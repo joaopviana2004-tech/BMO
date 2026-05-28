@@ -2,7 +2,10 @@
 
 - Lê de um projeto (default 'BMO') com 3 seções: 'To-Do', 'Doing', 'Done'
 - Roda em thread, faz refresh a cada 60s
-- Move tarefa entre seções via Sync API v9 (item_move)
+- Move tarefa entre seções via POST /api/v1/tasks/{id}/move
+
+Usa a API v1 unificada (https://api.todoist.com/api/v1/...). A antiga
+REST v2 e Sync v9 foram aposentadas em 2025.
 
 Token: env TODOIST_TOKEN > config['todoist_token']
 Sem token: snapshot.ok = False, screen mostra mensagem amigável.
@@ -16,13 +19,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
 from dataclasses import dataclass, field
 
 from ..core import config
 
-REST_BASE = "https://api.todoist.com/rest/v2"
-SYNC_URL = "https://api.todoist.com/sync/v9/sync"
+API_BASE = "https://api.todoist.com/api/v1"
 UPDATE_INTERVAL_S = 60
 HTTP_TIMEOUT = 10
 
@@ -52,6 +53,15 @@ def _resolve_token() -> str:
     if env:
         return env
     return (config.get("todoist_token") or "").strip()
+
+
+def _list(data) -> list:
+    """A API v1 envolve listas em {'results': [...], 'next_cursor': ...}."""
+    if isinstance(data, dict) and "results" in data:
+        return data["results"] or []
+    if isinstance(data, list):
+        return data
+    return []
 
 
 def _request(method: str, url: str, token: str, body: dict | None = None) -> tuple[int, str]:
@@ -111,11 +121,11 @@ class TodoistService:
         )
         try:
             # 1) projeto
-            status, body = _request("GET", f"{REST_BASE}/projects", token)
+            status, body = _request("GET", f"{API_BASE}/projects", token)
             if status != 200:
                 self._set_error(f"projects HTTP {status}")
                 return
-            projects = json.loads(body)
+            projects = _list(json.loads(body))
             project = next(
                 (p for p in projects if p.get("name", "").lower() == project_name.lower()),
                 None,
@@ -127,11 +137,11 @@ class TodoistService:
 
             # 2) seções
             params = urllib.parse.urlencode({"project_id": str(project_id)})
-            status, body = _request("GET", f"{REST_BASE}/sections?{params}", token)
+            status, body = _request("GET", f"{API_BASE}/sections?{params}", token)
             if status != 200:
                 self._set_error(f"sections HTTP {status}")
                 return
-            sections_raw = json.loads(body)
+            sections_raw = _list(json.loads(body))
             sections: dict[str, str] = {}
             for s in sections_raw:
                 key = (s.get("name") or "").strip().lower()
@@ -143,11 +153,11 @@ class TodoistService:
                 return
 
             # 3) tarefas ativas
-            status, body = _request("GET", f"{REST_BASE}/tasks?{params}", token)
+            status, body = _request("GET", f"{API_BASE}/tasks?{params}", token)
             if status != 200:
                 self._set_error(f"tasks HTTP {status}")
                 return
-            tasks_raw = json.loads(body)
+            tasks_raw = _list(json.loads(body))
             tasks: list[Task] = []
             for t in tasks_raw:
                 section_id = str(t.get("section_id") or "")
@@ -224,18 +234,10 @@ class TodoistService:
         return True
 
     def _send_move(self, token: str, task_id: str, section_id: str) -> None:
-        commands = [{
-            "type": "item_move",
-            "uuid": str(uuid.uuid4()),
-            "args": {"id": task_id, "section_id": section_id},
-        }]
-        body = {"commands": commands}
-        # Sync v9 aceita JSON OU form. Vou de JSON.
-        status, _ = _request("POST", SYNC_URL, token, body=body)
-        if status not in (200, 201):
-            # se falhou, agenda refresh pra reconciliar estado
+        url = f"{API_BASE}/tasks/{task_id}/move"
+        status, _ = _request("POST", url, token, body={"section_id": section_id})
+        if status not in (200, 201, 204):
             self.trigger_refresh()
         else:
-            # tudo bem; agenda refresh em 2s pra confirmar
             time.sleep(2)
             self.trigger_refresh()
