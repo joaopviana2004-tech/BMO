@@ -18,8 +18,9 @@ from bmo_os.core import config
 from bmo_os.core.app import App
 from bmo_os.screens.bmo_face import BMOFaceScreen
 from bmo_os.screens.clock import ClockScreen
-from bmo_os.screens.games import GamesScreen, draw_space_invaders_icon
+from bmo_os.screens.games import GamesScreen, draw_pong_icon, draw_space_invaders_icon
 from bmo_os.screens.home import HomeScreen
+from bmo_os.screens.pong import PongAmbientScreen, PongScreen
 from bmo_os.screens.settings import SettingsScreen
 from bmo_os.screens.sleep import SleepScreen
 from bmo_os.screens.space_invaders import SpaceInvadersScreen
@@ -43,6 +44,8 @@ def build_initial(app: App):
         if mode not in ambient_cache:
             if mode == "face":
                 ambient_cache[mode] = BMOFaceScreen(on_open_home=open_home)
+            elif mode == "pong":
+                ambient_cache[mode] = PongAmbientScreen(on_open_home=open_home)
             else:
                 ambient_cache[mode] = ClockScreen(on_open_home=open_home, git_updates=git_updates)
         return ambient_cache[mode]
@@ -66,6 +69,13 @@ def build_initial(app: App):
                     "draw_icon": draw_space_invaders_icon,
                     "launch": lambda: app.manager.push(
                         SpaceInvadersScreen(on_back=app.manager.pop)
+                    ),
+                },
+                {
+                    "label": "Pong",
+                    "draw_icon": draw_pong_icon,
+                    "launch": lambda: app.manager.push(
+                        PongScreen(on_back=app.manager.pop)
                     ),
                 },
             ],

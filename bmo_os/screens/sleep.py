@@ -19,8 +19,8 @@ from ..core.widgets import (
     LOGICAL_SIZE,
 )
 
-MODES = ["clock", "face"]
-LABELS = {"clock": "CLOCK", "face": "BMO FACE"}
+MODES = ["clock", "face", "pong"]
+LABELS = {"clock": "CLOCK", "face": "BMO FACE", "pong": "PONG"}
 
 
 class SleepScreen:
@@ -83,10 +83,15 @@ class SleepScreen:
         self._draw_hint(surface)
 
     def _tile_rects(self):
-        cx = LOGICAL_SIZE[0] // 2
+        # 3 tiles em linha, centrados horizontalmente
+        tile_w = tile_h = 60
+        gap = 14
+        total_w = len(MODES) * tile_w + (len(MODES) - 1) * gap
+        start_x = (LOGICAL_SIZE[0] - total_w) // 2
+        y = 64
         return [
-            pygame.Rect(cx - 90, 64, 72, 72),
-            pygame.Rect(cx + 18, 64, 72, 72),
+            pygame.Rect(start_x + i * (tile_w + gap), y, tile_w, tile_h)
+            for i in range(len(MODES))
         ]
 
     def _draw_title(self, surface: pygame.Surface) -> None:
@@ -101,8 +106,10 @@ class SleepScreen:
             pygame.draw.rect(surface, color, rect, 2)
             if mode == "clock":
                 self._draw_clock_preview(surface, rect, selected)
-            else:
+            elif mode == "face":
                 self._draw_face_preview(surface, rect, selected)
+            else:
+                self._draw_pong_preview(surface, rect, selected)
             lbl = render_text(LABELS[mode], 8, color)
             surface.blit(lbl, lbl.get_rect(midtop=(rect.centerx, rect.bottom + 5)))
             if selected:
@@ -114,8 +121,22 @@ class SleepScreen:
 
     def _draw_clock_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
         now = dt.datetime.now()
-        text = render_text(now.strftime("%H:%M"), 14, CRT_WHITE if bright else CRT_DIM)
+        text = render_text(now.strftime("%H:%M"), 12, CRT_WHITE if bright else CRT_DIM)
         surface.blit(text, text.get_rect(center=rect.center))
+
+    def _draw_pong_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
+        c = CRT_WHITE if bright else CRT_DIM
+        # 2 paddles
+        pygame.draw.rect(surface, c, (rect.left + 6, rect.centery - 8, 2, 16))
+        pygame.draw.rect(surface, c, (rect.right - 8, rect.centery - 8, 2, 16))
+        # linha tracejada do meio
+        for y in range(rect.top + 8, rect.bottom - 6, 6):
+            pygame.draw.rect(surface, c, (rect.centerx - 1, y, 2, 3))
+        # bola animada (vai-e-vem)
+        usable = rect.width - 18
+        phase = (math.sin(self._t * 1.6) + 1) / 2   # 0..1
+        bx = rect.left + 10 + int(usable * phase)
+        pygame.draw.rect(surface, c, (bx - 2, rect.centery - 2, 3, 3))
 
     def _draw_face_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
         c = CRT_WHITE if bright else CRT_DIM

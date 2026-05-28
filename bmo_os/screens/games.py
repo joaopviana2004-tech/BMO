@@ -151,3 +151,17 @@ def draw_space_invaders_icon(surface: pygame.Surface, rect: pygame.Rect) -> None
     pygame.draw.rect(surface, body, (cx - 10, cy + 6, 4, 4))
     pygame.draw.rect(surface, body, (cx - 2, cy + 6, 4, 4))
     pygame.draw.rect(surface, body, (cx + 6, cy + 6, 4, 4))
+
+
+def draw_pong_icon(surface: pygame.Surface, rect: pygame.Rect) -> None:
+    """Mini cena de Pong: 2 paddles + bola + linha tracejada."""
+    cx, cy = rect.center
+    # paddle player (ciano) à esquerda
+    pygame.draw.rect(surface, (90, 200, 220), (cx - 20, cy - 10, 3, 20))
+    # paddle bot (vermelho) à direita
+    pygame.draw.rect(surface, (230, 90, 90), (cx + 17, cy - 10, 3, 20))
+    # linha tracejada do meio
+    for dy in range(-14, 15, 6):
+        pygame.draw.rect(surface, (90, 100, 120), (cx - 1, cy + dy, 2, 3))
+    # bola no centro
+    pygame.draw.rect(surface, (255, 255, 255), (cx - 3, cy - 3, 6, 6))
