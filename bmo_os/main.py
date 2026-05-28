@@ -20,12 +20,14 @@ from bmo_os.screens.bmo_face import BMOFaceScreen
 from bmo_os.screens.clock import ClockScreen
 from bmo_os.screens.games import GamesScreen, draw_pong_icon, draw_space_invaders_icon
 from bmo_os.screens.home import HomeScreen
+from bmo_os.screens.photo import PhotoScreen
 from bmo_os.screens.pong import PongAmbientScreen, PongScreen
 from bmo_os.screens.settings import SettingsScreen
 from bmo_os.screens.shuffler import ShufflingAmbientScreen
 from bmo_os.screens.sleep import SleepScreen
 from bmo_os.screens.space_invaders import SpaceInvadersAmbientScreen, SpaceInvadersScreen
 from bmo_os.screens.tasks import TasksScreen
+from bmo_os.services.camera import CameraService
 from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.todoist import TodoistService
 
@@ -39,10 +41,12 @@ def build_initial(app: App):
     todoist = TodoistService()
     # Detector de git updates (só usado pelo clock pra mostrar alerta)
     git_updates = GitUpdatesService()
+    # Câmera (AI Camera no Pi). is_available=False quando offline (dev no PC)
+    camera = CameraService()
 
     def _instantiate_ambient(mode):
         if mode == "face":
-            return BMOFaceScreen(on_open_home=open_home)
+            return BMOFaceScreen(on_open_home=open_home, camera=camera)
         if mode == "pong":
             return PongAmbientScreen(on_open_home=open_home)
         if mode == "invaders":
@@ -105,6 +109,9 @@ def build_initial(app: App):
             on_open_games=lambda: app.manager.push(make_games_screen()),
             on_open_tasks=lambda: app.manager.push(
                 TasksScreen(on_back=app.manager.pop, todoist=todoist)
+            ),
+            on_open_photo=lambda: app.manager.push(
+                PhotoScreen(on_back=app.manager.pop, camera=camera)
             ),
             on_open_settings=lambda: app.manager.push(
                 SettingsScreen(on_back=app.manager.pop, on_ambient_changed=lambda _m: None)

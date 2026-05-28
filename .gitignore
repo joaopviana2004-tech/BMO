@@ -168,6 +168,9 @@ temp/
 captures/
 screenshots/
 
+# fotos tiradas pela tela PHOTO (AI Camera) — ficam em <repo>/photos/
+photos/
+
 # ROMs de emulador (V2) — provavelmente proprietárias, nunca commitar
 roms/
 *.nes

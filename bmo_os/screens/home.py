@@ -18,8 +18,8 @@ from ..core.widgets import (
     LOGICAL_SIZE,
 )
 
-ITEMS = ["SLEEP", "GAMES", "TASKS", "SETTINGS"]
-ICONS = ["sleep", "games", "tasks", "settings"]
+ITEMS = ["SLEEP", "GAMES", "TASKS", "PHOTO", "SETTINGS"]
+ICONS = ["sleep", "games", "tasks", "photo", "settings"]
 
 
 def _icon_sleep(surf: pygame.Surface, cx: int, cy: int) -> None:
@@ -62,6 +62,20 @@ def _icon_settings(surf: pygame.Surface, cx: int, cy: int) -> None:
         pygame.draw.line(surf, CRT_WHITE, (x1, y1), (x2, y2), 3)
 
 
+def _icon_photo(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # corpo da câmera
+    body = pygame.Rect(0, 0, 38, 26)
+    body.center = (cx, cy + 1)
+    pygame.draw.rect(surf, CRT_WHITE, body, 2, border_radius=3)
+    # visor em cima
+    pygame.draw.rect(surf, CRT_WHITE, (cx - 6, body.top - 4, 12, 4))
+    # lente
+    pygame.draw.circle(surf, CRT_WHITE, (cx, body.centery + 1), 7, 2)
+    pygame.draw.circle(surf, CRT_DIM, (cx, body.centery + 1), 3)
+    # flash
+    pygame.draw.rect(surf, CRT_WHITE, (body.right - 6, body.top + 3, 3, 3))
+
+
 def _icon_tasks(surf: pygame.Surface, cx: int, cy: int) -> None:
     # 3 colunas com mini-cards (representa kanban)
     col_w, col_h, gap = 12, 30, 3
@@ -77,13 +91,14 @@ def _icon_tasks(surf: pygame.Surface, cx: int, cy: int) -> None:
             pygame.draw.rect(surf, CRT_DIM, (x + 2, top_y + 18, col_w - 4, 3))
 
 
-_DRAW_ICON = [_icon_sleep, _icon_games, _icon_tasks, _icon_settings]
+_DRAW_ICON = [_icon_sleep, _icon_games, _icon_tasks, _icon_photo, _icon_settings]
 
 
 class HomeScreen:
-    def __init__(self, *, on_back, on_open_sleep, on_open_games, on_open_tasks, on_open_settings) -> None:
+    def __init__(self, *, on_back, on_open_sleep, on_open_games, on_open_tasks,
+                 on_open_photo, on_open_settings) -> None:
         self.on_back = on_back
-        self._on_select = [on_open_sleep, on_open_games, on_open_tasks, on_open_settings]
+        self._on_select = [on_open_sleep, on_open_games, on_open_tasks, on_open_photo, on_open_settings]
         self.on_open_games = on_open_games
         self.on_open_settings = on_open_settings
         self._index = 0

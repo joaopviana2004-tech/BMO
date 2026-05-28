@@ -55,8 +55,9 @@ def _to_logical(pos: tuple[int, int]) -> tuple[int, int]:
 
 
 class BMOFaceScreen:
-    def __init__(self, on_open_home) -> None:
+    def __init__(self, on_open_home, camera=None) -> None:
         self.on_open_home = on_open_home
+        self.camera = camera
         self.state = "IDLE"
         self.reaction: str | None = None
         self.reaction_until = 0.0
@@ -160,12 +161,35 @@ class BMOFaceScreen:
                 self._target_ox *= 0.85
                 self._target_oy *= 0.85
         elif self.state == "IDLE":
-            self._target_ox *= 0.9
-            self._target_oy *= 0.9
+            # Se tem câmera detectando rosto e nada do touch/anim tomando conta,
+            # os olhos seguem você de verdade no mundo
+            face_target = self._camera_face_target()
+            if face_target is not None:
+                self._target_ox, self._target_oy = face_target
+            else:
+                self._target_ox *= 0.9
+                self._target_oy *= 0.9
 
         # easing pros olhos
         self._eye_ox += (self._target_ox - self._eye_ox) * 0.18
         self._eye_oy += (self._target_oy - self._eye_oy) * 0.18
+
+    def _camera_face_target(self) -> tuple[float, float] | None:
+        """Retorna (ox, oy) alvo dos olhos baseado no maior rosto detectado."""
+        if self.camera is None or not getattr(self.camera, "is_available", False):
+            return None
+        faces = self.camera.get_faces()
+        if not faces:
+            return None
+        # pega o maior rosto (mais perto)
+        fx, fy, fw, fh = max(faces, key=lambda f: f[2] * f[3])
+        cam_w, cam_h = self.camera.preview_size
+        nx = ((fx + fw / 2) / cam_w - 0.5) * 2     # -1 .. +1
+        ny = ((fy + fh / 2) / cam_h - 0.5) * 2
+        gain = 1.4   # exagera um pouco pro olho aparentar seguir mais
+        ox = max(-EYE_MAX_OFFSET, min(EYE_MAX_OFFSET, nx * EYE_MAX_OFFSET * gain))
+        oy = max(-EYE_MAX_OFFSET, min(EYE_MAX_OFFSET, ny * EYE_MAX_OFFSET * gain))
+        return (ox, oy)
 
     # ---------- expression ----------
 
