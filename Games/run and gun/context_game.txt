@@ -1,0 +1,53 @@
+# Documentação Técnica: Top-Down Shooter Tático (Turnos Simultâneos)
+
+## 1. Visão Geral da Arquitetura
+O jogo foi construído em Python utilizando a biblioteca **Pygame**. A arquitetura segue o padrão de *Game Loop* clássico, contida em um único arquivo (One-File). 
+
+A principal característica do motor é a separação do jogo em uma **Máquina de Estados Finita (FSM)** simples, alternando entre a espera de input do jogador (`INPUT`) e a resolução física das ações de todas as entidades simultaneamente (`SIMULATING`).
+
+## 2. Estrutura de Classes
+
+* **`Obstacle`**: Gerencia a geometria do cenário (Quadrados, Retângulos e Triângulos). Possui métodos próprios para detecção de colisão com círculos (`collides_with_circle`) usando matemática de projeção de vetores, e interceptação de linha de visão (`blocks_line_of_sight`).
+* **`Entity`**: Classe base para o Player e os Bots. Gerencia posição (Vetor 2D), velocidade, atrito (inércia), colisão com as bordas da tela (Bounce) e vida (HP).
+* **`Projectile`**: Instanciado sempre que uma entidade atira. Carrega a referência do dono (`owner`) para aplicar o *cooldown* de recarga dinamicamente em caso de erro ou acerto.
+* **`GameEngine`**: O núcleo do jogo. Concentra a renderização, a FSM, as chamadas de física e a Inteligência Artificial.
+
+## 3. Geração de Cenário e Spawns
+
+### `generate_obstacles()`
+O mapa é abstraído em uma malha de $N \times N$ células (definido por `GRID_N`). A função itera sobre esta malha e aplica uma rolagem de dados (`OBSTACLE_PROB`) para decidir se a célula conterá um obstáculo. Os obstáculos gerados preenchem **100% da dimensão da célula**, facilitando a navegação da IA.
+
+### `reset_game()` (Sistema de Spawn Seguro)
+Garante que entidades nunca nasçam presas. A função varre a `map_grid` em busca de células com valor `0` (vazias), embaralha essa lista e aloca o Player e os Bots cirurgicamente no centro dessas células (coordenadas locais convertidas para globais).
+
+## 4. Sistema de Ações e Física
+
+As ações são cadastradas pelo player e processadas junto com as dos bots no método `execute_turn()`.
+
+* **`andar_para(entidade, direcao)`**: Recebe um vetor normalizado e aplica um impulso (multiplicado por `MOVE_FORCE`) à velocidade atual da entidade.
+* **`atirar(entidade, alvo_pos)`**: Calcula o vetor de direção entre a entidade e o alvo, instanciando um `Projectile`. Aplica a verificação de *cooldown*.
+* **`update_physics()`**: Roda a cada frame durante o estado `SIMULATING`. Aplica a velocidade à posição, multiplica a velocidade pelo `FRICTION` (inércia) e resolve as rebatidas nas paredes. 
+* **`handle_collisions()`**: Resolve dano e rebatimento (*knockback*) entre entidades e obstáculos. O turno só termina (`end_turn()`) quando o comprimento do vetor velocidade de **todas** as entidades for inferior a `1.0` e a lista de projéteis estiver vazia.
+
+## 5. Inteligência Artificial (Bots)
+
+A IA roda no método `process_bot_ai()` logo após o input do jogador e antes do início da simulação física. Ela segue uma árvore de decisão baseada em prioridades:
+
+1.  **Tiro (Line of Sight):** Usa a função matemática `line_intersects_segment` para traçar um *Raycast* do Bot até o Player. Se houver visão limpa e a distância for < 450px, o bot tem 80% de chance de atirar (com uma leve dispersão na mira para não ser *aimbot* puro).
+2.  **Navegação (A* Pathfinding):**
+    * A função `a_star(start, goal)` opera nativamente na matriz `map_grid` ($N \times N$), evitando a sobrecarga de um grid super granularizado.
+    * Possui trava de "Corner Cutting" (Corte de Quina): impede que o algoritmo trace uma diagonal por entre dois blocos sólidos adjacentes.
+    * **Flanqueamento:** Bots com IDs ímpares miram num *offset* posicional do player, forçando um cerco em vez de andarem em fila indiana.
+3.  **Sistema de Look-ahead (Sensor de Colisão):**
+    * `check_safe_direction()`: Antes de aplicar uma força de movimento, o bot projeta um raio para frente. Se esse vetor interceptar a `Bounding Box` dilatada de um obstáculo, o movimento é classificado como perigoso. O bot então tenta rotacionar o vetor em 45º ou, como último recurso de segurança, anula a própria velocidade para não sofrer dano na parede.
+
+## 6. Integração RL / Machine Learning (Exportação de Estado)
+
+O jogo possui saídas nativas para agentes de *Reinforcement Learning*:
+
+* **`get_state_map()`**: Lê as posições exatas do grid bidimensional e converte o mapa do jogo em uma matriz $N \times N$ de strings. 
+    * `-` = Célula vazia
+    * `+` = Obstáculo
+    * `p` = Player
+    * `b` = Bot
+* Essa matriz garante que qualquer agente computacional receba o estado simplificado e normalizado do ambiente (sem precisar processar os pixels da tela).

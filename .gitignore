@@ -1,0 +1,192 @@
+# =============================================================
+# Segredos / credenciais — NUNCA commitar
+# =============================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+*.cer
+*.keystore
+*.jks
+secrets.json
+secrets.*.json
+credentials.json
+credentials.*
+config.local.*
+*.secret
+*.secrets
+*_secret.*
+*_secrets.*
+.api_key
+.api_keys
+*.token
+auth.json
+
+# OpenWeather, Ollama URLs, etc — qualquer arquivo de config local
+config.local.json
+config.local.py
+local_settings.py
+settings.local.*
+
+# =============================================================
+# Claude / IA assistants — ignorar tudo
+# =============================================================
+.claude/
+.claude.json
+.claude.*.json
+CLAUDE.md
+CLAUDE.local.md
+CLAUDE.*.md
+.claudeignore
+.claude-cache/
+claude_desktop_config.json
+
+# outros assistentes (caso passe a usar)
+.cursor/
+.cursorrules
+.cursorignore
+.github/copilot-instructions.md
+.aider*
+.continue/
+.codeium/
+.windsurf/
+
+# =============================================================
+# Python
+# =============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+.Python
+
+# Distribuição / build
+build/
+dist/
+*.egg
+*.egg-info/
+.eggs/
+sdist/
+wheels/
+*.whl
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtualenvs
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# Ferramentas Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# =============================================================
+# IDEs / editores
+# =============================================================
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.iml
+*.swp
+*.swo
+*.swn
+*~
+.\#*
+\#*\#
+.history/
+*.code-workspace
+
+# =============================================================
+# Sistema operacional
+# =============================================================
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+*.stackdump
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+
+# =============================================================
+# Logs / temporários
+# =============================================================
+*.log
+logs/
+*.log.*
+*.tmp
+*.temp
+*.bak
+*.old
+*.orig
+tmp/
+temp/
+
+# =============================================================
+# BMO OS — assets de runtime e caches do projeto
+# =============================================================
+# screenshots/capturas geradas em runtime
+captures/
+screenshots/
+
+# ROMs de emulador (V2) — provavelmente proprietárias, nunca commitar
+roms/
+*.nes
+*.smc
+*.sfc
+*.gb
+*.gbc
+*.gba
+*.n64
+*.z64
+
+# Cache do OpenWeather, se você adicionar persistência depois
+weather_cache.json
+*.cache
+
+# =============================================================
+# Raspberry Pi / deployment
+# =============================================================
+# scripts de deploy locais com IPs/senhas
+deploy.local.*
+*.local.sh
+hosts.local
