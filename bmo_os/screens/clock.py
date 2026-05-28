@@ -14,14 +14,12 @@ import pygame
 
 from ..core import input as bmo_input
 from ..core.theme import render_text
+from ..core.widgets import CRT_BLACK as BLACK, CRT_WHITE as WHITE, CRT_DIM as DIM, draw_scanlines, draw_crt_corners
 from ..services.weather import WeatherService
 
 PT_WEEKDAYS = ["SEG", "TER", "QUA", "QUI", "SEX", "SAB", "DOM"]
 PT_MONTHS = ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"]
 
-BLACK = (0, 0, 0)
-WHITE = (235, 235, 235)
-DIM = (95, 95, 95)
 SCANLINE = (10, 10, 10)
 
 
@@ -50,37 +48,12 @@ class ClockScreen:
 
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(BLACK)
-        self._draw_scanlines(surface)
-        self._draw_corners(surface)
+        draw_scanlines(surface)
+        draw_crt_corners(surface)
         self._draw_status_dot(surface)
         self._draw_weather(surface)
         self._draw_time(surface)
         self._draw_date(surface)
-
-    # ---------- decoração ----------
-
-    def _draw_scanlines(self, surface: pygame.Surface) -> None:
-        w, h = surface.get_size()
-        for y in range(0, h, 2):
-            pygame.draw.line(surface, SCANLINE, (0, y), (w - 1, y))
-
-    def _draw_corners(self, surface: pygame.Surface) -> None:
-        w, h = surface.get_size()
-        length = 14
-        thick = 2
-        m = 4
-        # sup-esq
-        pygame.draw.rect(surface, WHITE, (m, m, length, thick))
-        pygame.draw.rect(surface, WHITE, (m, m, thick, length))
-        # sup-dir
-        pygame.draw.rect(surface, WHITE, (w - m - length, m, length, thick))
-        pygame.draw.rect(surface, WHITE, (w - m - thick, m, thick, length))
-        # inf-esq
-        pygame.draw.rect(surface, WHITE, (m, h - m - thick, length, thick))
-        pygame.draw.rect(surface, WHITE, (m, h - m - length, thick, length))
-        # inf-dir
-        pygame.draw.rect(surface, WHITE, (w - m - length, h - m - thick, length, thick))
-        pygame.draw.rect(surface, WHITE, (w - m - thick, h - m - length, thick, length))
 
     def _draw_status_dot(self, surface: pygame.Surface) -> None:
         # bolinha piscando no canto sup-dir tipo "LED de power"

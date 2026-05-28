@@ -9,6 +9,38 @@ import pygame
 
 from .theme import Colors, LOGICAL_SIZE, render_text
 
+# Paleta P&B usada nas telas no estilo CRT
+CRT_BLACK  = (0, 0, 0)
+CRT_WHITE  = (235, 235, 235)
+CRT_DIM    = (95, 95, 95)
+CRT_SCAN   = (10, 10, 10)
+
+
+def draw_scanlines(surface: pygame.Surface) -> None:
+    w, h = surface.get_size()
+    for y in range(0, h, 2):
+        pygame.draw.line(surface, CRT_SCAN, (0, y), (w - 1, y))
+
+
+def draw_crt_corners(surface: pygame.Surface, length: int = 14, margin: int = 4, color=None) -> None:
+    if color is None:
+        color = CRT_WHITE
+    w, h = surface.get_size()
+    t = 2
+    m = margin
+    # sup-esq
+    pygame.draw.rect(surface, color, (m, m, length, t))
+    pygame.draw.rect(surface, color, (m, m, t, length))
+    # sup-dir
+    pygame.draw.rect(surface, color, (w - m - length, m, length, t))
+    pygame.draw.rect(surface, color, (w - m - t, m, t, length))
+    # inf-esq
+    pygame.draw.rect(surface, color, (m, h - m - t, length, t))
+    pygame.draw.rect(surface, color, (m, h - m - length, t, length))
+    # inf-dir
+    pygame.draw.rect(surface, color, (w - m - length, h - m - t, length, t))
+    pygame.draw.rect(surface, color, (w - m - t, h - m - length, t, length))
+
 
 def draw_dashed_rect(
     surf: pygame.Surface,

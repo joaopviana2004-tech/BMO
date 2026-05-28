@@ -1,11 +1,15 @@
-"""Stubs visuais pra Games / Settings — V2 substitui."""
+"""Stub genérico pra telas ainda não implementadas (ex: GAMES)."""
 from __future__ import annotations
 
 import pygame
 
 from ..core import input as bmo_input
-from ..core.theme import Colors, render_text
-from ..core.widgets import draw_header
+from ..core.theme import render_text
+from ..core.widgets import (
+    CRT_BLACK, CRT_DIM, CRT_WHITE,
+    draw_crt_corners, draw_scanlines,
+    LOGICAL_SIZE,
+)
 
 
 class PlaceholderScreen:
@@ -25,9 +29,15 @@ class PlaceholderScreen:
     def update(self, dt: float) -> None: ...
 
     def draw(self, surface: pygame.Surface) -> None:
-        surface.fill(Colors.BG_DARK)
-        draw_header(surface, self.title)
-        msg = render_text("em breve...", 14, Colors.CYAN_DIM)
-        surface.blit(msg, msg.get_rect(center=(surface.get_width() // 2, surface.get_height() // 2)))
-        hint = render_text("toque para voltar", 8, Colors.CYAN_DIM)
-        surface.blit(hint, hint.get_rect(midbottom=(surface.get_width() // 2, surface.get_height() - 12)))
+        surface.fill(CRT_BLACK)
+        draw_scanlines(surface)
+        draw_crt_corners(surface)
+
+        title = render_text(self.title, 10, CRT_DIM)
+        surface.blit(title, title.get_rect(midtop=(LOGICAL_SIZE[0] // 2, 20)))
+
+        msg = render_text("EM BREVE", 16, CRT_WHITE)
+        surface.blit(msg, msg.get_rect(center=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] // 2 - 8)))
+
+        hint = render_text("B = voltar", 8, CRT_DIM)
+        surface.blit(hint, hint.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - 12)))
