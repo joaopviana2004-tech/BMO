@@ -17,7 +17,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 FETCH_INTERVAL_S = 5 * 60   # 5 min
-STARTUP_DELAY_S = 30        # espera o boot antes do primeiro fetch
+STARTUP_DELAY_S = 5         # espera curta antes do primeiro fetch
 FETCH_TIMEOUT_S = 30
 
 
