@@ -10,7 +10,7 @@ import math
 
 import pygame
 
-from ..core import config
+from ..core import config, theme_state
 from ..core import input as bmo_input
 from ..core.theme import render_text
 from ..core.widgets import (
@@ -77,6 +77,7 @@ class SleepScreen:
         surface.fill(CRT_BLACK)
         draw_scanlines(surface)
         draw_crt_corners(surface)
+        theme_state.draw_status_bar(surface)
         self._draw_title(surface)
         self._draw_tiles(surface)
         self._draw_hint(surface)

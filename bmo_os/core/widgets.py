@@ -9,11 +9,14 @@ import pygame
 
 from .theme import Colors, LOGICAL_SIZE, render_text
 
-# Paleta P&B usada nas telas no estilo CRT
-CRT_BLACK  = (0, 0, 0)
-CRT_WHITE  = (235, 235, 235)
-CRT_DIM    = (95, 95, 95)
-CRT_SCAN   = (10, 10, 10)
+# Paleta P&B usada nas telas no estilo CRT.
+# São pygame.Color (mutáveis) propositalmente: theme_state.apply_theme() faz
+# .update() nelas in-place, então qualquer screen que importou
+# `from widgets import CRT_BLACK` segue vendo a cor atual sem re-importar.
+CRT_BLACK  = pygame.Color(0, 0, 0)
+CRT_WHITE  = pygame.Color(235, 235, 235)
+CRT_DIM    = pygame.Color(95, 95, 95)
+CRT_SCAN   = pygame.Color(10, 10, 10)
 
 
 def draw_scanlines(surface: pygame.Surface) -> None:

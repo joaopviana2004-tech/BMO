@@ -11,6 +11,7 @@ import sys
 import pygame
 
 from . import input as bmo_input
+from . import theme_state
 from .screen_manager import ScreenManager
 from .theme import Colors, FPS, LOGICAL_SIZE, WINDOW_SIZE
 
@@ -39,6 +40,7 @@ class App:
         self.manager.push(initial_screen)
         while self.running:
             dt = self.clock.tick(FPS) / 1000.0
+            theme_state.apply_theme()
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False

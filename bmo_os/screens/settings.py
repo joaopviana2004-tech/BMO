@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pygame
 
-from ..core import config
+from ..core import config, theme_state
 from ..core import input as bmo_input
 from ..core.theme import render_text
 from ..core.widgets import (
@@ -39,6 +39,10 @@ def _fmt_ambient(v) -> str:
     return config.AMBIENT_MODE_LABELS.get(v, str(v).upper())
 
 
+def _fmt_theme(v) -> str:
+    return theme_state.THEME_LABELS.get(v, str(v).upper())
+
+
 ITEMS = [
     {
         "type": "cycle",
@@ -53,6 +57,13 @@ ITEMS = [
         "label": "Ambient",
         "options": config.AMBIENT_MODE_OPTIONS,
         "format": _fmt_ambient,
+    },
+    {
+        "type": "cycle",
+        "key": "theme",
+        "label": "Tema",
+        "options": theme_state.THEME_OPTIONS,
+        "format": _fmt_theme,
     },
     {"type": "action", "key": "update", "label": "Atualizar"},
     {"type": "action", "key": "shutdown", "label": "Desligar"},
@@ -178,6 +189,7 @@ class SettingsScreen:
         surface.fill(CRT_BLACK)
         draw_scanlines(surface)
         draw_crt_corners(surface)
+        theme_state.draw_status_bar(surface)
         self._draw_title(surface)
         self._draw_menu(surface)
         if self._status:
@@ -187,8 +199,9 @@ class SettingsScreen:
             surface.blit(msg, msg.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - 12)))
 
     def _row_rects(self):
-        top = 44
-        return [pygame.Rect(20, top + i * 28, LOGICAL_SIZE[0] - 40, 22) for i in range(len(ITEMS))]
+        top = 38
+        step = 26
+        return [pygame.Rect(20, top + i * step, LOGICAL_SIZE[0] - 40, 22) for i in range(len(ITEMS))]
 
     def _left_arrow_rect(self, row: pygame.Rect) -> pygame.Rect:
         return pygame.Rect(row.right - 38, row.top, 16, row.height)

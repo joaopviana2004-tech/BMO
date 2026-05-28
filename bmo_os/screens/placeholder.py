@@ -4,6 +4,7 @@ from __future__ import annotations
 import pygame
 
 from ..core import input as bmo_input
+from ..core import theme_state
 from ..core.theme import render_text
 from ..core.widgets import (
     CRT_BLACK, CRT_DIM, CRT_WHITE,
@@ -32,6 +33,7 @@ class PlaceholderScreen:
         surface.fill(CRT_BLACK)
         draw_scanlines(surface)
         draw_crt_corners(surface)
+        theme_state.draw_status_bar(surface)
 
         title = render_text(self.title, 10, CRT_DIM)
         surface.blit(title, title.get_rect(midtop=(LOGICAL_SIZE[0] // 2, 20)))

@@ -13,6 +13,7 @@ import unicodedata
 import pygame
 
 from ..core import input as bmo_input
+from ..core import theme_state
 from ..core.theme import render_text
 from ..core.widgets import CRT_BLACK as BLACK, CRT_WHITE as WHITE, CRT_DIM as DIM, draw_scanlines, draw_crt_corners
 from ..services.weather import WeatherService
@@ -50,16 +51,10 @@ class ClockScreen:
         surface.fill(BLACK)
         draw_scanlines(surface)
         draw_crt_corners(surface)
-        self._draw_status_dot(surface)
+        theme_state.draw_status_bar(surface)
         self._draw_weather(surface)
         self._draw_time(surface)
         self._draw_date(surface)
-
-    def _draw_status_dot(self, surface: pygame.Surface) -> None:
-        # bolinha piscando no canto sup-dir tipo "LED de power"
-        on = (self._t % 1.6) < 1.2
-        color = WHITE if on else DIM
-        pygame.draw.rect(surface, color, (surface.get_width() - 26, 14, 3, 3))
 
     # ---------- conteúdo ----------
 
