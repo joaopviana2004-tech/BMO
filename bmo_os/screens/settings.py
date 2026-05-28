@@ -4,6 +4,7 @@ Lista vertical com:
 - Standby (timer de auto-volta da home, em segundos)
 - Ambient (modo do bloqueio: RELOGIO ou BMO FACE)
 - Atualizar (git pull + restart)
+- Desligar (shutdown — exige confirmação dupla em 3s)
 - Voltar
 
 Itens 'cycle' giram o valor com LEFT/RIGHT (ou TAP cicla pra frente).
@@ -54,8 +55,11 @@ ITEMS = [
         "format": _fmt_ambient,
     },
     {"type": "action", "key": "update", "label": "Atualizar"},
+    {"type": "action", "key": "shutdown", "label": "Desligar"},
     {"type": "action", "key": "back", "label": "Voltar"},
 ]
+
+SHUTDOWN_CONFIRM_S = 3.0
 
 
 class SettingsScreen:
@@ -66,6 +70,7 @@ class SettingsScreen:
         self._status = ""
         self._action: str | None = None
         self._delay_until = 0.0
+        self._shutdown_confirm_until = 0.0
         self._t = 0.0
 
     def enter(self) -> None: ...
@@ -135,6 +140,13 @@ class SettingsScreen:
         if item["key"] == "update":
             self._status = "Atualizando..."
             self._action = "pull"
+        elif item["key"] == "shutdown":
+            if self._t < self._shutdown_confirm_until:
+                self._status = "Desligando..."
+                self._action = "shutdown"
+            else:
+                self._shutdown_confirm_until = self._t + SHUTDOWN_CONFIRM_S
+                self._status = "Toque DESLIGAR de novo p/ confirmar"
         elif item["key"] == "back":
             self.on_back()
 
@@ -148,6 +160,17 @@ class SettingsScreen:
         elif self._action == "restart" and self._t >= self._delay_until:
             self._action = None
             self._restart()
+        elif self._action == "shutdown":
+            self._action = None
+            self._do_shutdown()
+        # cancela confirmação de shutdown se expirou
+        if (
+            self._shutdown_confirm_until > 0
+            and self._t >= self._shutdown_confirm_until
+            and self._status.startswith("Toque DESLIGAR")
+        ):
+            self._shutdown_confirm_until = 0.0
+            self._status = ""
 
     # ---------- draw ----------
 
@@ -193,7 +216,10 @@ class SettingsScreen:
             else:
                 label_x = rect.left + 8
 
-            label = render_text(item["label"].upper(), 9, fg)
+            label_txt = item["label"].upper()
+            if item.get("key") == "shutdown" and self._t < self._shutdown_confirm_until:
+                label_txt = "DESLIGAR?"
+            label = render_text(label_txt, 9, fg)
             surface.blit(label, label.get_rect(midleft=(label_x, rect.centery)))
 
             if item["type"] == "cycle":
@@ -249,3 +275,15 @@ class SettingsScreen:
     def _restart(self) -> None:
         pygame.quit()
         os.execv(sys.executable, [sys.executable, *sys.argv])
+
+    def _do_shutdown(self) -> None:
+        pygame.quit()
+        if sys.platform == "win32":
+            os.system("shutdown /s /t 0")
+        else:
+            # Pi: precisa de passwordless sudo pra shutdown
+            # (`sudo visudo` -> `gravae ALL=(ALL) NOPASSWD: /sbin/shutdown`)
+            rc = os.system("sudo -n shutdown -h now")
+            if rc != 0:
+                os.system("shutdown -h now")
+        sys.exit(0)
