@@ -24,8 +24,9 @@ PT_WEEKDAYS = ["SEG", "TER", "QUA", "QUI", "SEX", "SAB", "DOM"]
 PT_MONTHS = ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"]
 
 SCANLINE = (10, 10, 10)
-SAFE_TOP = 14    # zona morta pro frame físico nas bordas sup
-SAFE_BOTTOM = 14 # idem inf
+# Zona morta em torno da tela inteira: o frame físico do BMO cobre uns 14px
+# nas bordas. Corners e conteúdo são empurrados pra dentro pra não sumirem.
+SAFE_INSET = 14
 
 
 def _ascii_upper(text: str) -> str:
@@ -54,9 +55,10 @@ class ClockScreen:
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(BLACK)
         draw_scanlines(surface)
-        draw_crt_corners(surface)
-        # status bar mais afastada da borda pro frame físico não cobrir
-        theme_state.draw_status_bar(surface, top_pad=SAFE_TOP, right_pad=SAFE_TOP)
+        # Corners empurrados pra dentro pra ficar visíveis abaixo do frame
+        draw_crt_corners(surface, margin=SAFE_INSET)
+        # Status bar logo abaixo do corner top-direito, com folga horizontal
+        theme_state.draw_status_bar(surface, top_pad=SAFE_INSET + 4, right_pad=SAFE_INSET + 4)
         self._draw_weather(surface)
         self._draw_time(surface)
         self._draw_date(surface)
@@ -68,13 +70,13 @@ class ClockScreen:
         temp = f"{snap.temp_c:.0f}C" if snap.ok and snap.temp_c is not None else "--C"
         hum = f"{snap.humidity}%" if snap.ok and snap.humidity is not None else "--%"
 
-        x = 16
+        x = SAFE_INSET + 8   # deixa folga pro corner top-esquerdo
         rows = [
             ("TEMP", temp),
             ("UMID", hum),
         ]
         for i, (label, value) in enumerate(rows):
-            y = SAFE_TOP + 18 + i * 16
+            y = SAFE_INSET + 22 + i * 16
             surface.blit(render_text(label, 8, DIM), (x, y + 1))
             surface.blit(render_text(value, 10, WHITE), (x + 48, y))
 
@@ -100,9 +102,8 @@ class ClockScreen:
         month = PT_MONTHS[now.month - 1]
         line1 = f"{weekday} {now.day:02d}"
         line2 = month
-        x = surface.get_width() - 16
-        # respeita zona morta inferior pro frame não cortar a data
-        y = surface.get_height() - SAFE_BOTTOM - 22
+        x = surface.get_width() - SAFE_INSET - 8   # folga do corner inf-direito
+        y = surface.get_height() - SAFE_INSET - 22
         img1 = render_text(line1, 8, WHITE)
         img2 = render_text(line2, 8, DIM)
         surface.blit(img1, img1.get_rect(topright=(x, y)))

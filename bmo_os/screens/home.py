@@ -18,20 +18,8 @@ from ..core.widgets import (
     LOGICAL_SIZE,
 )
 
-ITEMS = ["DISPLAY", "SLEEP", "GAMES", "TASKS", "SETTINGS"]
-ICONS = ["display", "sleep", "games", "tasks", "settings"]
-
-
-def _icon_display(surf: pygame.Surface, cx: int, cy: int) -> None:
-    body = pygame.Rect(0, 0, 44, 30)
-    body.center = (cx, cy - 4)
-    pygame.draw.rect(surf, CRT_WHITE, body, 2)
-    foot = pygame.Rect(0, 0, 16, 5)
-    foot.midtop = (cx, body.bottom + 1)
-    pygame.draw.rect(surf, CRT_WHITE, foot)
-    base = pygame.Rect(0, 0, 24, 2)
-    base.midtop = (cx, foot.bottom)
-    pygame.draw.rect(surf, CRT_WHITE, base)
+ITEMS = ["SLEEP", "GAMES", "TASKS", "SETTINGS"]
+ICONS = ["sleep", "games", "tasks", "settings"]
 
 
 def _icon_sleep(surf: pygame.Surface, cx: int, cy: int) -> None:
@@ -89,13 +77,13 @@ def _icon_tasks(surf: pygame.Surface, cx: int, cy: int) -> None:
             pygame.draw.rect(surf, CRT_DIM, (x + 2, top_y + 18, col_w - 4, 3))
 
 
-_DRAW_ICON = [_icon_display, _icon_sleep, _icon_games, _icon_tasks, _icon_settings]
+_DRAW_ICON = [_icon_sleep, _icon_games, _icon_tasks, _icon_settings]
 
 
 class HomeScreen:
     def __init__(self, *, on_back, on_open_sleep, on_open_games, on_open_tasks, on_open_settings) -> None:
         self.on_back = on_back
-        self._on_select = [lambda: None, on_open_sleep, on_open_games, on_open_tasks, on_open_settings]
+        self._on_select = [on_open_sleep, on_open_games, on_open_tasks, on_open_settings]
         self.on_open_games = on_open_games
         self.on_open_settings = on_open_settings
         self._index = 0
