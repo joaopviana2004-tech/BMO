@@ -2,7 +2,8 @@
 
 - Toca e arrasta pra mover a nave horizontalmente
 - Atira automaticamente em intervalo fixo
-- Inimigos coloridos marcham lateralmente e descem ao bater nas bordas
+- 4 tipos de inimigos pixel-art coloridos marcham e atiram
+- Campo de estrelas com parallax (3 camadas) no fundo
 - Toque no botão HOME no canto sup-esquerdo pra sair
 """
 from __future__ import annotations
@@ -14,46 +15,104 @@ import pygame
 from ..core import input as bmo_input
 from ..core.theme import LOGICAL_SIZE, render_text
 
-# ---------- paleta colorida (arcade) ----------
-BG            = (8, 12, 24)
+# ---------- paleta ----------
+BG            = (8, 10, 24)
 WHITE         = (240, 240, 240)
 DIM           = (130, 130, 140)
-PLAYER_COLOR  = (90, 230, 110)
-ENEMY_COLORS  = [
-    (230, 80, 80),    # row 0 — vermelho
-    (230, 200, 60),   # row 1 — amarelo
-    (90, 200, 90),    # row 2 — verde
-    (90, 200, 220),   # row 3 — ciano
-]
-BULLET_COLOR  = (240, 240, 240)
-ENEMY_BULLET  = (230, 100, 100)
+BULLET_COLOR  = (255, 250, 200)
+ENEMY_BULLET  = (255, 90, 90)
 
 # ---------- player ----------
-PLAYER_W = 22
-PLAYER_H = 12
-PLAYER_Y = 210
-PLAYER_LERP = 0.28      # quão rápido a nave segue o dedo
+PIXEL = 2
+PLAYER_SPRITE = [
+    "....G....",
+    "...GGG...",
+    "..GCCCG..",
+    ".GGGGGGG.",
+    "GG.GGG.GG",
+    "GGGGGGGGG",
+    "G.GG.GG.G",
+]
+PLAYER_COLORS = {
+    "G": (90, 230, 110),
+    "C": (160, 220, 255),
+}
+PLAYER_W = len(PLAYER_SPRITE[0]) * PIXEL    # 18
+PLAYER_H = len(PLAYER_SPRITE) * PIXEL       # 14
+PLAYER_Y = 208
+PLAYER_LERP = 0.28
 
 # ---------- bullets ----------
 BULLET_W = 2
 BULLET_H = 8
-PLAYER_BULLET_SPEED = 260   # px/s (sobe)
-ENEMY_BULLET_SPEED  = 140   # px/s (desce)
+PLAYER_BULLET_SPEED = 260
+ENEMY_BULLET_SPEED  = 140
 FIRE_INTERVAL_S     = 0.32
 
 # ---------- inimigos ----------
-ENEMY_W = 20
-ENEMY_H = 14
+ENEMY_SPRITES = {
+    0: [   # CRAB — vermelho
+        ".X....X.",
+        "..X..X..",
+        ".XXXXXX.",
+        "XX.XX.XX",
+        "XXXXXXXX",
+        "X.X..X.X",
+        ".X....X.",
+    ],
+    1: [   # OCTOPUS — amarelo
+        "..XXXX..",
+        ".XXXXXX.",
+        "XXXXXXXX",
+        "XX.XX.XX",
+        "XXXXXXXX",
+        "..X..X..",
+        ".X.XX.X.",
+    ],
+    2: [   # UFO — verde
+        "...XX...",
+        "..XXXX..",
+        "XXXXXXXX",
+        "XX.XX.XX",
+        ".XXXXXX.",
+        "..X..X..",
+        ".X....X.",
+    ],
+    3: [   # SQUID — ciano
+        "..XXXX..",
+        ".XXXXXX.",
+        "XX.XX.XX",
+        "XXXXXXXX",
+        ".X....X.",
+        ".X.XX.X.",
+        "X.X..X.X",
+    ],
+}
+ENEMY_BODY_COLORS = {
+    0: (230, 80, 80),    # vermelho
+    1: (230, 200, 60),   # amarelo
+    2: (90, 200, 90),    # verde
+    3: (90, 200, 220),   # ciano
+}
+ENEMY_W = len(ENEMY_SPRITES[0][0]) * PIXEL   # 16
+ENEMY_H = len(ENEMY_SPRITES[0]) * PIXEL      # 14
 ENEMY_ROWS = 4
 ENEMY_COLS = 8
-ENEMY_GAP_X = 6
+ENEMY_GAP_X = 8
 ENEMY_GAP_Y = 8
-ENEMY_TOP_Y = 38
-ENEMY_SPEED_BASE = 18           # px/s horizontal inicial
+ENEMY_TOP_Y = 40
+ENEMY_SPEED_BASE = 18
 ENEMY_DROP_PX = 8
 ENEMY_FIRE_CHANCE_PER_FRAME = 0.006
 
 INITIAL_LIVES = 3
+
+# ---------- starfield ----------
+STAR_LAYERS = [
+    {"count": 22, "speed": 14, "size": 1, "color": (100, 110, 140)},   # longe
+    {"count": 14, "speed": 30, "size": 1, "color": (170, 180, 210)},   # médio
+    {"count": 7,  "speed": 55, "size": 2, "color": (235, 240, 250)},   # perto
+]
 
 
 def _to_logical(pos: tuple[int, int]) -> tuple[int, int]:
@@ -63,29 +122,66 @@ def _to_logical(pos: tuple[int, int]) -> tuple[int, int]:
     return (pos[0] * LOGICAL_SIZE[0] // w, pos[1] * LOGICAL_SIZE[1] // h)
 
 
+def _draw_sprite(surface, lines, x_top, y_top, color_map):
+    for r, row in enumerate(lines):
+        for c, ch in enumerate(row):
+            color = color_map.get(ch)
+            if color is None:
+                continue
+            pygame.draw.rect(surface, color, (x_top + c * PIXEL, y_top + r * PIXEL, PIXEL, PIXEL))
+
+
 class _Bullet:
     __slots__ = ("x", "y", "vy")
-
-    def __init__(self, x: float, y: float, vy: float) -> None:
-        self.x = x
-        self.y = y
-        self.vy = vy
+    def __init__(self, x, y, vy):
+        self.x, self.y, self.vy = x, y, vy
 
 
 class _Enemy:
     __slots__ = ("x", "y", "row", "alive")
+    def __init__(self, x, y, row):
+        self.x, self.y, self.row, self.alive = x, y, row, True
 
-    def __init__(self, x: float, y: float, row: int) -> None:
-        self.x = x
-        self.y = y
-        self.row = row
-        self.alive = True
+
+class _Star:
+    __slots__ = ("x", "y", "speed", "size", "color")
+    def __init__(self, x, y, speed, size, color):
+        self.x, self.y, self.speed, self.size, self.color = x, y, speed, size, color
 
 
 class SpaceInvadersScreen:
     def __init__(self, on_back) -> None:
         self.on_back = on_back
+        self._t = 0.0
+        self._init_starfield()
         self._reset()
+
+    # ---------- starfield ----------
+
+    def _init_starfield(self) -> None:
+        self.stars: list[_Star] = []
+        for layer in STAR_LAYERS:
+            for _ in range(layer["count"]):
+                self.stars.append(_Star(
+                    x=random.uniform(0, LOGICAL_SIZE[0]),
+                    y=random.uniform(0, LOGICAL_SIZE[1]),
+                    speed=layer["speed"],
+                    size=layer["size"],
+                    color=layer["color"],
+                ))
+
+    def _update_stars(self, dt: float) -> None:
+        h = LOGICAL_SIZE[1]
+        w = LOGICAL_SIZE[0]
+        for s in self.stars:
+            s.y += s.speed * dt
+            if s.y > h:
+                s.y = -s.size
+                s.x = random.uniform(0, w)
+
+    def _draw_stars(self, surface) -> None:
+        for s in self.stars:
+            pygame.draw.rect(surface, s.color, (int(s.x), int(s.y), s.size, s.size))
 
     # ---------- state ----------
 
@@ -148,10 +244,12 @@ class SpaceInvadersScreen:
     # ---------- update ----------
 
     def update(self, dt: float) -> None:
+        self._t += dt
+        self._update_stars(dt)
         if self.game_over or self.victory:
             return
 
-        # nave segue o dedo (lerp suave) + clamp dentro da tela
+        # nave segue o dedo
         self.player_x += (self.target_x - self.player_x) * PLAYER_LERP
         half = PLAYER_W / 2
         self.player_x = max(half + 4, min(LOGICAL_SIZE[0] - half - 4, self.player_x))
@@ -188,11 +286,10 @@ class SpaceInvadersScreen:
             self.enemy_dir *= -1
             for e in alive:
                 e.y += ENEMY_DROP_PX
-            # acelera conforme mais inimigos morrem (clássico)
             dead = ENEMY_ROWS * ENEMY_COLS - len(alive)
             self.enemy_speed = ENEMY_SPEED_BASE * (1 + dead * 0.05)
 
-        # inimigos atiram (cada um tem pequena chance por frame)
+        # inimigos atiram
         for e in alive:
             if random.random() < ENEMY_FIRE_CHANCE_PER_FRAME:
                 self.enemy_bullets.append(_Bullet(e.x, e.y + ENEMY_H / 2 + 2, ENEMY_BULLET_SPEED))
@@ -229,7 +326,7 @@ class SpaceInvadersScreen:
             remaining_eb.append(b)
         self.enemy_bullets = remaining_eb
 
-        # inimigos atingem o chão → game over
+        # inimigos chegam no chão
         for e in self.enemies:
             if e.alive and e.y > PLAYER_Y - 14:
                 self.game_over = True
@@ -242,6 +339,7 @@ class SpaceInvadersScreen:
 
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(BG)
+        self._draw_stars(surface)
         self._draw_hud(surface)
         self._draw_back_btn(surface)
         self._draw_enemies(surface)
@@ -272,38 +370,65 @@ class SpaceInvadersScreen:
 
     def _draw_player(self, surface: pygame.Surface) -> None:
         px = int(self.player_x)
-        py_top = PLAYER_Y - PLAYER_H // 2
-        py_bot = PLAYER_Y + PLAYER_H // 2
-        # corpo trapezoidal
-        pts = [
-            (px - PLAYER_W // 2, py_bot),
-            (px - PLAYER_W // 2 + 4, py_top),
-            (px + PLAYER_W // 2 - 4, py_top),
-            (px + PLAYER_W // 2, py_bot),
-        ]
-        pygame.draw.polygon(surface, PLAYER_COLOR, pts)
-        # canhão
-        pygame.draw.rect(surface, PLAYER_COLOR, (px - 2, py_top - 3, 4, 3))
+        # sprite centralizado no player_x, PLAYER_Y é o centro vertical
+        top_x = px - PLAYER_W // 2
+        top_y = PLAYER_Y - PLAYER_H // 2
+        # chamas pulsantes embaixo da nave
+        self._draw_engine_flame(surface, px, top_y + PLAYER_H)
+        # corpo da nave
+        _draw_sprite(surface, PLAYER_SPRITE, top_x, top_y, PLAYER_COLORS)
+
+    def _draw_engine_flame(self, surface, cx: int, base_y: int) -> None:
+        phase = (self._t * 14) % 1.0
+        extra = int(phase * 4)
+        # vermelho externo
+        pygame.draw.polygon(surface, (255, 90, 40), [
+            (cx - 6, base_y - 1),
+            (cx - 3, base_y + 5 + extra),
+            (cx + 3, base_y + 5 + extra),
+            (cx + 6, base_y - 1),
+        ])
+        # laranja médio
+        pygame.draw.polygon(surface, (255, 180, 60), [
+            (cx - 4, base_y - 1),
+            (cx - 2, base_y + 4 + extra),
+            (cx + 2, base_y + 4 + extra),
+            (cx + 4, base_y - 1),
+        ])
+        # amarelo interno
+        pygame.draw.polygon(surface, (255, 240, 150), [
+            (cx - 2, base_y - 1),
+            (cx, base_y + 3 + extra),
+            (cx + 2, base_y - 1),
+        ])
 
     def _draw_enemies(self, surface: pygame.Surface) -> None:
+        # leve sway no tronco da marcha (vertical) pra dar vida
+        sway = int((self._t * 4) % 2)
         for e in self.enemies:
             if not e.alive:
                 continue
-            color = ENEMY_COLORS[e.row % len(ENEMY_COLORS)]
-            x = int(e.x - ENEMY_W // 2)
-            y = int(e.y - ENEMY_H // 2)
-            pygame.draw.rect(surface, color, (x, y, ENEMY_W, ENEMY_H))
-            # olhos pretos
-            pygame.draw.rect(surface, BG, (x + 4, y + 4, 3, 3))
-            pygame.draw.rect(surface, BG, (x + ENEMY_W - 7, y + 4, 3, 3))
-            # boca / faixa
-            pygame.draw.rect(surface, BG, (x + 3, y + ENEMY_H - 4, ENEMY_W - 6, 2))
+            sprite = ENEMY_SPRITES[e.row]
+            body_color = ENEMY_BODY_COLORS[e.row]
+            color_map = {"X": body_color}
+            top_x = int(e.x - ENEMY_W // 2)
+            top_y = int(e.y - ENEMY_H // 2) + (sway if e.row % 2 == 0 else (1 - sway))
+            _draw_sprite(surface, sprite, top_x, top_y, color_map)
 
     def _draw_bullets(self, surface: pygame.Surface) -> None:
         for b in self.bullets:
-            pygame.draw.rect(surface, BULLET_COLOR, (int(b.x) - BULLET_W // 2, int(b.y), BULLET_W, BULLET_H))
+            # bala do player com glow sutil (rect interno + outline)
+            pygame.draw.rect(surface, (180, 180, 100),
+                             (int(b.x) - BULLET_W // 2 - 1, int(b.y) - 1, BULLET_W + 2, BULLET_H + 2))
+            pygame.draw.rect(surface, BULLET_COLOR,
+                             (int(b.x) - BULLET_W // 2, int(b.y), BULLET_W, BULLET_H))
         for b in self.enemy_bullets:
-            pygame.draw.rect(surface, ENEMY_BULLET, (int(b.x) - BULLET_W // 2, int(b.y), BULLET_W, BULLET_H))
+            # bala do inimigo: zigzag pequenino pra parecer agressiva
+            x0 = int(b.x) - BULLET_W // 2
+            y0 = int(b.y)
+            pygame.draw.rect(surface, ENEMY_BULLET, (x0, y0, BULLET_W, 3))
+            pygame.draw.rect(surface, ENEMY_BULLET, (x0 + 1, y0 + 3, BULLET_W, 3))
+            pygame.draw.rect(surface, ENEMY_BULLET, (x0, y0 + 6, BULLET_W, 2))
 
     def _draw_overlay(self, surface: pygame.Surface, title: str, hint: str) -> None:
         dim = pygame.Surface(LOGICAL_SIZE)

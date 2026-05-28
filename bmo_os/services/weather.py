@@ -100,10 +100,14 @@ class WeatherService:
                 fetched_at=time.time(),
                 ok=True,
             )
+            with self._lock:
+                self.snapshot = snap
         except Exception:
-            snap = WeatherSnapshot(fetched_at=time.time(), ok=False)
-        with self._lock:
-            self.snapshot = snap
+            # Mantém o último snapshot bom — só atualiza o fetched_at pra
+            # marcar a tentativa. Evita o relógio "piscar" pra '--C / --%'
+            # toda vez que a rede falha por um instante.
+            with self._lock:
+                self.snapshot.fetched_at = time.time()
 
     def get(self) -> WeatherSnapshot:
         with self._lock:
