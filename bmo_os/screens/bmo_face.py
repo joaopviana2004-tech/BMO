@@ -22,11 +22,11 @@ BLACK          = (15, 22, 18)
 WHITE          = (245, 252, 245)
 HINT           = (110, 170, 130)
 
-# Geometria base (canvas 400x240)
-LEFT_EYE  = (140, 102)
-RIGHT_EYE = (260, 102)
-MOUTH     = (200, 162)
-EYE_R     = 11
+# Geometria base (canvas 400x240) — proporções batidas com a referência
+LEFT_EYE  = (130, 100)
+RIGHT_EYE = (270, 100)
+MOUTH     = (200, 148)
+EYE_R     = 9
 STROKE    = 3
 
 REACTIONS = ["HAPPY", "SURPRISED", "WINK_LEFT", "WINK_RIGHT", "SPEAK"]
@@ -188,8 +188,8 @@ class BMOFaceScreen:
             if a == "SMILE":        return ("DOT", "SMILE", None)
             if a == "THINK":        return ("DOT", "SMILE", "FLAT")
             if a == "SPEAK":        return ("DOT", self._speak_frame(), None)
-        # IDLE default — referência speaking 01 (olhos pretos + boca fechada)
-        return ("DOT", "SPEAK_SMALL", None)
+        # IDLE default — referência: olhos preto-bolinha + sorrisinho em U
+        return ("DOT", "SMILE", None)
 
     def _speak_frame(self) -> str:
         # cicla 3 bocas de fala a ~6Hz
@@ -276,8 +276,8 @@ class BMOFaceScreen:
             # tracinho horizontal — referência idle / thinking 03
             pygame.draw.line(surface, BLACK, (cx - 16, cy), (cx + 16, cy), STROKE + 1)
         elif style == "SMILE":
-            # sorrisinho fino em U — referência listen 01 / thinking 01
-            rect = pygame.Rect(cx - 26, cy - 18, 52, 36)
+            # sorrisinho fino em U — proporções da referência (90w x 32d em 400x240)
+            rect = pygame.Rect(cx - 40, cy - 26, 80, 52)
             pygame.draw.arc(surface, BLACK, rect, math.pi, 2 * math.pi, STROKE)
         elif style == "O_OPEN":
             # boca surpresa redonda — referência capturing
