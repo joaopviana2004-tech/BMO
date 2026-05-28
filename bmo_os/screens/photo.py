@@ -37,8 +37,12 @@ class PhotoScreen:
         except Exception:
             return 0
 
-    def enter(self) -> None: ...
-    def exit(self) -> None: ...
+    def enter(self) -> None:
+        # acquire = liga a câmera (1ª vez leva ~500ms até o primeiro frame)
+        self.camera.acquire()
+
+    def exit(self) -> None:
+        self.camera.release()
 
     # ---------- input ----------
 

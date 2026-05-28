@@ -5,6 +5,10 @@ disponíveis (caso típico: rodando no Windows pra dev), `is_available`
 fica False e as telas mostram mensagem amigável.
 
 Truques importantes:
+- **Lazy start**: a câmera só liga depois do primeiro `acquire()`. Sem
+  ninguém segurando ela, fica desligada (economiza calor e energia).
+  Refcount simples: cada screen que precisa chama `acquire()` no enter e
+  `release()` no exit. Quando o contador zera, picam2.stop() é chamado.
 - picamera2 'RGB888' é na verdade BGR — inverte canais antes do pygame
 - HFlip aplicado no ISP via libcamera.Transform (espelho tipo selfie cam)
 - Face detection (Haar do OpenCV) só roda se alguém chamou get_faces()
@@ -77,6 +81,8 @@ class CameraService:
         self._last_face_request = 0.0
         self._frame_count = 0
         self._fps_window_start = time.time()
+        self._active = False    # picam.start() já foi chamado?
+        self._users = 0         # refcount de quem pediu a câmera
         self._stop_flag = False
 
         if not HAS_PICAMERA:
@@ -90,19 +96,66 @@ class CameraService:
                 kwargs["transform"] = Transform(hflip=True)
             config = self._picam.create_preview_configuration(**kwargs)
             self._picam.configure(config)
-            self._picam.start()
+            # NÃO chama start() — espera primeiro acquire() pra ligar a câmera
             self.is_available = True
             self._thread = threading.Thread(target=self._loop, daemon=True)
             self._thread.start()
         except Exception as e:
             self.error = f"camera: {str(e)[:40]}"
 
+    # ---------- lifecycle (refcount) ----------
+
+    def acquire(self) -> None:
+        """Marca um usuário ativo. No primeiro, liga a câmera."""
+        if not self.is_available or self._picam is None:
+            return
+        with self._lock:
+            was_zero = self._users == 0
+            self._users += 1
+        if was_zero:
+            try:
+                self._picam.start()
+                with self._lock:
+                    self._active = True
+                    self._fps_window_start = time.time()
+                    self._frame_count = 0
+            except Exception:
+                with self._lock:
+                    self._users = max(0, self._users - 1)
+
+    def release(self) -> None:
+        """Marca usuário inativo. No último, desliga a câmera."""
+        if not self.is_available or self._picam is None:
+            return
+        with self._lock:
+            if self._users <= 0:
+                return
+            self._users -= 1
+            should_stop = self._users == 0
+            if should_stop:
+                self._active = False
+        if should_stop:
+            try:
+                self._picam.stop()
+            except Exception:
+                pass
+            with self._lock:
+                self._latest_frame = None
+                self._latest_faces = []
+                self.fps = 0.0
+
     # ---------- thread loop ----------
 
     def _loop(self) -> None:
         frame_dt = 1.0 / PREVIEW_FPS
         face_skip = 0
-        while not self._stop_flag and self.is_available:
+        while not self._stop_flag:
+            with self._lock:
+                active = self._active
+            if not active:
+                # câmera desligada — thread fica idle até alguém chamar acquire()
+                time.sleep(0.1)
+                continue
             t0 = time.time()
             try:
                 arr = self._picam.capture_array("main")
@@ -189,6 +242,8 @@ class CameraService:
         """ACTIVE se cv2 tá rodando agora; IDLE se ngm pediu; OFF se sem cv2."""
         if not HAS_CV2:
             return "OFF (no cv2)"
+        if not self._active:
+            return "OFF (cam off)"
         if time.time() - self._last_face_request > FACE_REQUEST_TIMEOUT_S:
             return "IDLE"
         return "ACTIVE"
@@ -196,3 +251,12 @@ class CameraService:
     @property
     def hflip(self) -> bool:
         return Transform is not None
+
+    @property
+    def is_running(self) -> bool:
+        """True se a câmera está ligada agora (alguém deu acquire)."""
+        return self._active
+
+    @property
+    def users(self) -> int:
+        return self._users

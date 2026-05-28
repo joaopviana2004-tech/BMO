@@ -12,6 +12,7 @@ import random
 
 import pygame
 
+from ..core import config
 from ..core import input as bmo_input
 from ..core import theme_state
 from ..core.theme import LOGICAL_SIZE, render_text
@@ -58,6 +59,7 @@ class BMOFaceScreen:
     def __init__(self, on_open_home, camera=None) -> None:
         self.on_open_home = on_open_home
         self.camera = camera
+        self._camera_held = False   # tem ref-count na camera service?
         self.state = "IDLE"
         self.reaction: str | None = None
         self.reaction_until = 0.0
@@ -73,8 +75,27 @@ class BMOFaceScreen:
 
     def enter(self) -> None:
         self._schedule_next_idle()
+        self._sync_camera_hold()
 
-    def exit(self) -> None: ...
+    def exit(self) -> None:
+        self._release_camera_if_held()
+
+    def _sync_camera_hold(self) -> None:
+        """Liga/desliga câmera conforme config camera_face_tracking."""
+        if self.camera is None or not getattr(self.camera, "is_available", False):
+            return
+        wants = bool(config.get("camera_face_tracking"))
+        if wants and not self._camera_held:
+            self.camera.acquire()
+            self._camera_held = True
+        elif not wants and self._camera_held:
+            self.camera.release()
+            self._camera_held = False
+
+    def _release_camera_if_held(self) -> None:
+        if self._camera_held and self.camera is not None:
+            self.camera.release()
+            self._camera_held = False
 
     def _schedule_next_idle(self) -> None:
         self.next_idle_at = self._t + random.uniform(IDLE_NEXT_MIN, IDLE_NEXT_MAX)
@@ -138,6 +159,8 @@ class BMOFaceScreen:
 
     def update(self, dt: float) -> None:
         self._t += dt
+        # Garante que a câmera está ligada/desligada conforme config atual
+        self._sync_camera_hold()
         if self.state == "REACTING" and self._t >= self.reaction_until:
             self.state = "IDLE"
             self.reaction = None
@@ -176,11 +199,7 @@ class BMOFaceScreen:
 
     def _camera_face_target(self) -> tuple[float, float] | None:
         """Retorna (ox, oy) alvo dos olhos baseado no maior rosto detectado."""
-        if self.camera is None or not getattr(self.camera, "is_available", False):
-            return None
-        # Importa aqui pra evitar dep circular no topo do módulo
-        from ..core import config
-        if not config.get("camera_face_tracking"):
+        if not self._camera_held:
             return None
         faces = self.camera.get_faces()
         if not faces:
