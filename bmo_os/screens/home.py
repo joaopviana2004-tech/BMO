@@ -62,6 +62,9 @@ def _icon_settings(surf: pygame.Surface, rect: pygame.Rect) -> None:
         pygame.draw.line(surf, Colors.CYAN, (x1, y1), (x2, y2), 3)
 
 
+IDLE_TIMEOUT_S = 10.0
+
+
 class HomeScreen:
     def __init__(self, *, on_back, on_open_sleep, on_open_games, on_open_settings) -> None:
         self.on_back = on_back
@@ -76,13 +79,21 @@ class HomeScreen:
         )
         self.on_open_games = on_open_games
         self.on_open_settings = on_open_settings
+        self._idle = 0.0
+        self._timed_out = False
 
-    def enter(self) -> None: ...
+    def enter(self) -> None:
+        # zera o timer quando a tela vira topo da pilha (push inicial OU volta de subscreen)
+        self._idle = 0.0
+        self._timed_out = False
+
     def exit(self) -> None: ...
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if event.type != bmo_input.ACTION_EVENT:
             return
+        # qualquer interação reseta o timer de inatividade
+        self._idle = 0.0
         action = event.action
         if action == bmo_input.Action.LEFT:
             self.carousel.prev()
@@ -100,6 +111,10 @@ class HomeScreen:
 
     def update(self, dt: float) -> None:
         self.carousel.update(dt)
+        self._idle += dt
+        if self._idle >= IDLE_TIMEOUT_S and not self._timed_out:
+            self._timed_out = True
+            self.on_back()
 
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(Colors.BG_DARK)
