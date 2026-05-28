@@ -33,7 +33,7 @@ REACTIONS = ["HAPPY", "SURPRISED", "WINK_LEFT", "WINK_RIGHT", "SPEAK"]
 IDLE_ANIMS = [
     "BLINK", "DOUBLE_BLINK",
     "LOOK_LEFT", "LOOK_RIGHT", "LOOK_UP",
-    "SMILE", "THINK", "SPEAK", "SLEEPY",
+    "SMILE", "THINK", "SPEAK",
 ]
 
 REACTION_DURATION   = 1.6
@@ -188,8 +188,8 @@ class BMOFaceScreen:
             if a == "SMILE":        return ("DOT", "SMILE", None)
             if a == "THINK":        return ("DOT", "SMILE", "FLAT")
             if a == "SPEAK":        return ("DOT", self._speak_frame(), None)
-            if a == "SLEEPY":       return ("U_CLOSED", "DASH", None)
-        return ("U_CLOSED", "DASH", None)
+        # IDLE default — referência speaking 01 (olhos pretos + boca fechada)
+        return ("DOT", "SPEAK_SMALL", None)
 
     def _speak_frame(self) -> str:
         # cicla 3 bocas de fala a ~6Hz
@@ -276,9 +276,9 @@ class BMOFaceScreen:
             # tracinho horizontal — referência idle / thinking 03
             pygame.draw.line(surface, BLACK, (cx - 16, cy), (cx + 16, cy), STROKE + 1)
         elif style == "SMILE":
-            # sorrisinho arc — referência listen / thinking 01
-            rect = pygame.Rect(cx - 28, cy - 14, 56, 28)
-            pygame.draw.arc(surface, BLACK, rect, math.pi, 2 * math.pi, STROKE + 1)
+            # sorrisinho fino em U — referência listen 01 / thinking 01
+            rect = pygame.Rect(cx - 26, cy - 18, 52, 36)
+            pygame.draw.arc(surface, BLACK, rect, math.pi, 2 * math.pi, STROKE)
         elif style == "O_OPEN":
             # boca surpresa redonda — referência capturing
             pygame.draw.circle(surface, BMO_GREEN_DEEP, (cx, cy), 12)
