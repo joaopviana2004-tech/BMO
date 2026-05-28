@@ -10,6 +10,7 @@ Toque/A/MENU -> abre o home.
 from __future__ import annotations
 
 import datetime as dt
+import math
 import unicodedata
 
 import pygame
@@ -104,31 +105,22 @@ class ClockScreen:
         snap = self.git_updates.get()
         if not snap.available:
             return
-        # blink suave a cada ~1.4s pra chamar atenção sem ser irritante
-        blink = (self._t % 1.4) < 1.0
+        # blink lento (~2.4s período) pra não distrair, mas indica algo pendente
+        blink = (self._t % 2.4) < 1.6
         color = WHITE if blink else DIM
 
-        # centralizado verticalmente entre os segundos e a data
-        cy = 192
-        txt = render_text("ATUALIZACAO DISPONIVEL", 8, color)
-        gap = 6
-        tri_w = 14
-        total_w = tri_w + gap + txt.get_width()
-        start_x = (surface.get_width() - total_w) // 2
+        # canto sup-direito, à esquerda do status bar (sol/sinal/bateria)
+        cx = surface.get_width() - 92
+        cy = SAFE_INSET + 8
 
-        # triângulo de alerta (outline) com tip pra cima
-        tcx = start_x + tri_w // 2
-        pts = [
-            (tcx, cy - 5),
-            (tcx - 6, cy + 5),
-            (tcx + 6, cy + 5),
-        ]
-        pygame.draw.polygon(surface, color, pts, 2)
-        # "!" dentro: barra fina + ponto embaixo
-        pygame.draw.rect(surface, color, (tcx, cy - 2, 1, 4))
-        pygame.draw.rect(surface, color, (tcx, cy + 3, 1, 1))
-        # texto à direita do triângulo
-        surface.blit(txt, txt.get_rect(midleft=(start_x + tri_w + gap, cy)))
+        # ícone de refresh: arco circular + ponta de seta
+        rect = pygame.Rect(cx - 5, cy - 5, 11, 11)
+        pygame.draw.arc(surface, color, rect, -math.pi / 2, math.pi, 2)
+        pygame.draw.polygon(surface, color, [
+            (cx + 1, cy - 7),
+            (cx + 5, cy - 3),
+            (cx, cy - 3),
+        ])
 
     def _draw_date(self, surface: pygame.Surface) -> None:
         now = dt.datetime.now()

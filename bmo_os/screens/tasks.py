@@ -12,26 +12,26 @@ import pygame
 
 from ..core import input as bmo_input
 from ..core.theme import LOGICAL_SIZE, render_text
-from ..core.widgets import CRT_BLACK, CRT_DIM, CRT_WHITE
+from ..core.widgets import CRT_BLACK, CRT_DIM, CRT_WHITE, SAFE_INSET
 from ..services.todoist import SECTION_LABELS, SECTION_NAMES, TodoistService
 
 # Layout (400x240) — fontes maiores, menos cards visíveis
-COL_PAD = 4
+COL_PAD = SAFE_INSET   # respeita zona morta do frame físico
 COL_GAP = 4
-COL_W = (LOGICAL_SIZE[0] - COL_PAD * 2 - COL_GAP * 2) // 3   # ~128
+COL_W = (LOGICAL_SIZE[0] - COL_PAD * 2 - COL_GAP * 2) // 3   # ~117
 
 CARD_H = 28
-CARDS_TOP_Y = 46
-HEADER_Y = 4
-COL_HEADER_Y = 24
-FOOTER_Y = LOGICAL_SIZE[1] - 16
+HEADER_Y = SAFE_INSET             # buttons + title aqui
+COL_HEADER_Y = HEADER_Y + 22      # ~36
+CARDS_TOP_Y = COL_HEADER_Y + 22   # ~58
+FOOTER_Y = LOGICAL_SIZE[1] - SAFE_INSET - 2   # ~224
 
 FONT_CARD = 11
 FONT_COL_HEADER = 11
 FONT_HINT = 8
 FONT_TITLE = 11
 
-MAX_VISIBLE = 5    # 5 * 28 = 140 → cards de y=46 a y=186
+MAX_VISIBLE = 5    # 5 * 28 = 140 → cards de y=58 a y=198
 
 
 def _col_x(idx: int) -> int:
@@ -258,10 +258,10 @@ class TasksScreen:
     # ---------- botões / hitboxes ----------
 
     def _back_btn(self) -> pygame.Rect:
-        return pygame.Rect(4, 4, 52, 16)
+        return pygame.Rect(SAFE_INSET, SAFE_INSET, 52, 16)
 
     def _sync_btn(self) -> pygame.Rect:
-        return pygame.Rect(LOGICAL_SIZE[0] - 56, 4, 52, 16)
+        return pygame.Rect(LOGICAL_SIZE[0] - SAFE_INSET - 52, SAFE_INSET, 52, 16)
 
     def _scroll_up_btn(self, col_i: int) -> pygame.Rect:
         x = _col_x(col_i)
@@ -287,7 +287,7 @@ class TasksScreen:
         self._draw_back_btn(surface)
         self._draw_sync_btn(surface)
         title = render_text("BMO BOARD", FONT_TITLE, CRT_WHITE)
-        surface.blit(title, title.get_rect(midtop=(LOGICAL_SIZE[0] // 2, HEADER_Y)))
+        surface.blit(title, title.get_rect(midtop=(LOGICAL_SIZE[0] // 2, HEADER_Y + 1)))
 
     def _draw_back_btn(self, surface) -> None:
         rect = self._back_btn()
@@ -444,4 +444,4 @@ class TasksScreen:
         else:
             txt = "toque e arraste um card    HOME / SYNC nos cantos"
         hint = render_text(txt, FONT_HINT, CRT_DIM, pixel=False)
-        surface.blit(hint, hint.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - 4)))
+        surface.blit(hint, hint.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - SAFE_INSET - 4)))
