@@ -10,6 +10,7 @@ import sys
 
 import pygame
 
+from . import config
 from . import input as bmo_input
 from . import theme_state
 from .screen_manager import ScreenManager
@@ -26,6 +27,9 @@ class App:
         pygame.display.set_caption("BMO OS")
         pygame.mouse.set_visible(False)
         self.canvas = pygame.Surface(LOGICAL_SIZE).convert()
+        # Overlay reutilizado pra dimming (config "brightness")
+        self._dim_overlay = pygame.Surface(LOGICAL_SIZE)
+        self._dim_overlay.fill((0, 0, 0))
         self.clock = pygame.time.Clock()
         self.manager = ScreenManager()
         self.running = True
@@ -55,6 +59,11 @@ class App:
             self.manager.update(dt)
             self.canvas.fill(Colors.BG_DARK)
             self.manager.draw(self.canvas)
+            # dimming software (overlay preto translúcido por cima do canvas)
+            brightness = int(config.get("brightness") or 100)
+            if brightness < 100:
+                self._dim_overlay.set_alpha(int((100 - brightness) * 2.55))
+                self.canvas.blit(self._dim_overlay, (0, 0))
             scaled = pygame.transform.scale(self.canvas, self.window.get_size())
             self.window.blit(scaled, (0, 0))
             pygame.display.flip()

@@ -43,6 +43,10 @@ def _fmt_theme(v) -> str:
     return theme_state.THEME_LABELS.get(v, str(v).upper())
 
 
+def _fmt_brightness(v) -> str:
+    return f"{int(v)}%"
+
+
 ITEMS = [
     {
         "type": "cycle",
@@ -64,6 +68,13 @@ ITEMS = [
         "label": "Tema",
         "options": theme_state.THEME_OPTIONS,
         "format": _fmt_theme,
+    },
+    {
+        "type": "cycle",
+        "key": "brightness",
+        "label": "Brilho",
+        "options": config.BRIGHTNESS_OPTIONS,
+        "format": _fmt_brightness,
     },
     {"type": "action", "key": "update", "label": "Atualizar"},
     {"type": "action", "key": "shutdown", "label": "Desligar"},
@@ -199,9 +210,9 @@ class SettingsScreen:
             surface.blit(msg, msg.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - SAFE_INSET - 4)))
 
     def _row_rects(self):
-        top = 38
-        step = 26
-        return [pygame.Rect(20, top + i * step, LOGICAL_SIZE[0] - 40, 22) for i in range(len(ITEMS))]
+        top = 36
+        step = 23   # comprimido pra caber 7 itens sem encostar no rodapé
+        return [pygame.Rect(20, top + i * step, LOGICAL_SIZE[0] - 40, 20) for i in range(len(ITEMS))]
 
     def _left_arrow_rect(self, row: pygame.Rect) -> pygame.Rect:
         return pygame.Rect(row.right - 38, row.top, 16, row.height)

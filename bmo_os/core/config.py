@@ -41,6 +41,7 @@ DEFAULTS: dict = {
     "idle_timeout_s": 10,      # quanto tempo a home espera sem input pra voltar
     "ambient_mode": "clock",   # "clock" | "face" — tela ociosa
     "theme": "auto",           # "auto" | "dark" | "light" — auto = claro 6h-18h
+    "brightness": 100,         # 0-100 — overlay de dimming no canvas
     "todoist_token": "",       # token da REST API v2 do Todoist (env TODOIST_TOKEN ganha)
     "todoist_project": "BMO",  # nome do projeto que vira o board
 }
@@ -48,6 +49,7 @@ DEFAULTS: dict = {
 IDLE_TIMEOUT_OPTIONS = [5, 10, 15, 30, 60, 120]
 AMBIENT_MODE_OPTIONS = ["clock", "face"]
 AMBIENT_MODE_LABELS = {"clock": "RELOGIO", "face": "BMO FACE"}
+BRIGHTNESS_OPTIONS = [20, 40, 60, 80, 100]
 
 _lock = Lock()
 _data: dict | None = None
