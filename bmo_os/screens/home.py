@@ -18,8 +18,8 @@ from ..core.widgets import (
     LOGICAL_SIZE,
 )
 
-ITEMS = ["DISPLAY", "SLEEP", "GAMES", "SETTINGS"]
-ICONS = ["display", "sleep", "games", "settings"]
+ITEMS = ["DISPLAY", "SLEEP", "GAMES", "TASKS", "SETTINGS"]
+ICONS = ["display", "sleep", "games", "tasks", "settings"]
 
 
 def _icon_display(surf: pygame.Surface, cx: int, cy: int) -> None:
@@ -74,13 +74,28 @@ def _icon_settings(surf: pygame.Surface, cx: int, cy: int) -> None:
         pygame.draw.line(surf, CRT_WHITE, (x1, y1), (x2, y2), 3)
 
 
-_DRAW_ICON = [_icon_display, _icon_sleep, _icon_games, _icon_settings]
+def _icon_tasks(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # 3 colunas com mini-cards (representa kanban)
+    col_w, col_h, gap = 12, 30, 3
+    total_w = 3 * col_w + 2 * gap
+    start_x = cx - total_w // 2
+    top_y = cy - col_h // 2
+    for i in range(3):
+        x = start_x + i * (col_w + gap)
+        pygame.draw.rect(surf, CRT_WHITE, (x, top_y, col_w, col_h), 1)
+        pygame.draw.rect(surf, CRT_WHITE, (x + 2, top_y + 4, col_w - 4, 3))
+        pygame.draw.rect(surf, CRT_WHITE, (x + 2, top_y + 11, col_w - 4, 3))
+        if i < 2:
+            pygame.draw.rect(surf, CRT_DIM, (x + 2, top_y + 18, col_w - 4, 3))
+
+
+_DRAW_ICON = [_icon_display, _icon_sleep, _icon_games, _icon_tasks, _icon_settings]
 
 
 class HomeScreen:
-    def __init__(self, *, on_back, on_open_sleep, on_open_games, on_open_settings) -> None:
+    def __init__(self, *, on_back, on_open_sleep, on_open_games, on_open_tasks, on_open_settings) -> None:
         self.on_back = on_back
-        self._on_select = [lambda: None, on_open_sleep, on_open_games, on_open_settings]
+        self._on_select = [lambda: None, on_open_sleep, on_open_games, on_open_tasks, on_open_settings]
         self.on_open_games = on_open_games
         self.on_open_settings = on_open_settings
         self._index = 0

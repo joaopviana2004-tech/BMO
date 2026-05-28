@@ -14,6 +14,8 @@ CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "bmo_config.json"
 DEFAULTS: dict = {
     "idle_timeout_s": 10,      # quanto tempo a home espera sem input pra voltar
     "ambient_mode": "clock",   # "clock" | "face" — tela ociosa
+    "todoist_token": "",       # token da REST API v2 do Todoist (env TODOIST_TOKEN ganha)
+    "todoist_project": "BMO",  # nome do projeto que vira o board
 }
 
 IDLE_TIMEOUT_OPTIONS = [5, 10, 15, 30, 60, 120]

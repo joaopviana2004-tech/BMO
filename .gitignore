@@ -183,6 +183,9 @@ roms/
 weather_cache.json
 *.cache
 
+# Config local do BMO OS — guarda preferências e token do Todoist, nunca commitar
+bmo_config.json
+
 # =============================================================
 # Raspberry Pi / deployment
 # =============================================================

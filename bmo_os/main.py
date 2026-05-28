@@ -22,12 +22,17 @@ from bmo_os.screens.home import HomeScreen
 from bmo_os.screens.placeholder import PlaceholderScreen
 from bmo_os.screens.settings import SettingsScreen
 from bmo_os.screens.sleep import SleepScreen
+from bmo_os.screens.tasks import TasksScreen
+from bmo_os.services.todoist import TodoistService
 
 
 def build_initial(app: App):
     # Cache pra reaproveitar a mesma instância de cada ambient — evita criar
     # uma WeatherService nova (e portanto uma thread) toda vez que a home volta.
     ambient_cache: dict = {}
+
+    # Singleton de Todoist (thread + cache vivem aqui)
+    todoist = TodoistService()
 
     def make_ambient():
         mode = config.get("ambient_mode")
@@ -56,6 +61,9 @@ def build_initial(app: App):
             ),
             on_open_games=lambda: app.manager.push(
                 PlaceholderScreen("BMO'S GAMES", app.manager.pop)
+            ),
+            on_open_tasks=lambda: app.manager.push(
+                TasksScreen(on_back=app.manager.pop, todoist=todoist)
             ),
             on_open_settings=lambda: app.manager.push(
                 SettingsScreen(on_back=app.manager.pop, on_ambient_changed=lambda _m: None)

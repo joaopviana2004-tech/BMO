@@ -1,0 +1,238 @@
+"""Cliente leve da API do Todoist pro Kanban do BMO OS.
+
+- Lê de um projeto (default 'BMO') com 3 seções: 'To-Do', 'Doing', 'Done'
+- Roda em thread, faz refresh a cada 60s
+- Move tarefa entre seções via Sync API v9 (item_move)
+
+Token: env TODOIST_TOKEN > config['todoist_token']
+Sem token: snapshot.ok = False, screen mostra mensagem amigável.
+"""
+from __future__ import annotations
+
+import json
+import os
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from dataclasses import dataclass, field
+
+from ..core import config
+
+REST_BASE = "https://api.todoist.com/rest/v2"
+SYNC_URL = "https://api.todoist.com/sync/v9/sync"
+UPDATE_INTERVAL_S = 60
+HTTP_TIMEOUT = 10
+
+# Nomes esperados das seções (case-insensitive)
+SECTION_NAMES = ["to-do", "doing", "done"]
+SECTION_LABELS = {"to-do": "TO-DO", "doing": "DOING", "done": "DONE"}
+
+
+@dataclass
+class Task:
+    id: str
+    content: str
+    section_key: str  # "to-do" | "doing" | "done"
+
+
+@dataclass
+class TodoistSnapshot:
+    ok: bool = False
+    error: str = ""
+    sections: dict[str, str] = field(default_factory=dict)  # key -> section_id
+    tasks: list[Task] = field(default_factory=list)
+    fetched_at: float = 0.0
+
+
+def _resolve_token() -> str:
+    env = os.environ.get("TODOIST_TOKEN", "").strip()
+    if env:
+        return env
+    return (config.get("todoist_token") or "").strip()
+
+
+def _request(method: str, url: str, token: str, body: dict | None = None) -> tuple[int, str]:
+    data = None
+    headers = {"Authorization": f"Bearer {token}"}
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            return resp.status, resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        try:
+            body_txt = e.read().decode("utf-8")
+        except Exception:
+            body_txt = ""
+        return e.code, body_txt
+
+
+class TodoistService:
+    def __init__(self) -> None:
+        self.snapshot = TodoistSnapshot()
+        self._lock = threading.Lock()
+        self._wake = threading.Event()
+        token = _resolve_token()
+        if not token:
+            self.snapshot = TodoistSnapshot(ok=False, error="sem TODOIST_TOKEN")
+            return
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    # ---------- loop ----------
+
+    def _loop(self) -> None:
+        while True:
+            self._fetch()
+            self._wake.wait(UPDATE_INTERVAL_S)
+            self._wake.clear()
+
+    def trigger_refresh(self) -> None:
+        """Acorda o loop pra refazer fetch agora (depois de um move otimista)."""
+        self._wake.set()
+
+    # ---------- fetch ----------
+
+    def _fetch(self) -> None:
+        token = _resolve_token()
+        if not token:
+            with self._lock:
+                self.snapshot = TodoistSnapshot(ok=False, error="sem TODOIST_TOKEN")
+            return
+
+        project_name = (config.get("todoist_project") or "BMO").strip()
+        try:
+            # 1) projeto
+            status, body = _request("GET", f"{REST_BASE}/projects", token)
+            if status != 200:
+                self._set_error(f"projects HTTP {status}")
+                return
+            projects = json.loads(body)
+            project = next(
+                (p for p in projects if p.get("name", "").lower() == project_name.lower()),
+                None,
+            )
+            if project is None:
+                self._set_error(f"projeto '{project_name}' nao encontrado")
+                return
+            project_id = project["id"]
+
+            # 2) seções
+            params = urllib.parse.urlencode({"project_id": str(project_id)})
+            status, body = _request("GET", f"{REST_BASE}/sections?{params}", token)
+            if status != 200:
+                self._set_error(f"sections HTTP {status}")
+                return
+            sections_raw = json.loads(body)
+            sections: dict[str, str] = {}
+            for s in sections_raw:
+                key = (s.get("name") or "").strip().lower()
+                if key in SECTION_NAMES:
+                    sections[key] = str(s["id"])
+            missing = [n for n in SECTION_NAMES if n not in sections]
+            if missing:
+                self._set_error("falta secao: " + ", ".join(missing))
+                return
+
+            # 3) tarefas ativas
+            status, body = _request("GET", f"{REST_BASE}/tasks?{params}", token)
+            if status != 200:
+                self._set_error(f"tasks HTTP {status}")
+                return
+            tasks_raw = json.loads(body)
+            tasks: list[Task] = []
+            for t in tasks_raw:
+                section_id = str(t.get("section_id") or "")
+                key = next((k for k, v in sections.items() if v == section_id), None)
+                if key is None:
+                    continue
+                tasks.append(Task(
+                    id=str(t["id"]),
+                    content=(t.get("content") or "").strip(),
+                    section_key=key,
+                ))
+
+            with self._lock:
+                self.snapshot = TodoistSnapshot(
+                    ok=True,
+                    error="",
+                    sections=sections,
+                    tasks=tasks,
+                    fetched_at=time.time(),
+                )
+        except Exception as e:
+            self._set_error(str(e)[:60])
+
+    def _set_error(self, msg: str) -> None:
+        with self._lock:
+            self.snapshot = TodoistSnapshot(
+                ok=False,
+                error=msg,
+                sections=self.snapshot.sections,
+                tasks=self.snapshot.tasks,
+                fetched_at=time.time(),
+            )
+
+    # ---------- snapshot ----------
+
+    def get(self) -> TodoistSnapshot:
+        with self._lock:
+            return self.snapshot
+
+    def by_section(self) -> dict[str, list[Task]]:
+        snap = self.get()
+        out: dict[str, list[Task]] = {k: [] for k in SECTION_NAMES}
+        for t in snap.tasks:
+            out.setdefault(t.section_key, []).append(t)
+        return out
+
+    # ---------- move ----------
+
+    def move(self, task_id: str, target_key: str) -> bool:
+        """Move (otimista) localmente e dispara sync. Retorna False se não rolou."""
+        if target_key not in SECTION_NAMES:
+            return False
+        token = _resolve_token()
+        if not token:
+            return False
+
+        # atualiza local pra UI reagir na hora
+        with self._lock:
+            snap = self.snapshot
+            target_section_id = snap.sections.get(target_key)
+            if target_section_id is None:
+                return False
+            for t in snap.tasks:
+                if t.id == task_id:
+                    t.section_key = target_key
+                    break
+
+        # dispara em thread pra não travar o frame
+        threading.Thread(
+            target=self._send_move,
+            args=(token, task_id, target_section_id),
+            daemon=True,
+        ).start()
+        return True
+
+    def _send_move(self, token: str, task_id: str, section_id: str) -> None:
+        commands = [{
+            "type": "item_move",
+            "uuid": str(uuid.uuid4()),
+            "args": {"id": task_id, "section_id": section_id},
+        }]
+        body = {"commands": commands}
+        # Sync v9 aceita JSON OU form. Vou de JSON.
+        status, _ = _request("POST", SYNC_URL, token, body=body)
+        if status not in (200, 201):
+            # se falhou, agenda refresh pra reconciliar estado
+            self.trigger_refresh()
+        else:
+            # tudo bem; agenda refresh em 2s pra confirmar
+            time.sleep(2)
+            self.trigger_refresh()
