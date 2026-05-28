@@ -30,7 +30,7 @@ bmo_os/
 ## Setup (Windows, pra desenvolver)
 
 ```powershell
-cd "D:\Meus Projetos\BMO\Interfaces"
+cd "D:\Meus Projetos\BMO"
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r bmo_os/requirements.txt
