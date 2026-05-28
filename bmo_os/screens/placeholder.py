@@ -8,7 +8,7 @@ from ..core import theme_state
 from ..core.theme import render_text
 from ..core.widgets import (
     CRT_BLACK, CRT_DIM, CRT_WHITE,
-    draw_crt_corners, draw_scanlines,
+    SAFE_INSET, draw_crt_corners, draw_scanlines,
     LOGICAL_SIZE,
 )
 
@@ -32,14 +32,14 @@ class PlaceholderScreen:
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(CRT_BLACK)
         draw_scanlines(surface)
-        draw_crt_corners(surface)
-        theme_state.draw_status_bar(surface)
+        draw_crt_corners(surface, margin=SAFE_INSET)
+        theme_state.draw_status_bar(surface, top_pad=SAFE_INSET + 4, right_pad=SAFE_INSET + 4)
 
         title = render_text(self.title, 10, CRT_DIM)
-        surface.blit(title, title.get_rect(midtop=(LOGICAL_SIZE[0] // 2, 20)))
+        surface.blit(title, title.get_rect(midtop=(LOGICAL_SIZE[0] // 2, SAFE_INSET + 6)))
 
         msg = render_text("EM BREVE", 16, CRT_WHITE)
         surface.blit(msg, msg.get_rect(center=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] // 2 - 8)))
 
         hint = render_text("B = voltar", 8, CRT_DIM)
-        surface.blit(hint, hint.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - 12)))
+        surface.blit(hint, hint.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - SAFE_INSET - 4)))

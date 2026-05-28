@@ -18,6 +18,10 @@ CRT_WHITE  = pygame.Color(235, 235, 235)
 CRT_DIM    = pygame.Color(95, 95, 95)
 CRT_SCAN   = pygame.Color(10, 10, 10)
 
+# Zona morta em torno da tela inteira: o frame físico do BMO cobre uns 14px
+# nas bordas. Telas CRT empurram corners e conteúdo pra dentro desse valor.
+SAFE_INSET = 14
+
 
 def draw_scanlines(surface: pygame.Surface) -> None:
     w, h = surface.get_size()

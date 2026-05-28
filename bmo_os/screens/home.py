@@ -14,7 +14,7 @@ from ..core import input as bmo_input
 from ..core.theme import render_text
 from ..core.widgets import (
     CRT_BLACK, CRT_DIM, CRT_WHITE,
-    draw_crt_corners, draw_scanlines,
+    SAFE_INSET, draw_crt_corners, draw_scanlines,
     LOGICAL_SIZE,
 )
 
@@ -138,8 +138,8 @@ class HomeScreen:
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(CRT_BLACK)
         draw_scanlines(surface)
-        draw_crt_corners(surface)
-        theme_state.draw_status_bar(surface)
+        draw_crt_corners(surface, margin=SAFE_INSET)
+        theme_state.draw_status_bar(surface, top_pad=SAFE_INSET + 4, right_pad=SAFE_INSET + 4)
         self._draw_carousel(surface)
         self._draw_hint(surface)
 
@@ -176,9 +176,11 @@ class HomeScreen:
             pygame.draw.rect(surface, color, (sx + i * (dot_w + 4), cy + 58, dot_w, 2))
 
     def _draw_hint(self, surface: pygame.Surface) -> None:
-        # barra de progresso do timeout (vai sumindo)
+        # barra de progresso do timeout (vai sumindo) — dentro da zona segura
         timeout = float(config.get("idle_timeout_s") or 10)
         idle_frac = min(self._idle / timeout, 1.0) if timeout > 0 else 0.0
-        bar_w = int((LOGICAL_SIZE[0] - 32) * (1.0 - idle_frac))
+        x = SAFE_INSET + 8
+        max_w = LOGICAL_SIZE[0] - 2 * x
+        bar_w = int(max_w * (1.0 - idle_frac))
         if bar_w > 0:
-            pygame.draw.rect(surface, CRT_DIM, (16, LOGICAL_SIZE[1] - 8, bar_w, 2))
+            pygame.draw.rect(surface, CRT_DIM, (x, LOGICAL_SIZE[1] - SAFE_INSET - 4, bar_w, 2))

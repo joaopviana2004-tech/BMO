@@ -17,16 +17,16 @@ import pygame
 from ..core import input as bmo_input
 from ..core import theme_state
 from ..core.theme import render_text
-from ..core.widgets import CRT_BLACK as BLACK, CRT_WHITE as WHITE, CRT_DIM as DIM, draw_scanlines, draw_crt_corners
+from ..core.widgets import (
+    CRT_BLACK as BLACK, CRT_WHITE as WHITE, CRT_DIM as DIM,
+    SAFE_INSET, draw_scanlines, draw_crt_corners,
+)
 from ..services.weather import WeatherService
 
 PT_WEEKDAYS = ["SEG", "TER", "QUA", "QUI", "SEX", "SAB", "DOM"]
 PT_MONTHS = ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"]
 
 SCANLINE = (10, 10, 10)
-# Zona morta em torno da tela inteira: o frame físico do BMO cobre uns 14px
-# nas bordas. Corners e conteúdo são empurrados pra dentro pra não sumirem.
-SAFE_INSET = 14
 
 
 def _ascii_upper(text: str) -> str:

@@ -24,7 +24,7 @@ from ..core import input as bmo_input
 from ..core.theme import render_text
 from ..core.widgets import (
     CRT_BLACK, CRT_DIM, CRT_WHITE,
-    draw_crt_corners, draw_scanlines,
+    SAFE_INSET, draw_crt_corners, draw_scanlines,
     LOGICAL_SIZE,
 )
 
@@ -188,15 +188,15 @@ class SettingsScreen:
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(CRT_BLACK)
         draw_scanlines(surface)
-        draw_crt_corners(surface)
-        theme_state.draw_status_bar(surface)
+        draw_crt_corners(surface, margin=SAFE_INSET)
+        theme_state.draw_status_bar(surface, top_pad=SAFE_INSET + 4, right_pad=SAFE_INSET + 4)
         self._draw_title(surface)
         self._draw_menu(surface)
         if self._status:
             bright = "OK" in self._status or "Atualizando" in self._status
             color = CRT_WHITE if bright else CRT_DIM
             msg = render_text(self._status, 9, color)
-            surface.blit(msg, msg.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - 12)))
+            surface.blit(msg, msg.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - SAFE_INSET - 4)))
 
     def _row_rects(self):
         top = 38
@@ -211,7 +211,7 @@ class SettingsScreen:
 
     def _draw_title(self, surface: pygame.Surface) -> None:
         img = render_text("SETTINGS", 10, CRT_DIM)
-        surface.blit(img, img.get_rect(midtop=(LOGICAL_SIZE[0] // 2, 18)))
+        surface.blit(img, img.get_rect(midtop=(LOGICAL_SIZE[0] // 2, SAFE_INSET + 6)))
 
     def _draw_menu(self, surface: pygame.Surface) -> None:
         for i, (item, rect) in enumerate(zip(ITEMS, self._row_rects())):

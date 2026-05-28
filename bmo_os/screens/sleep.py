@@ -15,7 +15,7 @@ from ..core import input as bmo_input
 from ..core.theme import render_text
 from ..core.widgets import (
     CRT_BLACK, CRT_DIM, CRT_WHITE,
-    draw_crt_corners, draw_scanlines,
+    SAFE_INSET, draw_crt_corners, draw_scanlines,
     LOGICAL_SIZE,
 )
 
@@ -76,8 +76,8 @@ class SleepScreen:
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(CRT_BLACK)
         draw_scanlines(surface)
-        draw_crt_corners(surface)
-        theme_state.draw_status_bar(surface)
+        draw_crt_corners(surface, margin=SAFE_INSET)
+        theme_state.draw_status_bar(surface, top_pad=SAFE_INSET + 4, right_pad=SAFE_INSET + 4)
         self._draw_title(surface)
         self._draw_tiles(surface)
         self._draw_hint(surface)
@@ -91,7 +91,7 @@ class SleepScreen:
 
     def _draw_title(self, surface: pygame.Surface) -> None:
         img = render_text("HOW BMO RESTS", 10, CRT_DIM)
-        surface.blit(img, img.get_rect(midtop=(LOGICAL_SIZE[0] // 2, 20)))
+        surface.blit(img, img.get_rect(midtop=(LOGICAL_SIZE[0] // 2, SAFE_INSET + 6)))
 
     def _draw_tiles(self, surface: pygame.Surface) -> None:
         for i, rect in enumerate(self._tile_rects()):
@@ -140,4 +140,4 @@ class SleepScreen:
 
     def _draw_hint(self, surface: pygame.Surface) -> None:
         hint = render_text("A = selecionar  B = voltar", 7, CRT_DIM)
-        surface.blit(hint, hint.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - 10)))
+        surface.blit(hint, hint.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - SAFE_INSET - 4)))
