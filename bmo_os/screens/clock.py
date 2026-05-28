@@ -113,15 +113,15 @@ class ClockScreen:
         blink = (self._t % 1.0) < 0.5
         sep = ":" if blink else " "
         hh_mm = f"{now.hour:02d}{sep}{now.minute:02d}"
-        big = render_text(hh_mm, 44, WHITE)
+        big = render_text(hh_mm, 72, WHITE)
         cx = surface.get_width() // 2
-        cy = surface.get_height() // 2 + 4
+        cy = surface.get_height() // 2 + 6
         rect = big.get_rect(center=(cx, cy))
         surface.blit(big, rect)
 
         ss = f"{now.second:02d}"
-        small = render_text(ss, 10, DIM)
-        sr = small.get_rect(midtop=(cx, rect.bottom + 4))
+        small = render_text(ss, 14, DIM)
+        sr = small.get_rect(midtop=(cx, rect.bottom + 6))
         surface.blit(small, sr)
 
     def _draw_date(self, surface: pygame.Surface) -> None:

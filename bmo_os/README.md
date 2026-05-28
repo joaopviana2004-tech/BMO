@@ -65,8 +65,10 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/bmo_os
 Environment="SDL_VIDEODRIVER=kmsdrm"
-Environment="OPENWEATHER_API_KEY=sua_chave"
-Environment="OPENWEATHER_CITY=Sao Paulo,BR"
+# (opcional) sobrescreva a localização — default já é João Pessoa/PB
+# Environment="WEATHER_LAT=-7.1195"
+# Environment="WEATHER_LON=-34.8450"
+# Environment="WEATHER_TIMEZONE=America/Fortaleza"
 ExecStart=/home/pi/bmo_os/.venv/bin/python -m bmo_os.main --fullscreen
 Restart=on-failure
 
@@ -78,17 +80,19 @@ WantedBy=multi-user.target
 sudo systemctl enable --now bmo-os
 ```
 
-## OpenWeather
+## Clima (Open-Meteo)
 
-Pegue chave grátis em <https://openweathermap.org/api> e defina as variáveis:
+Usa <https://open-meteo.com> — grátis, sem API key, sem cadastro. Default já vem
+configurado pra **João Pessoa/PB**. Pra trocar de cidade, defina as variáveis:
 
 ```powershell
-$env:OPENWEATHER_API_KEY="sua_chave"
-$env:OPENWEATHER_CITY="Sao Paulo,BR"
+$env:WEATHER_LAT="-23.5505"     # latitude
+$env:WEATHER_LON="-46.6333"     # longitude
+$env:WEATHER_TIMEZONE="America/Sao_Paulo"
 python -m bmo_os.main
 ```
 
-Sem chave: as temperaturas aparecem como `--C` e `--%`, sem erro.
+Sem internet: as medidas aparecem como `--C` e `--%`, sem erro.
 
 ## Fontes pixel
 

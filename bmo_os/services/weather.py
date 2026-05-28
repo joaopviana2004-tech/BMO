@@ -1,10 +1,10 @@
-"""Cliente OpenWeather com cache local e fallback.
+"""Cliente Open-Meteo (https://open-meteo.com) — grátis, sem API key.
 
-Configure via variáveis de ambiente:
-    OPENWEATHER_API_KEY  — chave da API (https://openweathermap.org/api)
-    OPENWEATHER_CITY     — nome da cidade (ex: "Sao Paulo,BR")
+Configure via variáveis de ambiente (opcional, default = João Pessoa/PB):
+    WEATHER_LAT       — latitude  (ex: "-7.1195")
+    WEATHER_LON       — longitude (ex: "-34.8450")
+    WEATHER_TIMEZONE  — timezone (ex: "America/Fortaleza")
 
-Se não tiver chave, retorna valores placeholder e não tenta rede.
 A leitura roda em thread separada pra não travar o frame.
 """
 from __future__ import annotations
@@ -18,6 +18,42 @@ import urllib.request
 from dataclasses import dataclass
 
 UPDATE_INTERVAL_S = 10 * 60  # 10 min
+DEFAULT_LAT = "-7.1195"
+DEFAULT_LON = "-34.8450"
+DEFAULT_TZ = "America/Fortaleza"
+
+# WMO weather codes -> descrição curta em pt_BR (ASCII, pra fonte pixel renderizar).
+# tabela oficial: https://open-meteo.com/en/docs (seção "Weather Code")
+WMO_DESC = {
+    0: "limpo",
+    1: "quase limpo",
+    2: "parc nublado",
+    3: "nublado",
+    45: "nevoa",
+    48: "nevoa gelo",
+    51: "garoa fraca",
+    53: "garoa",
+    55: "garoa forte",
+    56: "garoa gelo",
+    57: "garoa gelo+",
+    61: "chuva fraca",
+    63: "chuva",
+    65: "chuva forte",
+    66: "chuva gelada",
+    67: "chuva gelo+",
+    71: "neve fraca",
+    73: "neve",
+    75: "neve forte",
+    77: "granizo",
+    80: "pancadas",
+    81: "pancadas+",
+    82: "tempestade",
+    85: "neve fraca",
+    86: "neve forte",
+    95: "trovoada",
+    96: "trovoada+",
+    99: "trovoada++",
+}
 
 
 @dataclass
@@ -31,15 +67,11 @@ class WeatherSnapshot:
 
 class WeatherService:
     def __init__(self) -> None:
-        self.api_key = os.environ.get("OPENWEATHER_API_KEY", "").strip()
-        self.city = os.environ.get("OPENWEATHER_CITY", "Sao Paulo,BR").strip()
+        self.lat = os.environ.get("WEATHER_LAT", DEFAULT_LAT).strip()
+        self.lon = os.environ.get("WEATHER_LON", DEFAULT_LON).strip()
+        self.tz = os.environ.get("WEATHER_TIMEZONE", DEFAULT_TZ).strip()
         self.snapshot = WeatherSnapshot()
         self._lock = threading.Lock()
-        self._thread: threading.Thread | None = None
-        if self.api_key:
-            self._kick_off()
-
-    def _kick_off(self) -> None:
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
@@ -50,19 +82,21 @@ class WeatherService:
 
     def _fetch(self) -> None:
         params = urllib.parse.urlencode({
-            "q": self.city,
-            "appid": self.api_key,
-            "units": "metric",
-            "lang": "pt_br",
+            "latitude": self.lat,
+            "longitude": self.lon,
+            "current": "temperature_2m,relative_humidity_2m,weather_code",
+            "timezone": self.tz,
         })
-        url = f"https://api.openweathermap.org/data/2.5/weather?{params}"
+        url = f"https://api.open-meteo.com/v1/forecast?{params}"
         try:
             with urllib.request.urlopen(url, timeout=8) as resp:
                 data = json.load(resp)
+            cur = data["current"]
+            code = int(cur.get("weather_code", -1))
             snap = WeatherSnapshot(
-                temp_c=float(data["main"]["temp"]),
-                humidity=int(data["main"]["humidity"]),
-                description=str(data["weather"][0]["description"]),
+                temp_c=float(cur["temperature_2m"]),
+                humidity=int(cur["relative_humidity_2m"]),
+                description=WMO_DESC.get(code, "sem dados"),
                 fetched_at=time.time(),
                 ok=True,
             )
