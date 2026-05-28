@@ -47,6 +47,10 @@ def _fmt_brightness(v) -> str:
     return f"{int(v)}%"
 
 
+def _fmt_onoff(v) -> str:
+    return "ON" if v else "OFF"
+
+
 ITEMS = [
     {
         "type": "cycle",
@@ -75,6 +79,13 @@ ITEMS = [
         "label": "Brilho",
         "options": config.BRIGHTNESS_OPTIONS,
         "format": _fmt_brightness,
+    },
+    {
+        "type": "cycle",
+        "key": "camera_face_tracking",
+        "label": "BMO te ve",
+        "options": [False, True],
+        "format": _fmt_onoff,
     },
     {"type": "action", "key": "update", "label": "Atualizar"},
     {"type": "action", "key": "shutdown", "label": "Desligar"},
@@ -211,8 +222,8 @@ class SettingsScreen:
 
     def _row_rects(self):
         top = 36
-        step = 23   # comprimido pra caber 7 itens sem encostar no rodapé
-        return [pygame.Rect(20, top + i * step, LOGICAL_SIZE[0] - 40, 20) for i in range(len(ITEMS))]
+        step = 21   # comprimido pra caber 8 itens sem encostar no rodapé
+        return [pygame.Rect(20, top + i * step, LOGICAL_SIZE[0] - 40, 19) for i in range(len(ITEMS))]
 
     def _left_arrow_rect(self, row: pygame.Rect) -> pygame.Rect:
         return pygame.Rect(row.right - 38, row.top, 16, row.height)

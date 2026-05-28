@@ -4,9 +4,12 @@ Wrapper sobre `picamera2`. Se nem picamera2 nem a câmera estiverem
 disponíveis (caso típico: rodando no Windows pra dev), `is_available`
 fica False e as telas mostram mensagem amigável.
 
-Face detection: usa Haar cascade do OpenCV (rodado na CPU em ~10fps no
-thread da câmera). Quando quiser usar o modelo on-sensor IMX500 real,
-trocar a parte de detecção sem mexer na interface pública.
+Truques importantes:
+- picamera2 'RGB888' é na verdade BGR — inverte canais antes do pygame
+- HFlip aplicado no ISP via libcamera.Transform (espelho tipo selfie cam)
+- Face detection (Haar do OpenCV) só roda se alguém chamou get_faces()
+  nos últimos FACE_REQUEST_TIMEOUT_S segundos — economiza CPU/calor quando
+  ninguém tá olhando
 
 Setup no Pi:
     sudo apt install python3-picamera2 imx500-models python3-opencv
@@ -23,10 +26,16 @@ import pygame
 # ----- imports opcionais -----
 HAS_PICAMERA = False
 Picamera2 = None
+Transform = None
 try:
     from picamera2 import Picamera2 as _Picamera2  # type: ignore
     Picamera2 = _Picamera2
     HAS_PICAMERA = True
+    try:
+        from libcamera import Transform as _Transform  # type: ignore
+        Transform = _Transform
+    except Exception:
+        Transform = None
 except Exception:
     pass
 
@@ -42,10 +51,17 @@ except Exception:
     cv2 = None  # type: ignore
 
 
-PREVIEW_W, PREVIEW_H = 320, 240
+# Preview em 800x480 — 1:1 com o display físico, sem perda na escala
+PREVIEW_W, PREVIEW_H = 800, 480
 PREVIEW_SIZE = (PREVIEW_W, PREVIEW_H)
 PREVIEW_FPS = 15
-FACE_EVERY_N_FRAMES = 3   # detecção é cara — rodar a cada N frames
+
+# Detecção de rosto roda numa versão pequena pra ficar rápida
+DETECT_W, DETECT_H = 320, 192
+
+# Quanto tempo manter detecção ativa após a última chamada de get_faces().
+# Se ninguém pede, cv2 nem é invocado → economiza CPU/calor.
+FACE_REQUEST_TIMEOUT_S = 4.0
 
 
 class CameraService:
@@ -57,6 +73,7 @@ class CameraService:
         self._lock = threading.Lock()
         self._latest_frame: Optional[pygame.Surface] = None
         self._latest_faces: list[tuple[int, int, int, int]] = []
+        self._last_face_request = 0.0
         self._stop_flag = False
 
         if not HAS_PICAMERA:
@@ -65,9 +82,10 @@ class CameraService:
 
         try:
             self._picam = Picamera2()
-            config = self._picam.create_preview_configuration(
-                main={"size": PREVIEW_SIZE, "format": "RGB888"}
-            )
+            kwargs = dict(main={"size": PREVIEW_SIZE, "format": "RGB888"})
+            if Transform is not None:
+                kwargs["transform"] = Transform(hflip=True)
+            config = self._picam.create_preview_configuration(**kwargs)
             self._picam.configure(config)
             self._picam.start()
             self.is_available = True
@@ -80,28 +98,40 @@ class CameraService:
 
     def _loop(self) -> None:
         frame_dt = 1.0 / PREVIEW_FPS
-        face_counter = 0
+        face_skip = 0
         while not self._stop_flag and self.is_available:
             t0 = time.time()
             try:
                 arr = self._picam.capture_array("main")
-                # picamera2 retorna (H, W, 3) — pygame.surfarray quer (W, H, 3)
-                surf = pygame.surfarray.make_surface(arr.transpose([1, 0, 2]))
+                # picamera2 'RGB888' é na verdade BGR — inverte canais
+                # depois transpoe (H,W,3) → (W,H,3) pro pygame.surfarray
+                surf = pygame.surfarray.make_surface(arr[:, :, ::-1].transpose([1, 0, 2]))
                 with self._lock:
                     self._latest_frame = surf
-                # face detection cada N frames
-                face_counter += 1
-                if HAS_CV2 and face_counter >= FACE_EVERY_N_FRAMES:
-                    face_counter = 0
-                    gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+                # Face detection só se alguém pediu recentemente
+                face_skip += 1
+                wants_faces = (HAS_CV2
+                               and time.time() - self._last_face_request < FACE_REQUEST_TIMEOUT_S)
+                if wants_faces and face_skip >= 3:
+                    face_skip = 0
+                    # downscale pra detecção (mais rápido)
+                    small = cv2.resize(arr, (DETECT_W, DETECT_H))
+                    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
                     faces = _face_cascade.detectMultiScale(
                         gray,
                         scaleFactor=1.2,
                         minNeighbors=4,
                         minSize=(28, 28),
                     )
+                    sx = PREVIEW_W / DETECT_W
+                    sy = PREVIEW_H / DETECT_H
+                    scaled = [(int(x*sx), int(y*sy), int(w*sx), int(h*sy))
+                              for (x, y, w, h) in faces]
                     with self._lock:
-                        self._latest_faces = [tuple(map(int, f)) for f in faces]
+                        self._latest_faces = scaled
+                elif not wants_faces:
+                    with self._lock:
+                        self._latest_faces = []
             except Exception:
                 pass
             elapsed = time.time() - t0
@@ -116,8 +146,10 @@ class CameraService:
             return self._latest_frame
 
     def get_faces(self) -> list[tuple[int, int, int, int]]:
-        """Lista de (x, y, w, h) em coords do preview (320x240)."""
+        """Lista de (x, y, w, h) em coords do preview. Marca interesse."""
+        now = time.time()
         with self._lock:
+            self._last_face_request = now
             return list(self._latest_faces)
 
     def capture_photo(self, target_dir: Path) -> Optional[Path]:

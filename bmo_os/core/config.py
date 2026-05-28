@@ -38,12 +38,13 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 DEFAULTS: dict = {
-    "idle_timeout_s": 10,      # quanto tempo a home espera sem input pra voltar
-    "ambient_mode": "clock",   # "clock" | "face" — tela ociosa
-    "theme": "auto",           # "auto" | "dark" | "light" — auto = claro 6h-18h
-    "brightness": 100,         # 0-100 — overlay de dimming no canvas
-    "todoist_token": "",       # token da REST API v2 do Todoist (env TODOIST_TOKEN ganha)
-    "todoist_project": "BMO",  # nome do projeto que vira o board
+    "idle_timeout_s": 10,           # quanto tempo a home espera sem input pra voltar
+    "ambient_mode": "clock",        # "clock" | "face" | "pong" | "invaders" | "shuffle"
+    "theme": "auto",                # "auto" | "dark" | "light" — auto = claro 6h-18h
+    "brightness": 100,              # 0-100 — overlay de dimming no canvas
+    "camera_face_tracking": False,  # BMO Face usa câmera pra seguir rosto? (off por padrão p/ não esquentar)
+    "todoist_token": "",            # token da REST API v2 do Todoist (env TODOIST_TOKEN ganha)
+    "todoist_project": "BMO",       # nome do projeto que vira o board
 }
 
 IDLE_TIMEOUT_OPTIONS = [5, 10, 15, 30, 60, 120]

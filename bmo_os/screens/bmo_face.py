@@ -178,6 +178,10 @@ class BMOFaceScreen:
         """Retorna (ox, oy) alvo dos olhos baseado no maior rosto detectado."""
         if self.camera is None or not getattr(self.camera, "is_available", False):
             return None
+        # Importa aqui pra evitar dep circular no topo do módulo
+        from ..core import config
+        if not config.get("camera_face_tracking"):
+            return None
         faces = self.camera.get_faces()
         if not faces:
             return None
