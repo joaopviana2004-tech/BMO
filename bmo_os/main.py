@@ -23,6 +23,7 @@ from bmo_os.screens.placeholder import PlaceholderScreen
 from bmo_os.screens.settings import SettingsScreen
 from bmo_os.screens.sleep import SleepScreen
 from bmo_os.screens.tasks import TasksScreen
+from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.todoist import TodoistService
 
 
@@ -33,6 +34,8 @@ def build_initial(app: App):
 
     # Singleton de Todoist (thread + cache vivem aqui)
     todoist = TodoistService()
+    # Detector de git updates (só usado pelo clock pra mostrar alerta)
+    git_updates = GitUpdatesService()
 
     def make_ambient():
         mode = config.get("ambient_mode")
@@ -40,7 +43,7 @@ def build_initial(app: App):
             if mode == "face":
                 ambient_cache[mode] = BMOFaceScreen(on_open_home=open_home)
             else:
-                ambient_cache[mode] = ClockScreen(on_open_home=open_home)
+                ambient_cache[mode] = ClockScreen(on_open_home=open_home, git_updates=git_updates)
         return ambient_cache[mode]
 
     def go_ambient() -> None:

@@ -35,9 +35,10 @@ def _ascii_upper(text: str) -> str:
 
 
 class ClockScreen:
-    def __init__(self, on_open_home) -> None:
+    def __init__(self, on_open_home, git_updates=None) -> None:
         self.on_open_home = on_open_home
         self.weather = WeatherService()
+        self.git_updates = git_updates
         self._t = 0.0
 
     def enter(self) -> None: ...
@@ -62,6 +63,7 @@ class ClockScreen:
         self._draw_weather(surface)
         self._draw_time(surface)
         self._draw_date(surface)
+        self._draw_update_alert(surface)
 
     # ---------- conteúdo ----------
 
@@ -95,6 +97,38 @@ class ClockScreen:
         small = render_text(ss, 14, DIM)
         sr = small.get_rect(midtop=(cx, rect.bottom + 6))
         surface.blit(small, sr)
+
+    def _draw_update_alert(self, surface: pygame.Surface) -> None:
+        if self.git_updates is None:
+            return
+        snap = self.git_updates.get()
+        if not snap.available:
+            return
+        # blink suave a cada ~1.4s pra chamar atenção sem ser irritante
+        blink = (self._t % 1.4) < 1.0
+        color = WHITE if blink else DIM
+
+        # centralizado verticalmente entre os segundos e a data
+        cy = 192
+        txt = render_text("ATUALIZACAO DISPONIVEL", 8, color)
+        gap = 6
+        tri_w = 14
+        total_w = tri_w + gap + txt.get_width()
+        start_x = (surface.get_width() - total_w) // 2
+
+        # triângulo de alerta (outline) com tip pra cima
+        tcx = start_x + tri_w // 2
+        pts = [
+            (tcx, cy - 5),
+            (tcx - 6, cy + 5),
+            (tcx + 6, cy + 5),
+        ]
+        pygame.draw.polygon(surface, color, pts, 2)
+        # "!" dentro: barra fina + ponto embaixo
+        pygame.draw.rect(surface, color, (tcx, cy - 2, 1, 4))
+        pygame.draw.rect(surface, color, (tcx, cy + 3, 1, 1))
+        # texto à direita do triângulo
+        surface.blit(txt, txt.get_rect(midleft=(start_x + tri_w + gap, cy)))
 
     def _draw_date(self, surface: pygame.Surface) -> None:
         now = dt.datetime.now()
