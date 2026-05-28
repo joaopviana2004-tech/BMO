@@ -12,6 +12,7 @@ import random
 import pygame
 
 from ..core import input as bmo_input
+from ..core import theme_state
 from ..core.theme import LOGICAL_SIZE, render_text
 
 # ---------- paleta ----------
@@ -327,11 +328,13 @@ class PongAmbientScreen:
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(BG)
         _draw_court(surface)
-        # scores discretos
-        s_l = render_text(str(self.core.score_left), 12, DIM)
-        s_r = render_text(str(self.core.score_right), 12, DIM)
-        surface.blit(s_l, s_l.get_rect(midtop=(LOGICAL_SIZE[0] // 3, 6)))
-        surface.blit(s_r, s_r.get_rect(midtop=(2 * LOGICAL_SIZE[0] // 3, 6)))
+        # scores nos cantos pra liberar o centro do topo pro relógio
+        s_l = render_text(str(self.core.score_left), 10, DIM, pixel=False)
+        s_r = render_text(str(self.core.score_right), 10, DIM, pixel=False)
+        surface.blit(s_l, s_l.get_rect(topleft=(8, 6)))
+        surface.blit(s_r, s_r.get_rect(topright=(LOGICAL_SIZE[0] - 8, 6)))
+        # mini-clock no topo-centro
+        theme_state.draw_mini_clock(surface, LOGICAL_SIZE[0] // 2, 4, WHITE)
         # paddles iguais (não tem player aqui)
         _draw_paddle(surface, PADDLE_LEFT_X + PADDLE_W // 2, int(self.core.left_y), WHITE)
         _draw_paddle(surface, PADDLE_RIGHT_X - PADDLE_W // 2, int(self.core.right_y), WHITE)

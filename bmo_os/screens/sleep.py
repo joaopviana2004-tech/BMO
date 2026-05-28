@@ -19,8 +19,14 @@ from ..core.widgets import (
     LOGICAL_SIZE,
 )
 
-MODES = ["clock", "face", "pong"]
-LABELS = {"clock": "CLOCK", "face": "BMO FACE", "pong": "PONG"}
+MODES = ["clock", "face", "pong", "invaders", "shuffle"]
+LABELS = {
+    "clock": "CLOCK",
+    "face": "BMO FACE",
+    "pong": "PONG",
+    "invaders": "INVADERS",
+    "shuffle": "VARIADO",
+}
 
 
 class SleepScreen:
@@ -83,9 +89,9 @@ class SleepScreen:
         self._draw_hint(surface)
 
     def _tile_rects(self):
-        # 3 tiles em linha, centrados horizontalmente
-        tile_w = tile_h = 60
-        gap = 14
+        # 5 tiles em linha, centrados horizontalmente
+        tile_w = tile_h = 50
+        gap = 10
         total_w = len(MODES) * tile_w + (len(MODES) - 1) * gap
         start_x = (LOGICAL_SIZE[0] - total_w) // 2
         y = 64
@@ -108,8 +114,12 @@ class SleepScreen:
                 self._draw_clock_preview(surface, rect, selected)
             elif mode == "face":
                 self._draw_face_preview(surface, rect, selected)
-            else:
+            elif mode == "pong":
                 self._draw_pong_preview(surface, rect, selected)
+            elif mode == "invaders":
+                self._draw_invaders_preview(surface, rect, selected)
+            else:
+                self._draw_shuffle_preview(surface, rect, selected)
             lbl = render_text(LABELS[mode], 8, color)
             surface.blit(lbl, lbl.get_rect(midtop=(rect.centerx, rect.bottom + 5)))
             if selected:
@@ -127,16 +137,51 @@ class SleepScreen:
     def _draw_pong_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
         c = CRT_WHITE if bright else CRT_DIM
         # 2 paddles
-        pygame.draw.rect(surface, c, (rect.left + 6, rect.centery - 8, 2, 16))
-        pygame.draw.rect(surface, c, (rect.right - 8, rect.centery - 8, 2, 16))
+        pygame.draw.rect(surface, c, (rect.left + 5, rect.centery - 7, 2, 14))
+        pygame.draw.rect(surface, c, (rect.right - 7, rect.centery - 7, 2, 14))
         # linha tracejada do meio
-        for y in range(rect.top + 8, rect.bottom - 6, 6):
+        for y in range(rect.top + 6, rect.bottom - 4, 6):
             pygame.draw.rect(surface, c, (rect.centerx - 1, y, 2, 3))
-        # bola animada (vai-e-vem)
-        usable = rect.width - 18
-        phase = (math.sin(self._t * 1.6) + 1) / 2   # 0..1
-        bx = rect.left + 10 + int(usable * phase)
-        pygame.draw.rect(surface, c, (bx - 2, rect.centery - 2, 3, 3))
+        # bola animada
+        usable = rect.width - 16
+        phase = (math.sin(self._t * 1.6) + 1) / 2
+        bx = rect.left + 8 + int(usable * phase)
+        pygame.draw.rect(surface, c, (bx - 1, rect.centery - 1, 3, 3))
+
+    def _draw_invaders_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
+        c = CRT_WHITE if bright else CRT_DIM
+        # alien em cima
+        cx = rect.centerx
+        ay = rect.top + 12
+        pygame.draw.rect(surface, c, (cx - 6, ay, 12, 5))
+        pygame.draw.rect(surface, c, (cx - 8, ay + 2, 2, 2))
+        pygame.draw.rect(surface, c, (cx + 6, ay + 2, 2, 2))
+        # bala subindo
+        bullet_y = rect.bottom - 14 - int((self._t * 30) % 22)
+        pygame.draw.rect(surface, c, (cx - 1, bullet_y, 2, 4))
+        # nave embaixo
+        sy = rect.bottom - 10
+        pygame.draw.polygon(surface, c, [
+            (cx - 8, sy + 4), (cx - 6, sy), (cx + 6, sy), (cx + 8, sy + 4),
+        ])
+        pygame.draw.rect(surface, c, (cx - 1, sy - 2, 2, 2))
+
+    def _draw_shuffle_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
+        c = CRT_WHITE if bright else CRT_DIM
+        # 2 setas curvas cruzadas (ícone de shuffle universal)
+        m = 8
+        pygame.draw.line(surface, c, (rect.left + m, rect.top + m + 2),
+                         (rect.right - m, rect.bottom - m - 2), 2)
+        pygame.draw.line(surface, c, (rect.left + m, rect.bottom - m - 2),
+                         (rect.right - m, rect.top + m + 2), 2)
+        # pontas de seta
+        for end_x, end_y, dx, dy in (
+            (rect.right - m, rect.bottom - m - 2, -4, -1),
+            (rect.right - m, rect.bottom - m - 2, -1, -4),
+            (rect.right - m, rect.top + m + 2, -4, 1),
+            (rect.right - m, rect.top + m + 2, -1, 4),
+        ):
+            pygame.draw.line(surface, c, (end_x, end_y), (end_x + dx, end_y + dy), 2)
 
     def _draw_face_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
         c = CRT_WHITE if bright else CRT_DIM

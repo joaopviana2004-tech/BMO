@@ -13,6 +13,7 @@ import random
 import pygame
 
 from ..core import input as bmo_input
+from ..core import theme_state
 from ..core.theme import LOGICAL_SIZE, render_text
 
 # Paleta inspirada nas referências
@@ -215,6 +216,8 @@ class BMOFaceScreen:
         bob = int(math.sin(self._t * 1.5) * 1.2)
         self._draw_eyes(surface, eye_style, bob, eyebrow)
         self._draw_mouth(surface, mouth_style, bob)
+        # mini-clock no topo-centro (cor que combina com o verde)
+        theme_state.draw_mini_clock(surface, LOGICAL_SIZE[0] // 2, 4, HINT)
         self._draw_menu_hint(surface)
 
     def _draw_eyes(self, surface: pygame.Surface, style: str, bob: int, eyebrow: str | None) -> None:

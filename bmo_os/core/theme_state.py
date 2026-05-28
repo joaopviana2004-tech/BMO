@@ -1,4 +1,4 @@
-"""Tema (dark/light/auto) + barra de status do BMO OS.
+"""Tema (dark/light/auto) + barra de status + mini-clock do BMO OS.
 
 Aplica o tema mutando in-place os pygame.Color de widgets.CRT_*. Como Color
 é mutável, todos os screens que importam essas constantes (mesmo via
@@ -6,6 +6,7 @@ Aplica o tema mutando in-place os pygame.Color de widgets.CRT_*. Como Color
 sem precisar re-importar.
 
 Status bar (canto sup-direito): sol/lua, sinal (mock 4/4), bateria (mock 100%).
+Mini-clock: HH:MM pequeno pras telas idle que não são o clock-screen em si.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ import math
 import pygame
 
 from . import config, widgets
+from .theme import render_text
 
 DARK = {
     "bg":   (0, 0, 0),
@@ -115,3 +117,10 @@ def _draw_moon(surface, cx: int, cy: int, fg, bg) -> None:
     # crescente: círculo fg cheio - círculo bg com offset
     pygame.draw.circle(surface, fg, (cx, cy), 4)
     pygame.draw.circle(surface, bg, (cx + 2, cy - 1), 4)
+
+
+def draw_mini_clock(surface: pygame.Surface, x: int, y: int, color) -> None:
+    """HH:MM pequeno (10pt consolas), midtop em (x, y)."""
+    now = dt.datetime.now()
+    txt = render_text(now.strftime("%H:%M"), 10, color, pixel=False)
+    surface.blit(txt, txt.get_rect(midtop=(x, y)))

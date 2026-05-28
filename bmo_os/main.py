@@ -22,8 +22,9 @@ from bmo_os.screens.games import GamesScreen, draw_pong_icon, draw_space_invader
 from bmo_os.screens.home import HomeScreen
 from bmo_os.screens.pong import PongAmbientScreen, PongScreen
 from bmo_os.screens.settings import SettingsScreen
+from bmo_os.screens.shuffler import ShufflingAmbientScreen
 from bmo_os.screens.sleep import SleepScreen
-from bmo_os.screens.space_invaders import SpaceInvadersScreen
+from bmo_os.screens.space_invaders import SpaceInvadersAmbientScreen, SpaceInvadersScreen
 from bmo_os.screens.tasks import TasksScreen
 from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.todoist import TodoistService
@@ -39,15 +40,29 @@ def build_initial(app: App):
     # Detector de git updates (só usado pelo clock pra mostrar alerta)
     git_updates = GitUpdatesService()
 
+    def _instantiate_ambient(mode):
+        if mode == "face":
+            return BMOFaceScreen(on_open_home=open_home)
+        if mode == "pong":
+            return PongAmbientScreen(on_open_home=open_home)
+        if mode == "invaders":
+            return SpaceInvadersAmbientScreen(on_open_home=open_home)
+        # default: clock
+        return ClockScreen(on_open_home=open_home, git_updates=git_updates)
+
     def make_ambient():
         mode = config.get("ambient_mode")
         if mode not in ambient_cache:
-            if mode == "face":
-                ambient_cache[mode] = BMOFaceScreen(on_open_home=open_home)
-            elif mode == "pong":
-                ambient_cache[mode] = PongAmbientScreen(on_open_home=open_home)
+            if mode == "shuffle":
+                # cria todas as ambient screens uma vez e deixa o shuffler ciclar
+                ambient_cache[mode] = ShufflingAmbientScreen([
+                    _instantiate_ambient("clock"),
+                    _instantiate_ambient("face"),
+                    _instantiate_ambient("pong"),
+                    _instantiate_ambient("invaders"),
+                ])
             else:
-                ambient_cache[mode] = ClockScreen(on_open_home=open_home, git_updates=git_updates)
+                ambient_cache[mode] = _instantiate_ambient(mode)
         return ambient_cache[mode]
 
     def go_ambient() -> None:

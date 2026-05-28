@@ -47,8 +47,14 @@ DEFAULTS: dict = {
 }
 
 IDLE_TIMEOUT_OPTIONS = [5, 10, 15, 30, 60, 120]
-AMBIENT_MODE_OPTIONS = ["clock", "face", "pong"]
-AMBIENT_MODE_LABELS = {"clock": "RELOGIO", "face": "BMO FACE", "pong": "PONG"}
+AMBIENT_MODE_OPTIONS = ["clock", "face", "pong", "invaders", "shuffle"]
+AMBIENT_MODE_LABELS = {
+    "clock": "RELOGIO",
+    "face": "BMO FACE",
+    "pong": "PONG",
+    "invaders": "INVADERS",
+    "shuffle": "VARIADO",
+}
 BRIGHTNESS_OPTIONS = [20, 40, 60, 80, 100]
 
 _lock = Lock()

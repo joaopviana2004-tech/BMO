@@ -13,6 +13,7 @@ import random
 import pygame
 
 from ..core import input as bmo_input
+from ..core import theme_state
 from ..core.theme import LOGICAL_SIZE, render_text
 
 # ---------- paleta ----------
@@ -439,3 +440,174 @@ class SpaceInvadersScreen:
         h = render_text(hint, 9, DIM, pixel=False)
         surface.blit(t, t.get_rect(center=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] // 2 - 8)))
         surface.blit(h, h.get_rect(center=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] // 2 + 14)))
+
+
+# ---------- AMBIENT (BMO joga sozinho) ----------
+
+class SpaceInvadersAmbientScreen:
+    """Modo idle: a nave fica vagando e caça inimigos isolados que aparecem."""
+
+    def __init__(self, on_open_home) -> None:
+        self.on_open_home = on_open_home
+        self._t = 0.0
+        # Reusa o helper de estrelas de SpaceInvadersScreen (3 camadas parallax)
+        self.stars: list[_Star] = []
+        for layer in STAR_LAYERS:
+            for _ in range(layer["count"]):
+                self.stars.append(_Star(
+                    x=random.uniform(0, LOGICAL_SIZE[0]),
+                    y=random.uniform(0, LOGICAL_SIZE[1]),
+                    speed=layer["speed"],
+                    size=layer["size"],
+                    color=layer["color"],
+                ))
+        self.player_x = LOGICAL_SIZE[0] / 2
+        self.target_x = self.player_x
+        self.target_change_at = 0.0
+        self.bullets: list[_Bullet] = []
+        self.fire_timer = 0.0
+        self.enemy: _Enemy | None = None
+        self.enemy_vx = 0.0
+        self.next_enemy_at = 3.0
+        self.score = 0
+
+    def enter(self) -> None: ...
+    def exit(self) -> None: ...
+
+    def handle_event(self, event: pygame.event.Event) -> None:
+        if event.type != bmo_input.ACTION_EVENT:
+            return
+        if event.action in (bmo_input.Action.TAP, bmo_input.Action.A, bmo_input.Action.MENU):
+            self.on_open_home()
+
+    def update(self, dt: float) -> None:
+        self._t += dt
+        self._update_stars(dt)
+
+        # decide target da nave: se tem inimigo, persegue; senão wandering
+        if self._t >= self.target_change_at:
+            if self.enemy is not None:
+                self.target_x = self.enemy.x
+                self.target_change_at = self._t + 0.25
+            else:
+                self.target_x = random.uniform(40, LOGICAL_SIZE[0] - 40)
+                self.target_change_at = self._t + random.uniform(2.0, 5.0)
+
+        # move a nave
+        self.player_x += (self.target_x - self.player_x) * 0.13
+        half = PLAYER_W / 2
+        self.player_x = max(half + 4, min(LOGICAL_SIZE[0] - half - 4, self.player_x))
+
+        # spawn de inimigo isolado
+        if self.enemy is None and self._t >= self.next_enemy_at:
+            self.enemy = _Enemy(
+                x=random.uniform(40, LOGICAL_SIZE[0] - 40),
+                y=random.uniform(46, 80),
+                row=random.randint(0, 3),
+            )
+            self.enemy_vx = random.choice([-1, 1]) * random.uniform(22, 45)
+
+        # move o inimigo (vagueia lateral + desce devagar)
+        if self.enemy is not None:
+            self.enemy.x += self.enemy_vx * dt
+            self.enemy.y += 7 * dt
+            if self.enemy.x < 20:
+                self.enemy.x = 20
+                self.enemy_vx = abs(self.enemy_vx)
+            elif self.enemy.x > LOGICAL_SIZE[0] - 20:
+                self.enemy.x = LOGICAL_SIZE[0] - 20
+                self.enemy_vx = -abs(self.enemy_vx)
+            # se chegou no chão sem ser abatido, escapa
+            if self.enemy.y > 170:
+                self.enemy = None
+                self.next_enemy_at = self._t + random.uniform(5.0, 14.0)
+
+        # atira só quando tem alvo E está mais ou menos alinhado
+        if self.enemy is not None and abs(self.player_x - self.enemy.x) < 10:
+            self.fire_timer += dt
+            if self.fire_timer >= FIRE_INTERVAL_S:
+                self.fire_timer = 0.0
+                self.bullets.append(_Bullet(
+                    self.player_x, PLAYER_Y - PLAYER_H / 2 - 4, -PLAYER_BULLET_SPEED,
+                ))
+        else:
+            self.fire_timer = max(0.0, self.fire_timer - dt)
+
+        # bullets sobem
+        for b in self.bullets:
+            b.y += b.vy * dt
+        self.bullets = [b for b in self.bullets if b.y > -BULLET_H]
+
+        # colisão bullet vs inimigo
+        if self.enemy is not None:
+            for b in self.bullets:
+                if (abs(b.x - self.enemy.x) < ENEMY_W / 2
+                        and abs(b.y - self.enemy.y) < ENEMY_H / 2):
+                    self.score += 10
+                    self.enemy = None
+                    self.next_enemy_at = self._t + random.uniform(5.0, 14.0)
+                    self.bullets.remove(b)
+                    break
+
+    def _update_stars(self, dt: float) -> None:
+        h = LOGICAL_SIZE[1]
+        w = LOGICAL_SIZE[0]
+        for s in self.stars:
+            s.y += s.speed * dt
+            if s.y > h:
+                s.y = -s.size
+                s.x = random.uniform(0, w)
+
+    def draw(self, surface: pygame.Surface) -> None:
+        surface.fill(BG)
+        # estrelas no fundo
+        for s in self.stars:
+            pygame.draw.rect(surface, s.color, (int(s.x), int(s.y), s.size, s.size))
+        # mini relógio centro-top
+        theme_state.draw_mini_clock(surface, LOGICAL_SIZE[0] // 2, 6, WHITE)
+        # placar discreto à esquerda
+        sc = render_text(f"SCORE {self.score:04d}", 7, DIM, pixel=False)
+        surface.blit(sc, sc.get_rect(topleft=(8, 7)))
+
+        # inimigo (se houver)
+        if self.enemy is not None:
+            sprite = ENEMY_SPRITES[self.enemy.row]
+            color_map = {"X": ENEMY_BODY_COLORS[self.enemy.row]}
+            top_x = int(self.enemy.x - ENEMY_W // 2)
+            top_y = int(self.enemy.y - ENEMY_H // 2)
+            _draw_sprite(surface, sprite, top_x, top_y, color_map)
+
+        # bullets do player
+        for b in self.bullets:
+            pygame.draw.rect(surface, (180, 180, 100),
+                             (int(b.x) - BULLET_W // 2 - 1, int(b.y) - 1, BULLET_W + 2, BULLET_H + 2))
+            pygame.draw.rect(surface, BULLET_COLOR,
+                             (int(b.x) - BULLET_W // 2, int(b.y), BULLET_W, BULLET_H))
+
+        # nave (com chama)
+        px = int(self.player_x)
+        top_x = px - PLAYER_W // 2
+        top_y = PLAYER_Y - PLAYER_H // 2
+        self._draw_engine_flame(surface, px, top_y + PLAYER_H)
+        _draw_sprite(surface, PLAYER_SPRITE, top_x, top_y, PLAYER_COLORS)
+
+    def _draw_engine_flame(self, surface, cx: int, base_y: int) -> None:
+        phase = (self._t * 14) % 1.0
+        extra = int(phase * 4)
+        pygame.draw.polygon(surface, (255, 90, 40), [
+            (cx - 6, base_y - 1),
+            (cx - 3, base_y + 5 + extra),
+            (cx + 3, base_y + 5 + extra),
+            (cx + 6, base_y - 1),
+        ])
+        pygame.draw.polygon(surface, (255, 180, 60), [
+            (cx - 4, base_y - 1),
+            (cx - 2, base_y + 4 + extra),
+            (cx + 2, base_y + 4 + extra),
+            (cx + 4, base_y - 1),
+        ])
+        pygame.draw.polygon(surface, (255, 240, 150), [
+            (cx - 2, base_y - 1),
+            (cx, base_y + 3 + extra),
+            (cx + 2, base_y - 1),
+        ])
