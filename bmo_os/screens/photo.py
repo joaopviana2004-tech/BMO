@@ -29,6 +29,7 @@ class PhotoScreen:
         self._toast = ""
         self._toast_until = 0.0
         self._photo_count = self._count_existing_photos()
+        self._debug = False
 
     def _count_existing_photos(self) -> int:
         try:
@@ -55,6 +56,9 @@ class PhotoScreen:
         if action == bmo_input.Action.TAP and pos is not None:
             if self._back_btn().collidepoint(pos):
                 self.on_back()
+                return
+            if self._debug_btn_rect().collidepoint(pos):
+                self._debug = not self._debug
                 return
             if self._shoot_btn_rect().collidepoint(pos):
                 self._capture()
@@ -87,6 +91,10 @@ class PhotoScreen:
             size, size,
         )
 
+    def _debug_btn_rect(self) -> pygame.Rect:
+        # canto inf-direito, pequeno
+        return pygame.Rect(LOGICAL_SIZE[0] - 26, LOGICAL_SIZE[1] - 26, 20, 20)
+
     # ---------- draw ----------
 
     def draw(self, surface: pygame.Surface) -> None:
@@ -97,6 +105,9 @@ class PhotoScreen:
         # — câmera é fullscreen)
         theme_state.draw_status_bar(surface, top_pad=6, right_pad=8)
         self._draw_shoot_btn(surface)
+        self._draw_debug_btn(surface)
+        if self._debug:
+            self._draw_debug_overlay(surface)
         if self._t < self._flash_until:
             self._draw_flash(surface)
         if self._t < self._toast_until and self._toast:
@@ -187,6 +198,50 @@ class PhotoScreen:
         # ponto vermelho interno
         inner_color = (230, 80, 80) if self.camera.is_available else CRT_DIM
         pygame.draw.circle(surface, inner_color, (cx, cy), r_outer - 5)
+
+    def _draw_debug_btn(self, surface) -> None:
+        rect = self._debug_btn_rect()
+        bg = pygame.Surface((rect.width, rect.height))
+        bg.fill((0, 0, 0))
+        bg.set_alpha(140)
+        surface.blit(bg, rect.topleft)
+        color = (255, 220, 80) if self._debug else CRT_WHITE
+        pygame.draw.rect(surface, color, rect, 1)
+        # "i" letra simples
+        cx = rect.centerx
+        pygame.draw.rect(surface, color, (cx - 1, rect.top + 4, 2, 2))
+        pygame.draw.rect(surface, color, (cx - 1, rect.top + 8, 2, 8))
+
+    def _draw_debug_overlay(self, surface) -> None:
+        faces = self.camera.get_faces()
+        cam_w, cam_h = self.camera.preview_size
+        lines = [
+            f"PREVIEW {cam_w}x{cam_h}",
+            f"FPS:        {self.camera.fps:5.1f}",
+            f"HFLIP:      {'ON' if self.camera.hflip else 'OFF'}",
+            f"DETECTOR:   {self.camera.detector_status}",
+            f"FACES:      {len(faces)}",
+        ]
+        for i, (fx, fy, fw, fh) in enumerate(faces[:3]):
+            lines.append(f"  #{i+1}: {fw}x{fh} @ ({fx},{fy})")
+
+        rendered = [render_text(line, 8, CRT_WHITE, pixel=False) for line in lines]
+        max_w = max(r.get_width() for r in rendered)
+        line_h = rendered[0].get_height()
+        total_h = len(rendered) * line_h + (len(rendered) - 1) * 2 + 10
+
+        bg = pygame.Surface((max_w + 14, total_h))
+        bg.fill((0, 0, 0))
+        bg.set_alpha(180)
+        bg_pos = (6, LOGICAL_SIZE[1] - total_h - 30)
+        surface.blit(bg, bg_pos)
+        pygame.draw.rect(surface, (255, 220, 80),
+                         (bg_pos[0], bg_pos[1], max_w + 14, total_h), 1)
+
+        y = bg_pos[1] + 5
+        for r in rendered:
+            surface.blit(r, (bg_pos[0] + 7, y))
+            y += line_h + 2
 
     def _draw_flash(self, surface) -> None:
         flash = pygame.Surface(LOGICAL_SIZE)

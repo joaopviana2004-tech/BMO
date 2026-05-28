@@ -69,11 +69,14 @@ class CameraService:
         self.preview_size = PREVIEW_SIZE
         self.is_available = False
         self.error = ""
+        self.fps = 0.0
         self._picam = None
         self._lock = threading.Lock()
         self._latest_frame: Optional[pygame.Surface] = None
         self._latest_faces: list[tuple[int, int, int, int]] = []
         self._last_face_request = 0.0
+        self._frame_count = 0
+        self._fps_window_start = time.time()
         self._stop_flag = False
 
         if not HAS_PICAMERA:
@@ -108,6 +111,14 @@ class CameraService:
                 surf = pygame.surfarray.make_surface(arr[:, :, ::-1].transpose([1, 0, 2]))
                 with self._lock:
                     self._latest_frame = surf
+                # FPS rolling 1s
+                self._frame_count += 1
+                now = time.time()
+                window = now - self._fps_window_start
+                if window >= 1.0:
+                    self.fps = self._frame_count / window
+                    self._frame_count = 0
+                    self._fps_window_start = now
                 # Face detection só se alguém pediu recentemente
                 face_skip += 1
                 wants_faces = (HAS_CV2
@@ -172,3 +183,16 @@ class CameraService:
             except Exception:
                 pass
         self.is_available = False
+
+    @property
+    def detector_status(self) -> str:
+        """ACTIVE se cv2 tá rodando agora; IDLE se ngm pediu; OFF se sem cv2."""
+        if not HAS_CV2:
+            return "OFF (no cv2)"
+        if time.time() - self._last_face_request > FACE_REQUEST_TIMEOUT_S:
+            return "IDLE"
+        return "ACTIVE"
+
+    @property
+    def hflip(self) -> bool:
+        return Transform is not None
