@@ -18,6 +18,7 @@ from bmo_os.core.app import App
 from bmo_os.screens.clock import ClockScreen
 from bmo_os.screens.home import HomeScreen
 from bmo_os.screens.placeholder import PlaceholderScreen
+from bmo_os.screens.settings import SettingsScreen
 from bmo_os.screens.sleep import SleepScreen
 
 
@@ -30,7 +31,7 @@ def build_initial(app: App):
             on_back=app.manager.pop,
             on_open_sleep=lambda: app.manager.push(SleepScreen(on_back=app.manager.pop)),
             on_open_games=lambda: app.manager.push(PlaceholderScreen("BMO'S GAMES", app.manager.pop)),
-            on_open_settings=lambda: app.manager.push(PlaceholderScreen("SETTINGS", app.manager.pop)),
+            on_open_settings=lambda: app.manager.push(SettingsScreen(on_back=app.manager.pop)),
         )
 
     return ClockScreen(on_open_home=open_home)
