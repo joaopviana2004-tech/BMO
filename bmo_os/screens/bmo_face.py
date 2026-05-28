@@ -1,8 +1,9 @@
 """Modo ambient 'BMO FACE' — pet virtual procedural.
 
-Os olhos seguem o dedo, BMO reage quando você solta (sorri, surpresa, pisca)
-e de vez em quando faz uma animação sozinho (olhar pros lados, sorrir, blink).
-Tudo desenhado em runtime — nada de sprite.
+Inspirado nas faces do projeto be-more-agent: traços limpos pretos sobre
+fundo verde pastel, sem painel/borda. Expressões alternam entre idle,
+tracking (segue o dedo), reações (happy/surprised/wink/speak) e animações
+espontâneas (blink, look around, think, sleepy). Tudo desenhado em runtime.
 """
 from __future__ import annotations
 
@@ -14,40 +15,42 @@ import pygame
 from ..core import input as bmo_input
 from ..core.theme import LOGICAL_SIZE, render_text
 
-# Paleta BMO (corpo verde claro, traços bem escuros pra contraste)
-BMO_GREEN = (172, 230, 167)
-BMO_GREEN_DARK = (118, 178, 120)
-BMO_EYE = (12, 22, 14)
-BMO_WHITE = (240, 250, 235)
-BMO_BLUSH = (240, 150, 160)
-BMO_HINT = (90, 140, 95)
+# Paleta inspirada nas referências
+BMO_GREEN      = (186, 247, 200)   # fundo
+BMO_GREEN_DEEP = (55, 130, 80)     # interior da boca aberta
+BLACK          = (15, 22, 18)
+WHITE          = (245, 252, 245)
+HINT           = (110, 170, 130)
 
-# Posições base no canvas 400x240
-LEFT_EYE_BASE = (140, 100)
-RIGHT_EYE_BASE = (260, 100)
-EYE_R = 16
-MOUTH_CENTER = (200, 160)
+# Geometria base (canvas 400x240)
+LEFT_EYE  = (140, 102)
+RIGHT_EYE = (260, 102)
+MOUTH     = (200, 162)
+EYE_R     = 11
+STROKE    = 3
 
-EYE_MAX_OFFSET = 12   # raio máximo do olhar (pra olho não sair da face)
-TRACK_FACTOR = 0.07   # fator que converte distância do dedo em offset
+REACTIONS = ["HAPPY", "SURPRISED", "WINK_LEFT", "WINK_RIGHT", "SPEAK"]
+IDLE_ANIMS = [
+    "BLINK", "DOUBLE_BLINK",
+    "LOOK_LEFT", "LOOK_RIGHT", "LOOK_UP",
+    "SMILE", "THINK", "SPEAK", "SLEEPY",
+]
 
-REACTION_DURATION = 1.6
-IDLE_ANIM_DURATION = 1.4
-IDLE_NEXT_MIN = 4.0
-IDLE_NEXT_MAX = 9.0
+REACTION_DURATION   = 1.6
+IDLE_ANIM_DURATION  = 1.5
+IDLE_NEXT_MIN       = 3.5
+IDLE_NEXT_MAX       = 8.0
 
-REACTIONS = ["HAPPY", "SURPRISED", "WINK", "HEART"]
-IDLE_ANIMS = ["BLINK", "LOOK_LEFT", "LOOK_RIGHT", "LOOK_UP", "SMILE", "DOUBLE_BLINK"]
+EYE_MAX_OFFSET = 10
+TRACK_FACTOR   = 0.06
 
 
 def _to_logical(pos: tuple[int, int]) -> tuple[int, int]:
     """Converte coords da janela física pro canvas lógico 400x240."""
-    win_w, win_h = pygame.display.get_window_size()
-    if win_w <= 0 or win_h <= 0:
+    w, h = pygame.display.get_window_size()
+    if w <= 0 or h <= 0:
         return pos
-    lx = pos[0] * LOGICAL_SIZE[0] // win_w
-    ly = pos[1] * LOGICAL_SIZE[1] // win_h
-    return (lx, ly)
+    return (pos[0] * LOGICAL_SIZE[0] // w, pos[1] * LOGICAL_SIZE[1] // h)
 
 
 class BMOFaceScreen:
@@ -80,7 +83,7 @@ class BMOFaceScreen:
         if event.type == bmo_input.ACTION_EVENT:
             self._handle_action(event)
             return
-        # Eventos raw pra detectar drag e release do dedo
+        # raw events pra detectar drag e release do dedo
         if event.type == pygame.MOUSEMOTION:
             if pygame.mouse.get_pressed()[0] and self.state == "TRACKING":
                 self._touch_pos = _to_logical(event.pos)
@@ -91,19 +94,16 @@ class BMOFaceScreen:
 
     def _handle_action(self, event) -> None:
         action = event.action
-        if action == bmo_input.Action.MENU or action == bmo_input.Action.B:
+        if action in (bmo_input.Action.MENU, bmo_input.Action.B):
             self.on_open_home()
             return
         if action == bmo_input.Action.A:
-            # interpreta A como "fazer carinho rápido"
             self._start_reaction(forced="HAPPY")
             return
         if action == bmo_input.Action.TAP and event.pos is not None:
-            # Toque no canto sup direito = abrir home
             if self._menu_hint_rect().collidepoint(event.pos):
                 self.on_open_home()
                 return
-            # Começa a seguir o dedo
             self._touch_pos = event.pos
             self.state = "TRACKING"
             self.reaction = None
@@ -117,11 +117,8 @@ class BMOFaceScreen:
         cx, cy = LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] // 2
         ox = (tx - cx) * TRACK_FACTOR
         oy = (ty - cy) * TRACK_FACTOR
-        # clamp pra olho não sair do rosto
-        ox = max(-EYE_MAX_OFFSET, min(EYE_MAX_OFFSET, ox))
-        oy = max(-EYE_MAX_OFFSET, min(EYE_MAX_OFFSET, oy))
-        self._target_ox = ox
-        self._target_oy = oy
+        self._target_ox = max(-EYE_MAX_OFFSET, min(EYE_MAX_OFFSET, ox))
+        self._target_oy = max(-EYE_MAX_OFFSET, min(EYE_MAX_OFFSET, oy))
 
     def _start_reaction(self, *, forced: str | None = None) -> None:
         self.reaction = forced or random.choice(REACTIONS)
@@ -150,129 +147,163 @@ class BMOFaceScreen:
         elif self.state == "IDLE" and self._t >= self.next_idle_at:
             self._start_idle_anim()
 
-        # alvos do olhar conforme estado
+        # alvo do olhar conforme estado
         if self.state == "IDLE_ANIM":
             if self.idle_anim == "LOOK_LEFT":
-                self._target_ox, self._target_oy = -10.0, 0.0
+                self._target_ox, self._target_oy = -8.0, 0.0
             elif self.idle_anim == "LOOK_RIGHT":
-                self._target_ox, self._target_oy = 10.0, 0.0
+                self._target_ox, self._target_oy = 8.0, 0.0
             elif self.idle_anim == "LOOK_UP":
-                self._target_ox, self._target_oy = 0.0, -8.0
+                self._target_ox, self._target_oy = 0.0, -6.0
             else:
-                self._target_ox, self._target_oy = 0.0, 0.0
+                self._target_ox *= 0.85
+                self._target_oy *= 0.85
         elif self.state == "IDLE":
-            # respirar suavemente e relaxar
-            self._target_ox *= 0.92
-            self._target_oy *= 0.92
+            self._target_ox *= 0.9
+            self._target_oy *= 0.9
 
         # easing pros olhos
         self._eye_ox += (self._target_ox - self._eye_ox) * 0.18
         self._eye_oy += (self._target_oy - self._eye_oy) * 0.18
 
+    # ---------- expression ----------
+
+    def _current_expression(self) -> tuple[str, str, str | None]:
+        """Retorna (eye_style, mouth_style, eyebrow) p/ o estado atual."""
+        if self.state == "REACTING":
+            r = self.reaction
+            if r == "HAPPY":      return ("V_HAPPY", "SMILE", None)
+            if r == "SURPRISED":  return ("BIG", "O_OPEN", None)
+            if r == "WINK_LEFT":  return ("WINK_LEFT", "SMILE", None)
+            if r == "WINK_RIGHT": return ("WINK_RIGHT", "SMILE", None)
+            if r == "SPEAK":      return ("DOT", self._speak_frame(), None)
+        if self.state == "TRACKING":
+            return ("DOT", "SMILE", None)
+        if self.state == "IDLE_ANIM":
+            a = self.idle_anim
+            if a == "BLINK":        return ("LINE", "DASH", None)
+            if a == "DOUBLE_BLINK": return (self._double_blink_eye(), "DASH", None)
+            if a in ("LOOK_LEFT", "LOOK_RIGHT", "LOOK_UP"):
+                return ("DOT", "DASH", None)
+            if a == "SMILE":        return ("DOT", "SMILE", None)
+            if a == "THINK":        return ("DOT", "SMILE", "FLAT")
+            if a == "SPEAK":        return ("DOT", self._speak_frame(), None)
+            if a == "SLEEPY":       return ("U_CLOSED", "DASH", None)
+        return ("U_CLOSED", "DASH", None)
+
+    def _speak_frame(self) -> str:
+        # cicla 3 bocas de fala a ~6Hz
+        frame = int(self._t * 6) % 3
+        return ["SPEAK_SMALL", "SPEAK_BIG", "SPEAK_MED"][frame]
+
+    def _double_blink_eye(self) -> str:
+        # 3 fases: fecha / abre / fecha
+        elapsed = IDLE_ANIM_DURATION - (self.idle_anim_until - self._t)
+        phase = elapsed / IDLE_ANIM_DURATION
+        if phase < 0.28 or (0.5 < phase < 0.78):
+            return "LINE"
+        return "DOT"
+
     # ---------- draw ----------
 
     def _menu_hint_rect(self) -> pygame.Rect:
-        return pygame.Rect(LOGICAL_SIZE[0] - 50, 4, 46, 16)
+        return pygame.Rect(LOGICAL_SIZE[0] - 48, 4, 44, 14)
 
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(BMO_GREEN)
-        self._draw_face_panel(surface)
-        self._draw_eyes(surface)
-        self._draw_mouth(surface)
-        self._draw_blush(surface)
+        eye_style, mouth_style, eyebrow = self._current_expression()
+        bob = int(math.sin(self._t * 1.5) * 1.2)
+        self._draw_eyes(surface, eye_style, bob, eyebrow)
+        self._draw_mouth(surface, mouth_style, bob)
         self._draw_menu_hint(surface)
 
-    def _draw_face_panel(self, surface: pygame.Surface) -> None:
-        # leve respirar do corpo
-        bob = int(math.sin(self._t * 1.3) * 1.2)
-        panel = pygame.Rect(28, 30 + bob, LOGICAL_SIZE[0] - 56, LOGICAL_SIZE[1] - 60)
-        pygame.draw.rect(surface, BMO_GREEN_DARK, panel, 0, border_radius=10)
-        pygame.draw.rect(surface, BMO_EYE, panel, 2, border_radius=10)
-
-    def _draw_eyes(self, surface: pygame.Surface) -> None:
+    def _draw_eyes(self, surface: pygame.Surface, style: str, bob: int, eyebrow: str | None) -> None:
         ox = int(round(self._eye_ox))
         oy = int(round(self._eye_oy))
-        bob = int(math.sin(self._t * 1.3) * 1.2)
-        lx, ly = LEFT_EYE_BASE[0], LEFT_EYE_BASE[1] + bob
-        rx, ry = RIGHT_EYE_BASE[0], RIGHT_EYE_BASE[1] + bob
+        # com sobrancelha baixinha, abaixa um pouquinho o olho pra parecer "olhando de canto"
+        eye_drop = 3 if eyebrow == "FLAT" else 0
 
-        blink_full = self.state == "IDLE_ANIM" and self.idle_anim in ("BLINK", "DOUBLE_BLINK")
-        wink_right = self.state == "REACTING" and self.reaction == "WINK"
-        surprised = self.state == "REACTING" and self.reaction == "SURPRISED"
-        happy = self.state == "REACTING" and self.reaction in ("HAPPY", "HEART")
+        lx, ly = LEFT_EYE[0], LEFT_EYE[1] + bob + eye_drop
+        rx, ry = RIGHT_EYE[0], RIGHT_EYE[1] + bob + eye_drop
 
-        r = EYE_R + (4 if surprised else 0)
+        if style == "U_CLOSED":
+            # arcos em "u" — eyes resting / sleepy (referência idle)
+            r = EYE_R
+            for cx, cy in ((lx, ly), (rx, ry)):
+                rect = pygame.Rect(cx - r, cy - r // 2, r * 2, r + 2)
+                pygame.draw.arc(surface, BLACK, rect, math.pi, 2 * math.pi, STROKE)
+        elif style == "LINE":
+            # piscada — linha horizontal
+            for cx, cy in ((lx, ly), (rx, ry)):
+                pygame.draw.line(surface, BLACK, (cx - EYE_R, cy), (cx + EYE_R, cy), STROKE)
+        elif style == "V_HAPPY":
+            # ^^ — arcos pra baixo (referência listen 02)
+            r = EYE_R + 1
+            for cx, cy in ((lx, ly), (rx, ry)):
+                rect = pygame.Rect(cx - r, cy - r // 2, r * 2, r)
+                pygame.draw.arc(surface, BLACK, rect, 0, math.pi, STROKE)
+        elif style == "BIG":
+            # olhos enormes anime — referência capturing
+            R = 24
+            for cx, cy in ((lx + ox, ly + oy), (rx + ox, ry + oy)):
+                pygame.draw.circle(surface, BLACK, (cx, cy), R)
+                # reflexo grande no canto sup esq
+                hl = pygame.Rect(cx - R + 4, cy - R + 4, 17, 13)
+                pygame.draw.ellipse(surface, WHITE, hl)
+                # reflexo pequeno no canto inf dir
+                pygame.draw.circle(surface, WHITE, (cx + 5, cy + 7), 4)
+        elif style == "WINK_LEFT":
+            # esquerdo fechado, direito normal
+            pygame.draw.line(surface, BLACK, (lx - EYE_R, ly), (lx + EYE_R, ly), STROKE)
+            pygame.draw.circle(surface, BLACK, (rx + ox, ry + oy), EYE_R)
+        elif style == "WINK_RIGHT":
+            pygame.draw.circle(surface, BLACK, (lx + ox, ly + oy), EYE_R)
+            pygame.draw.line(surface, BLACK, (rx - EYE_R, ry), (rx + EYE_R, ry), STROKE)
+        else:  # DOT — normal (referência listen 01 / speaking)
+            for cx, cy in ((lx + ox, ly + oy), (rx + ox, ry + oy)):
+                pygame.draw.circle(surface, BLACK, (cx, cy), EYE_R)
 
-        # piscada dupla = pisca, abre, pisca de novo
-        if self.idle_anim == "DOUBLE_BLINK":
-            phase = (self.idle_anim_until - self._t) / IDLE_ANIM_DURATION
-            blink_full = (phase > 0.7) or (phase < 0.3 and phase > 0.1)
+        if eyebrow == "FLAT":
+            # barra horizontal acima do olho — referência thinking
+            for cx, cy in ((lx + ox, ly + oy), (rx + ox, ry + oy)):
+                br = pygame.Rect(cx - EYE_R - 3, cy - EYE_R - 5, EYE_R * 2 + 6, 3)
+                pygame.draw.rect(surface, BLACK, br, border_radius=2)
 
-        self._draw_one_eye(surface, lx + ox, ly + oy, r, closed=blink_full, happy=happy, hearts=(self.reaction == "HEART"))
-        self._draw_one_eye(surface, rx + ox, ry + oy, r, closed=blink_full or wink_right, happy=happy, hearts=(self.reaction == "HEART"))
+    def _draw_mouth(self, surface: pygame.Surface, style: str, bob: int) -> None:
+        cx, cy = MOUTH[0], MOUTH[1] + bob
 
-    def _draw_one_eye(self, surface, cx: int, cy: int, r: int, *, closed: bool, happy: bool, hearts: bool) -> None:
-        if closed:
-            pygame.draw.line(surface, BMO_EYE, (cx - r, cy), (cx + r, cy), 4)
-            return
-        if happy:
-            # arco "^" sorrindo
-            rect = pygame.Rect(cx - r, cy - r // 2, r * 2, r)
-            pygame.draw.arc(surface, BMO_EYE, rect, 0, math.pi, 4)
-            return
-        if hearts:
-            self._draw_heart(surface, cx, cy, r)
-            return
-        # olho normal: círculo escuro + reflexo branco
-        pygame.draw.circle(surface, BMO_EYE, (cx, cy), r)
-        pygame.draw.circle(surface, BMO_WHITE, (cx + r // 3, cy - r // 3), max(2, r // 4))
-
-    def _draw_heart(self, surface, cx: int, cy: int, r: int) -> None:
-        # dois círculos + triângulo abaixo, em rosa
-        rr = max(3, r // 2)
-        pygame.draw.circle(surface, BMO_BLUSH, (cx - rr // 2, cy - rr // 2), rr)
-        pygame.draw.circle(surface, BMO_BLUSH, (cx + rr // 2, cy - rr // 2), rr)
-        pts = [(cx - rr, cy), (cx + rr, cy), (cx, cy + rr + 2)]
-        pygame.draw.polygon(surface, BMO_BLUSH, pts)
-
-    def _draw_mouth(self, surface: pygame.Surface) -> None:
-        cx, cy = MOUTH_CENTER
-        bob = int(math.sin(self._t * 1.3) * 1.2)
-        cy += bob
-
-        smile = (
-            (self.state == "REACTING" and self.reaction in ("HAPPY", "WINK", "HEART"))
-            or (self.state == "IDLE_ANIM" and self.idle_anim == "SMILE")
-        )
-        surprised = self.state == "REACTING" and self.reaction == "SURPRISED"
-
-        if surprised:
-            pygame.draw.circle(surface, BMO_GREEN, (cx, cy), 12)
-            pygame.draw.circle(surface, BMO_EYE, (cx, cy), 12, 3)
-        elif smile:
-            rect = pygame.Rect(cx - 22, cy - 10, 44, 20)
-            pygame.draw.arc(surface, BMO_EYE, rect, math.pi, 2 * math.pi, 4)
-            # cantinho da boca pra cima
-            pygame.draw.line(surface, BMO_EYE, (cx - 22, cy), (cx - 18, cy - 4), 3)
-            pygame.draw.line(surface, BMO_EYE, (cx + 22, cy), (cx + 18, cy - 4), 3)
-        elif self.state == "TRACKING":
-            # boquinha curiosa
-            pygame.draw.line(surface, BMO_EYE, (cx - 6, cy + 2), (cx + 6, cy + 2), 3)
-            pygame.draw.line(surface, BMO_EYE, (cx - 6, cy + 2), (cx - 9, cy - 1), 3)
-            pygame.draw.line(surface, BMO_EYE, (cx + 6, cy + 2), (cx + 9, cy - 1), 3)
-        else:
-            pygame.draw.line(surface, BMO_EYE, (cx - 14, cy), (cx + 14, cy), 4)
-
-    def _draw_blush(self, surface: pygame.Surface) -> None:
-        if not (self.state == "REACTING" and self.reaction in ("HAPPY", "HEART", "WINK")):
-            return
-        bob = int(math.sin(self._t * 1.3) * 1.2)
-        for cx in (88, 312):
-            cy = 140 + bob
-            for i in range(3):
-                pygame.draw.line(surface, BMO_BLUSH, (cx - 6 + i * 5, cy), (cx - 6 + i * 5 + 3, cy), 2)
+        if style == "DASH":
+            # tracinho horizontal — referência idle / thinking 03
+            pygame.draw.line(surface, BLACK, (cx - 16, cy), (cx + 16, cy), STROKE + 1)
+        elif style == "SMILE":
+            # sorrisinho arc — referência listen / thinking 01
+            rect = pygame.Rect(cx - 28, cy - 14, 56, 28)
+            pygame.draw.arc(surface, BLACK, rect, math.pi, 2 * math.pi, STROKE + 1)
+        elif style == "O_OPEN":
+            # boca surpresa redonda — referência capturing
+            pygame.draw.circle(surface, BMO_GREEN_DEEP, (cx, cy), 12)
+            pygame.draw.circle(surface, BLACK, (cx, cy), 12, STROKE)
+        elif style == "SPEAK_SMALL":
+            # boquinha quase fechada — referência speaking 01
+            rect = pygame.Rect(cx - 18, cy - 6, 36, 12)
+            pygame.draw.rect(surface, BMO_GREEN_DEEP, rect, border_radius=6)
+            pygame.draw.rect(surface, BLACK, rect, STROKE, border_radius=6)
+            pygame.draw.line(surface, WHITE, (cx - 12, cy - 1), (cx + 12, cy - 1), 2)
+        elif style == "SPEAK_MED":
+            # boca média aberta — referência speaking 03
+            rect = pygame.Rect(cx - 22, cy - 9, 44, 18)
+            pygame.draw.rect(surface, BMO_GREEN_DEEP, rect, border_radius=8)
+            pygame.draw.rect(surface, BLACK, rect, STROKE, border_radius=8)
+            pygame.draw.line(surface, WHITE, (cx - 14, cy - 3), (cx + 14, cy - 3), 2)
+        elif style == "SPEAK_BIG":
+            # boca bem aberta com dentes — referência speaking 02
+            rect = pygame.Rect(cx - 26, cy - 12, 52, 26)
+            pygame.draw.ellipse(surface, BMO_GREEN_DEEP, rect)
+            pygame.draw.ellipse(surface, BLACK, rect, STROKE)
+            pygame.draw.rect(surface, WHITE, (cx - 20, cy - 9, 40, 5), border_radius=2)
+            pygame.draw.line(surface, BLACK, (cx - 20, cy - 4), (cx + 20, cy - 4), 1)
 
     def _draw_menu_hint(self, surface: pygame.Surface) -> None:
         rect = self._menu_hint_rect()
-        img = render_text("MENU", 7, BMO_HINT)
+        img = render_text("MENU", 7, HINT)
         surface.blit(img, img.get_rect(center=rect.center))
