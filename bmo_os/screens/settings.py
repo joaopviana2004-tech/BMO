@@ -240,7 +240,7 @@ class SettingsScreen:
                 val_img = render_text(val, 9, fg)
                 # valor à direita; setas só quando selecionado
                 if selected:
-                    val_x = rect.right - 28
+                    val_x = rect.right - 46    # folga p/ não encostar nas setas < >
                     surface.blit(val_img, val_img.get_rect(midright=(val_x, rect.centery)))
                     # < >
                     la = self._left_arrow_rect(rect)

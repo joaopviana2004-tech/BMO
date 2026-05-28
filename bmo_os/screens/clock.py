@@ -1,8 +1,10 @@
 """Tela do relógio — preto e branco, estilo terminal/videogame retro.
 
-Sem header/footer com título. Canto sup. esquerdo: clima (temp, umid, ceu).
+Sem header/footer com título. Canto sup. esquerdo: clima (temp, umid).
 Centro: HH:MM gigante com dois-pontos piscando + segundos pequenos abaixo.
 Brackets nos quatro cantos e scanlines sutis pra dar cara de CRT.
+Zona morta SAFE_TOP/SAFE_BOTTOM compensa o frame físico do BMO que cobre
+~12px nas bordas sup/inf da tela.
 Toque/A/MENU -> abre o home.
 """
 from __future__ import annotations
@@ -22,6 +24,8 @@ PT_WEEKDAYS = ["SEG", "TER", "QUA", "QUI", "SEX", "SAB", "DOM"]
 PT_MONTHS = ["JAN", "FEV", "MAR", "ABR", "MAI", "JUN", "JUL", "AGO", "SET", "OUT", "NOV", "DEZ"]
 
 SCANLINE = (10, 10, 10)
+SAFE_TOP = 14    # zona morta pro frame físico nas bordas sup
+SAFE_BOTTOM = 14 # idem inf
 
 
 def _ascii_upper(text: str) -> str:
@@ -51,7 +55,8 @@ class ClockScreen:
         surface.fill(BLACK)
         draw_scanlines(surface)
         draw_crt_corners(surface)
-        theme_state.draw_status_bar(surface)
+        # status bar mais afastada da borda pro frame físico não cobrir
+        theme_state.draw_status_bar(surface, top_pad=SAFE_TOP, right_pad=SAFE_TOP)
         self._draw_weather(surface)
         self._draw_time(surface)
         self._draw_date(surface)
@@ -62,17 +67,14 @@ class ClockScreen:
         snap = self.weather.get()
         temp = f"{snap.temp_c:.0f}C" if snap.ok and snap.temp_c is not None else "--C"
         hum = f"{snap.humidity}%" if snap.ok and snap.humidity is not None else "--%"
-        raw_desc = snap.description if snap.ok and snap.description else "sem dados"
-        desc = _ascii_upper(raw_desc)[:12]
 
         x = 16
         rows = [
             ("TEMP", temp),
             ("UMID", hum),
-            ("CEU", desc),
         ]
         for i, (label, value) in enumerate(rows):
-            y = 22 + i * 16
+            y = SAFE_TOP + 18 + i * 16
             surface.blit(render_text(label, 8, DIM), (x, y + 1))
             surface.blit(render_text(value, 10, WHITE), (x + 48, y))
 
@@ -99,7 +101,8 @@ class ClockScreen:
         line1 = f"{weekday} {now.day:02d}"
         line2 = month
         x = surface.get_width() - 16
-        y = surface.get_height() - 26
+        # respeita zona morta inferior pro frame não cortar a data
+        y = surface.get_height() - SAFE_BOTTOM - 22
         img1 = render_text(line1, 8, WHITE)
         img2 = render_text(line2, 8, DIM)
         surface.blit(img1, img1.get_rect(topright=(x, y)))

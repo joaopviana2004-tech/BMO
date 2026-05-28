@@ -60,12 +60,16 @@ def apply_theme() -> None:
 
 # ---------- status bar ----------
 
-def draw_status_bar(surface: pygame.Surface) -> None:
-    """Top-right: sol/lua + sinal (mock) + bateria (mock 100%)."""
+def draw_status_bar(surface: pygame.Surface, *, top_pad: int = 7, right_pad: int = 10) -> None:
+    """Top-right: sol/lua + sinal (mock) + bateria (mock 100%).
+
+    top_pad/right_pad permitem afastar a barra dos brackets de canto (clock
+    pede mais, pra dar zona morta pro frame físico cobrir).
+    """
     fg = widgets.CRT_WHITE
     bg = widgets.CRT_BLACK
-    right = surface.get_width() - 4
-    top = 7   # logo abaixo do bracket sup-dir
+    right = surface.get_width() - right_pad
+    top = top_pad
 
     # ---- Bateria (18x9 corpo + 2px terminal) ----
     bat = pygame.Rect(right - 20, top, 18, 9)

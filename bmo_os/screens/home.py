@@ -127,16 +127,16 @@ class HomeScreen:
 
     def _handle_tap(self, pos: tuple[int, int]) -> None:
         cx, cy = LOGICAL_SIZE[0] // 2, 110
-        # seta esq
-        if pygame.Rect(16, cy - 12, 24, 24).collidepoint(pos):
+        # zona de toque BEM maior que a seta (visualmente continua pequena)
+        # pra ficar fácil acertar no touch
+        if pygame.Rect(0, cy - 36, 80, 72).collidepoint(pos):
             self._index = (self._index - 1) % len(ITEMS)
             return
-        # seta dir
-        if pygame.Rect(LOGICAL_SIZE[0] - 40, cy - 12, 24, 24).collidepoint(pos):
+        if pygame.Rect(LOGICAL_SIZE[0] - 80, cy - 36, 80, 72).collidepoint(pos):
             self._index = (self._index + 1) % len(ITEMS)
             return
         # ícone central
-        if pygame.Rect(0, 0, 60, 60).move(cx - 30, cy - 30).collidepoint(pos):
+        if pygame.Rect(0, 0, 80, 80).move(cx - 40, cy - 40).collidepoint(pos):
             self._on_select[self._index]()
 
     def update(self, dt: float) -> None:
