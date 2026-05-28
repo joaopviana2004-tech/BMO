@@ -78,10 +78,20 @@ class TasksScreen:
         if event.type != bmo_input.ACTION_EVENT:
             return
         action = event.action
+        pos = getattr(event, "pos", None)
+
+        # Botão HOME e scroll arrows funcionam em qualquer modo
+        if action == bmo_input.Action.TAP and pos is not None:
+            if self._back_btn().collidepoint(pos):
+                self.on_back()
+                return
+            if self._handle_scroll_tap(pos):
+                return
+
         if self.mode == "cursor":
-            self._handle_cursor(action, getattr(event, "pos", None))
+            self._handle_cursor(action, pos)
         else:
-            self._handle_moving(action, getattr(event, "pos", None))
+            self._handle_moving(action, pos)
 
     def _handle_cursor(self, action, pos) -> None:
         if action == bmo_input.Action.UP:
@@ -102,8 +112,12 @@ class TasksScreen:
         elif action == bmo_input.Action.TAP and pos is not None:
             hit = self._card_at(pos)
             if hit is not None:
-                self.cursor_col, self.cursor_idx = hit
-                self._enter_move()
+                col, idx = hit
+                if (col, idx) == (self.cursor_col, self.cursor_idx):
+                    # mesmo card de novo → pega
+                    self._enter_move()
+                else:
+                    self.cursor_col, self.cursor_idx = col, idx
 
     def _handle_moving(self, action, pos) -> None:
         if action == bmo_input.Action.LEFT:
@@ -119,7 +133,25 @@ class TasksScreen:
             if self._right_btn().collidepoint(pos):
                 self._move_card(+1)
                 return
+            # tap em outro card = solta e foca lá; tap fora = só solta
+            hit = self._card_at(pos)
+            if hit is not None and hit != (self.cursor_col, self.cursor_idx):
+                self.cursor_col, self.cursor_idx = hit
             self.mode = "cursor"
+
+    def _handle_scroll_tap(self, pos) -> bool:
+        by = self.todoist.by_section()
+        for col_i in range(3):
+            n = len(by.get(SECTION_NAMES[col_i], []))
+            if n == 0:
+                continue
+            if self.scroll[col_i] > 0 and self._scroll_up_btn(col_i).collidepoint(pos):
+                self.scroll[col_i] -= 1
+                return True
+            if self.scroll[col_i] + MAX_VISIBLE < n and self._scroll_down_btn(col_i).collidepoint(pos):
+                self.scroll[col_i] += 1
+                return True
+        return False
 
     def _enter_move(self) -> None:
         col_key = SECTION_NAMES[self.cursor_col]
@@ -170,6 +202,18 @@ class TasksScreen:
     def _right_btn(self):
         return pygame.Rect(LOGICAL_SIZE[0] - 58, FOOTER_Y - 2, 50, 18)
 
+    def _back_btn(self) -> pygame.Rect:
+        return pygame.Rect(4, 4, 52, 16)
+
+    def _scroll_up_btn(self, col_i: int) -> pygame.Rect:
+        x = _col_x(col_i)
+        return pygame.Rect(x + COL_W - 18, CARDS_TOP_Y - 14, 18, 14)
+
+    def _scroll_down_btn(self, col_i: int) -> pygame.Rect:
+        x = _col_x(col_i)
+        ybot = CARDS_TOP_Y + MAX_VISIBLE * CARD_H
+        return pygame.Rect(x + COL_W - 18, ybot, 18, 14)
+
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(CRT_BLACK)
         self._draw_header(surface)
@@ -177,12 +221,26 @@ class TasksScreen:
         self._draw_footer(surface)
 
     def _draw_header(self, surface) -> None:
+        # botão HOME (sempre visível e tappável)
+        self._draw_back_btn(surface)
         title = render_text("BMO BOARD", 11, CRT_WHITE)
         surface.blit(title, title.get_rect(midtop=(LOGICAL_SIZE[0] // 2, HEADER_Y)))
         snap = self.todoist.get()
         if not snap.ok and snap.error:
-            err = render_text(snap.error[:34], 8, CRT_DIM, pixel=False)
+            err = render_text(snap.error[:28], 8, CRT_DIM, pixel=False)
             surface.blit(err, err.get_rect(topright=(LOGICAL_SIZE[0] - 6, HEADER_Y + 4)))
+
+    def _draw_back_btn(self, surface) -> None:
+        rect = self._back_btn()
+        pygame.draw.rect(surface, CRT_BLACK, rect)
+        pygame.draw.rect(surface, CRT_WHITE, rect, 1)
+        pygame.draw.polygon(surface, CRT_WHITE, [
+            (rect.left + 6, rect.centery - 3),
+            (rect.left + 6, rect.centery + 3),
+            (rect.left + 3, rect.centery),
+        ])
+        img = render_text("HOME", 8, CRT_WHITE, pixel=False)
+        surface.blit(img, img.get_rect(midleft=(rect.left + 12, rect.centery)))
 
     def _draw_columns(self, surface) -> None:
         by = self.todoist.by_section()
@@ -216,18 +274,25 @@ class TasksScreen:
                     is_cursor=(is_cursor_col and gi == self.cursor_idx),
                 )
 
-            # indicadores de scroll (▲ no topo, ▼ embaixo)
+            # botões de scroll tappáveis (só aparecem se tiver pra scrollar)
             if scroll > 0:
-                pts = [(x + COL_W - 10, CARDS_TOP_Y - 2),
-                       (x + COL_W - 2, CARDS_TOP_Y - 2),
-                       (x + COL_W - 6, CARDS_TOP_Y - 8)]
-                pygame.draw.polygon(surface, CRT_DIM, pts)
+                btn = self._scroll_up_btn(col_i)
+                pygame.draw.rect(surface, CRT_BLACK, btn)
+                pygame.draw.rect(surface, CRT_DIM, btn, 1)
+                pygame.draw.polygon(surface, CRT_DIM, [
+                    (btn.centerx - 4, btn.bottom - 4),
+                    (btn.centerx + 4, btn.bottom - 4),
+                    (btn.centerx, btn.top + 3),
+                ])
             if scroll + MAX_VISIBLE < len(cards):
-                ybot = CARDS_TOP_Y + MAX_VISIBLE * CARD_H
-                pts = [(x + COL_W - 10, ybot),
-                       (x + COL_W - 2, ybot),
-                       (x + COL_W - 6, ybot + 6)]
-                pygame.draw.polygon(surface, CRT_DIM, pts)
+                btn = self._scroll_down_btn(col_i)
+                pygame.draw.rect(surface, CRT_BLACK, btn)
+                pygame.draw.rect(surface, CRT_DIM, btn, 1)
+                pygame.draw.polygon(surface, CRT_DIM, [
+                    (btn.centerx - 4, btn.top + 4),
+                    (btn.centerx + 4, btn.top + 4),
+                    (btn.centerx, btn.bottom - 3),
+                ])
 
     def _draw_empty_message(self, surface, error: str) -> None:
         cx = LOGICAL_SIZE[0] // 2
@@ -292,8 +357,8 @@ class TasksScreen:
                 pygame.draw.rect(surface, color, r_, 2)
                 img = render_text(txt, 14, color)
                 surface.blit(img, img.get_rect(center=r_.center))
-            hint = render_text("MOVENDO   A: soltar", 8, CRT_DIM, pixel=False)
+            hint = render_text("MOVENDO   toque < ou >   toque fora p/ soltar", 7, CRT_DIM, pixel=False)
             surface.blit(hint, hint.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - 4)))
         else:
-            hint = render_text("A pegar   <-> trocar coluna   B voltar", 8, CRT_DIM, pixel=False)
+            hint = render_text("toque num card 2x p/ pegar    HOME = sair", 7, CRT_DIM, pixel=False)
             surface.blit(hint, hint.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - 4)))

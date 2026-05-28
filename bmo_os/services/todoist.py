@@ -105,7 +105,10 @@ class TodoistService:
                 self.snapshot = TodoistSnapshot(ok=False, error="sem TODOIST_TOKEN")
             return
 
-        project_name = (config.get("todoist_project") or "BMO").strip()
+        project_name = (
+            os.environ.get("TODOIST_PROJECT", "").strip()
+            or (config.get("todoist_project") or "BMO").strip()
+        )
         try:
             # 1) projeto
             status, body = _request("GET", f"{REST_BASE}/projects", token)

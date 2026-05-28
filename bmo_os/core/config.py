@@ -2,14 +2,40 @@
 
 Carrega/salva um JSON na raiz do repo (bmo_config.json). Pensado pra ter
 poucas chaves — preferências do usuário que sobrevivem entre boots.
+
+Também carrega `.env` da raiz no os.environ na importação (sem dep extra).
 """
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from threading import Lock
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "bmo_config.json"
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+CONFIG_PATH = REPO_ROOT / "bmo_config.json"
+DOTENV_PATH = REPO_ROOT / ".env"
+
+
+def _load_dotenv() -> None:
+    """Lê .env e popula os.environ (sem sobrescrever vars já definidas)."""
+    if not DOTENV_PATH.exists():
+        return
+    try:
+        for raw in DOTENV_PATH.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key:
+                os.environ.setdefault(key, val)
+    except Exception:
+        pass
+
+
+_load_dotenv()
 
 DEFAULTS: dict = {
     "idle_timeout_s": 10,      # quanto tempo a home espera sem input pra voltar
