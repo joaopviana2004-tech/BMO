@@ -1,13 +1,16 @@
-"""Tela 'HOW BMO RESTS' — seleção de modo de sleep.
+"""Tela 'HOW BMO RESTS' — escolha do modo ambient.
 
-Estilo CRT P&B.
+Estilo CRT P&B. Selecionar um tile grava em config e dispara
+o callback on_select_mode (em geral troca o ambient agora mesmo).
 """
 from __future__ import annotations
 
 import datetime as dt
+import math
 
 import pygame
 
+from ..core import config
 from ..core import input as bmo_input
 from ..core.theme import render_text
 from ..core.widgets import (
@@ -16,15 +19,28 @@ from ..core.widgets import (
     LOGICAL_SIZE,
 )
 
+MODES = ["clock", "face"]
+LABELS = {"clock": "CLOCK", "face": "BMO FACE"}
+
 
 class SleepScreen:
-    def __init__(self, on_back) -> None:
+    def __init__(self, on_back, on_select_mode=None) -> None:
         self.on_back = on_back
-        self.index = 0
-        self._labels = ["CLOCK", "AMBIENT"]
+        self.on_select_mode = on_select_mode
+        current = config.get("ambient_mode")
+        try:
+            self.index = MODES.index(current)
+        except ValueError:
+            self.index = 0
         self._t = 0.0
 
-    def enter(self) -> None: ...
+    def enter(self) -> None:
+        current = config.get("ambient_mode")
+        try:
+            self.index = MODES.index(current)
+        except ValueError:
+            self.index = 0
+
     def exit(self) -> None: ...
 
     def handle_event(self, event: pygame.event.Event) -> None:
@@ -32,19 +48,27 @@ class SleepScreen:
             return
         action = event.action
         if action in (bmo_input.Action.LEFT, bmo_input.Action.RIGHT):
-            self.index = (self.index + 1) % 2
+            self.index = (self.index + 1) % len(MODES)
         elif action == bmo_input.Action.B:
             self.on_back()
         elif action == bmo_input.Action.A:
-            self.on_back()
+            self._select()
         elif action == bmo_input.Action.TAP and event.pos is not None:
             for i, rect in enumerate(self._tile_rects()):
                 if rect.collidepoint(event.pos):
                     if i == self.index:
-                        self.on_back()
+                        self._select()
                     else:
                         self.index = i
                     return
+
+    def _select(self) -> None:
+        mode = MODES[self.index]
+        config.set_value("ambient_mode", mode)
+        if self.on_select_mode is not None:
+            self.on_select_mode(mode)
+        else:
+            self.on_back()
 
     def update(self, dt_: float) -> None:
         self._t += dt_
@@ -60,8 +84,8 @@ class SleepScreen:
     def _tile_rects(self):
         cx = LOGICAL_SIZE[0] // 2
         return [
-            pygame.Rect(cx - 90, 68, 72, 72),
-            pygame.Rect(cx + 18, 68, 72, 72),
+            pygame.Rect(cx - 90, 64, 72, 72),
+            pygame.Rect(cx + 18, 64, 72, 72),
         ]
 
     def _draw_title(self, surface: pygame.Surface) -> None:
@@ -69,37 +93,50 @@ class SleepScreen:
         surface.blit(img, img.get_rect(midtop=(LOGICAL_SIZE[0] // 2, 20)))
 
     def _draw_tiles(self, surface: pygame.Surface) -> None:
-        for i, (rect, label) in enumerate(zip(self._tile_rects(), self._labels)):
+        for i, rect in enumerate(self._tile_rects()):
+            mode = MODES[i]
             selected = (i == self.index)
             color = CRT_WHITE if selected else CRT_DIM
             pygame.draw.rect(surface, color, rect, 2)
-            # conteúdo interno
-            if i == 0:
-                self._draw_clock_preview(surface, rect)
+            if mode == "clock":
+                self._draw_clock_preview(surface, rect, selected)
             else:
-                self._draw_ambient_preview(surface, rect, selected)
-            # label
-            lbl = render_text(label, 8, color)
+                self._draw_face_preview(surface, rect, selected)
+            lbl = render_text(LABELS[mode], 8, color)
             surface.blit(lbl, lbl.get_rect(midtop=(rect.centerx, rect.bottom + 5)))
-            # cursor de seleção
             if selected:
                 pygame.draw.rect(surface, CRT_WHITE, rect.inflate(6, 6), 1)
+            # marca "ATUAL" se for o ambient atual
+            if mode == config.get("ambient_mode"):
+                tag = render_text("ATUAL", 7, CRT_DIM)
+                surface.blit(tag, tag.get_rect(midtop=(rect.centerx, rect.bottom + 16)))
 
-    def _draw_clock_preview(self, surface: pygame.Surface, rect: pygame.Rect) -> None:
+    def _draw_clock_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
         now = dt.datetime.now()
-        text = render_text(now.strftime("%H:%M"), 16, CRT_WHITE)
+        text = render_text(now.strftime("%H:%M"), 14, CRT_WHITE if bright else CRT_DIM)
         surface.blit(text, text.get_rect(center=rect.center))
 
-    def _draw_ambient_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
+    def _draw_face_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
         c = CRT_WHITE if bright else CRT_DIM
-        face = rect.inflate(-16, -16)
+        # rosto inset
+        face = rect.inflate(-14, -14)
         pygame.draw.rect(surface, c, face, 1, border_radius=4)
+        # piscar de vez em quando no preview
+        blink = (self._t % 3.0) > 2.8
         # olhos
-        pygame.draw.rect(surface, c, (face.left + 9, face.centery - 6, 4, 6))
-        pygame.draw.rect(surface, c, (face.right - 13, face.centery - 6, 4, 6))
-        # boca
-        pygame.draw.line(surface, c, (face.centerx - 5, face.bottom - 8), (face.centerx + 5, face.bottom - 8), 2)
+        ex_l = face.left + 11
+        ex_r = face.right - 11
+        ey = face.centery - 4
+        if blink:
+            pygame.draw.line(surface, c, (ex_l - 3, ey), (ex_l + 3, ey), 2)
+            pygame.draw.line(surface, c, (ex_r - 3, ey), (ex_r + 3, ey), 2)
+        else:
+            pygame.draw.circle(surface, c, (ex_l, ey), 3)
+            pygame.draw.circle(surface, c, (ex_r, ey), 3)
+        # boca curvinha sorrindo
+        smile = pygame.Rect(face.centerx - 8, face.bottom - 18, 16, 8)
+        pygame.draw.arc(surface, c, smile, math.pi, 2 * math.pi, 2)
 
     def _draw_hint(self, surface: pygame.Surface) -> None:
-        hint = render_text("B = voltar", 8, CRT_DIM)
+        hint = render_text("A = selecionar  B = voltar", 7, CRT_DIM)
         surface.blit(hint, hint.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - 10)))

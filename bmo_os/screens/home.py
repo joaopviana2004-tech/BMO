@@ -9,6 +9,7 @@ import math
 
 import pygame
 
+from ..core import config
 from ..core import input as bmo_input
 from ..core.theme import render_text
 from ..core.widgets import (
@@ -16,8 +17,6 @@ from ..core.widgets import (
     draw_crt_corners, draw_scanlines,
     LOGICAL_SIZE,
 )
-
-IDLE_TIMEOUT_S = 10.0
 
 ITEMS = ["DISPLAY", "SLEEP", "GAMES", "SETTINGS"]
 ICONS = ["display", "sleep", "games", "settings"]
@@ -128,7 +127,8 @@ class HomeScreen:
     def update(self, dt: float) -> None:
         self._t += dt
         self._idle += dt
-        if self._idle >= IDLE_TIMEOUT_S and not self._timed_out:
+        timeout = float(config.get("idle_timeout_s") or 10)
+        if self._idle >= timeout and not self._timed_out:
             self._timed_out = True
             self.on_back()
 
@@ -173,7 +173,8 @@ class HomeScreen:
 
     def _draw_hint(self, surface: pygame.Surface) -> None:
         # barra de progresso do timeout (vai sumindo)
-        idle_frac = min(self._idle / IDLE_TIMEOUT_S, 1.0)
+        timeout = float(config.get("idle_timeout_s") or 10)
+        idle_frac = min(self._idle / timeout, 1.0) if timeout > 0 else 0.0
         bar_w = int((LOGICAL_SIZE[0] - 32) * (1.0 - idle_frac))
         if bar_w > 0:
             pygame.draw.rect(surface, CRT_DIM, (16, LOGICAL_SIZE[1] - 8, bar_w, 2))

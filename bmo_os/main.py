@@ -14,7 +14,9 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from bmo_os.core import config
 from bmo_os.core.app import App
+from bmo_os.screens.bmo_face import BMOFaceScreen
 from bmo_os.screens.clock import ClockScreen
 from bmo_os.screens.home import HomeScreen
 from bmo_os.screens.placeholder import PlaceholderScreen
@@ -23,18 +25,44 @@ from bmo_os.screens.sleep import SleepScreen
 
 
 def build_initial(app: App):
+    # Cache pra reaproveitar a mesma instância de cada ambient — evita criar
+    # uma WeatherService nova (e portanto uma thread) toda vez que a home volta.
+    ambient_cache: dict = {}
+
+    def make_ambient():
+        mode = config.get("ambient_mode")
+        if mode not in ambient_cache:
+            if mode == "face":
+                ambient_cache[mode] = BMOFaceScreen(on_open_home=open_home)
+            else:
+                ambient_cache[mode] = ClockScreen(on_open_home=open_home)
+        return ambient_cache[mode]
+
+    def go_ambient() -> None:
+        app.manager.replace(make_ambient())
+
+    def select_ambient(mode: str) -> None:
+        config.set_value("ambient_mode", mode)
+        go_ambient()
+
     def open_home() -> None:
         app.manager.push(make_home())
 
     def make_home() -> HomeScreen:
         return HomeScreen(
-            on_back=app.manager.pop,
-            on_open_sleep=lambda: app.manager.push(SleepScreen(on_back=app.manager.pop)),
-            on_open_games=lambda: app.manager.push(PlaceholderScreen("BMO'S GAMES", app.manager.pop)),
-            on_open_settings=lambda: app.manager.push(SettingsScreen(on_back=app.manager.pop)),
+            on_back=go_ambient,
+            on_open_sleep=lambda: app.manager.push(
+                SleepScreen(on_back=app.manager.pop, on_select_mode=select_ambient)
+            ),
+            on_open_games=lambda: app.manager.push(
+                PlaceholderScreen("BMO'S GAMES", app.manager.pop)
+            ),
+            on_open_settings=lambda: app.manager.push(
+                SettingsScreen(on_back=app.manager.pop, on_ambient_changed=lambda _m: None)
+            ),
         )
 
-    return ClockScreen(on_open_home=open_home)
+    return make_ambient()
 
 
 def main() -> None:
