@@ -290,9 +290,11 @@ class SettingsScreen:
             self._status = ("Falhou: " + first)[:36]
             return
         if "already up to date" in output or "ja atualizado" in output:
-            self._status = "Ja na versao mais nova!"
-            return
-        self._status = "OK! Reiniciando..."
+            # mesmo sem pull novo, reiniciar limpa drift local (HEAD avançou
+            # via commit aqui mas o processo ainda roda código velho)
+            self._status = "Ja atualizado, reiniciando..."
+        else:
+            self._status = "OK! Reiniciando..."
         self._delay_until = self._t + 1.5
         self._action = "restart"
 
