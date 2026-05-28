@@ -18,10 +18,11 @@ from bmo_os.core import config
 from bmo_os.core.app import App
 from bmo_os.screens.bmo_face import BMOFaceScreen
 from bmo_os.screens.clock import ClockScreen
+from bmo_os.screens.games import GamesScreen, draw_space_invaders_icon
 from bmo_os.screens.home import HomeScreen
-from bmo_os.screens.placeholder import PlaceholderScreen
 from bmo_os.screens.settings import SettingsScreen
 from bmo_os.screens.sleep import SleepScreen
+from bmo_os.screens.space_invaders import SpaceInvadersScreen
 from bmo_os.screens.tasks import TasksScreen
 from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.todoist import TodoistService
@@ -56,15 +57,27 @@ def build_initial(app: App):
     def open_home() -> None:
         app.manager.push(make_home())
 
+    def make_games_screen():
+        return GamesScreen(
+            on_back=app.manager.pop,
+            games=[
+                {
+                    "label": "Space Invaders",
+                    "draw_icon": draw_space_invaders_icon,
+                    "launch": lambda: app.manager.push(
+                        SpaceInvadersScreen(on_back=app.manager.pop)
+                    ),
+                },
+            ],
+        )
+
     def make_home() -> HomeScreen:
         return HomeScreen(
             on_back=go_ambient,
             on_open_sleep=lambda: app.manager.push(
                 SleepScreen(on_back=app.manager.pop, on_select_mode=select_ambient)
             ),
-            on_open_games=lambda: app.manager.push(
-                PlaceholderScreen("BMO'S GAMES", app.manager.pop)
-            ),
+            on_open_games=lambda: app.manager.push(make_games_screen()),
             on_open_tasks=lambda: app.manager.push(
                 TasksScreen(on_back=app.manager.pop, todoist=todoist)
             ),
