@@ -18,7 +18,7 @@ from .theme import Colors, FPS, LOGICAL_SIZE, WINDOW_SIZE
 class App:
     def __init__(self, *, fullscreen: bool = False) -> None:
         pygame.init()
-        flags = pygame.SCALED
+        flags = pygame.SCALED | pygame.NOFRAME
         if fullscreen:
             flags |= pygame.FULLSCREEN
         self.window = pygame.display.set_mode(WINDOW_SIZE, flags)
