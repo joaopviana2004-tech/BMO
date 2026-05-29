@@ -21,9 +21,10 @@ PHOTOS_DIR = Path(__file__).resolve().parent.parent.parent / "photos"
 
 
 class PhotoScreen:
-    def __init__(self, on_back, camera: CameraService) -> None:
+    def __init__(self, on_back, camera: CameraService, on_open_gallery=None) -> None:
         self.on_back = on_back
         self.camera = camera
+        self.on_open_gallery = on_open_gallery
         self._t = 0.0
         self._flash_until = 0.0
         self._toast = ""
@@ -40,6 +41,8 @@ class PhotoScreen:
     def enter(self) -> None:
         # acquire = liga a câmera (1ª vez leva ~500ms até o primeiro frame)
         self.camera.acquire()
+        # atualiza contador caso veio da galeria com fotos novas/deletadas
+        self._photo_count = self._count_existing_photos()
 
     def exit(self) -> None:
         self.camera.release()
@@ -63,6 +66,10 @@ class PhotoScreen:
                 return
             if self._debug_btn_rect().collidepoint(pos):
                 self._debug = not self._debug
+                return
+            if self._gallery_btn_rect().collidepoint(pos):
+                if self.on_open_gallery is not None:
+                    self.on_open_gallery()
                 return
             if self._shoot_btn_rect().collidepoint(pos):
                 self._capture()
@@ -99,6 +106,10 @@ class PhotoScreen:
         # canto inf-direito, pequeno
         return pygame.Rect(LOGICAL_SIZE[0] - 26, LOGICAL_SIZE[1] - 26, 20, 20)
 
+    def _gallery_btn_rect(self) -> pygame.Rect:
+        # canto inf-esquerdo, mostra ícone grid + contagem
+        return pygame.Rect(6, LOGICAL_SIZE[1] - 26, 56, 20)
+
     # ---------- draw ----------
 
     def draw(self, surface: pygame.Surface) -> None:
@@ -109,6 +120,7 @@ class PhotoScreen:
         # — câmera é fullscreen)
         theme_state.draw_status_bar(surface, top_pad=6, right_pad=8)
         self._draw_shoot_btn(surface)
+        self._draw_gallery_btn(surface)
         self._draw_debug_btn(surface)
         if self._debug:
             self._draw_debug_overlay(surface)
@@ -202,6 +214,24 @@ class PhotoScreen:
         # ponto vermelho interno
         inner_color = (230, 80, 80) if self.camera.is_available else CRT_DIM
         pygame.draw.circle(surface, inner_color, (cx, cy), r_outer - 5)
+
+    def _draw_gallery_btn(self, surface) -> None:
+        rect = self._gallery_btn_rect()
+        bg = pygame.Surface((rect.width, rect.height))
+        bg.fill((0, 0, 0))
+        bg.set_alpha(140)
+        surface.blit(bg, rect.topleft)
+        pygame.draw.rect(surface, CRT_WHITE, rect, 1)
+        # mini ícone grid 2x2 à esquerda
+        gx = rect.left + 5
+        gy = rect.centery - 4
+        for dr in range(2):
+            for dc in range(2):
+                pygame.draw.rect(surface, CRT_WHITE, (gx + dc * 5, gy + dr * 5, 3, 3))
+        # contagem ao lado
+        txt = f"{self._photo_count}" if self._photo_count > 0 else "0"
+        img = render_text(txt, 9, CRT_WHITE, pixel=False)
+        surface.blit(img, img.get_rect(midleft=(rect.left + 22, rect.centery)))
 
     def _draw_debug_btn(self, surface) -> None:
         rect = self._debug_btn_rect()

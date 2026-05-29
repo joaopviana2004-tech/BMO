@@ -20,7 +20,8 @@ from bmo_os.screens.bmo_face import BMOFaceScreen
 from bmo_os.screens.clock import ClockScreen
 from bmo_os.screens.games import GamesScreen, draw_pong_icon, draw_space_invaders_icon
 from bmo_os.screens.home import HomeScreen
-from bmo_os.screens.photo import PhotoScreen
+from bmo_os.screens.gallery import GalleryScreen
+from bmo_os.screens.photo import PHOTOS_DIR, PhotoScreen
 from bmo_os.screens.pong import PongAmbientScreen, PongScreen
 from bmo_os.screens.settings import SettingsScreen
 from bmo_os.screens.shuffler import ShufflingAmbientScreen
@@ -111,7 +112,13 @@ def build_initial(app: App):
                 TasksScreen(on_back=app.manager.pop, todoist=todoist)
             ),
             on_open_photo=lambda: app.manager.push(
-                PhotoScreen(on_back=app.manager.pop, camera=camera)
+                PhotoScreen(
+                    on_back=app.manager.pop,
+                    camera=camera,
+                    on_open_gallery=lambda: app.manager.push(
+                        GalleryScreen(on_back=app.manager.pop, photos_dir=PHOTOS_DIR)
+                    ),
+                )
             ),
             on_open_settings=lambda: app.manager.push(
                 SettingsScreen(on_back=app.manager.pop, on_ambient_changed=lambda _m: None)
