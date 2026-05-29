@@ -19,6 +19,7 @@ from ..core.widgets import (
     CRT_BLACK, CRT_DIM, CRT_WHITE,
     SAFE_INSET, draw_crt_corners, draw_scanlines,
 )
+from ..services import audio
 
 GRID_COLS = 3
 GRID_ROWS = 2
@@ -114,29 +115,38 @@ class GalleryScreen:
         action = event.action
         pos = getattr(event, "pos", None)
         if action == bmo_input.Action.B:
+            audio.play("back")
             self.on_back()
         elif action == bmo_input.Action.LEFT:
-            self.page = max(0, self.page - 1)
+            if self.page > 0:
+                self.page -= 1
+                audio.play("tick")
         elif action == bmo_input.Action.RIGHT:
-            self.page = min(self._total_pages() - 1, self.page + 1)
+            if self.page < self._total_pages() - 1:
+                self.page += 1
+                audio.play("tick")
         elif action == bmo_input.Action.A:
-            # abre o primeiro visível
             if self._files:
+                audio.play("select")
                 self.viewer_index = self.page * PER_PAGE
         elif action == bmo_input.Action.TAP and pos is not None:
             if self._back_btn().collidepoint(pos):
+                audio.play("back")
                 self.on_back()
                 return
             if self.page > 0 and self._prev_btn().collidepoint(pos):
                 self.page -= 1
+                audio.play("tick")
                 return
             if self.page < self._total_pages() - 1 and self._next_btn().collidepoint(pos):
                 self.page += 1
+                audio.play("tick")
                 return
             for i, rect in enumerate(self._thumb_rects()):
                 if rect.collidepoint(pos):
                     visible = self._visible_files()
                     if i < len(visible):
+                        audio.play("select")
                         self.viewer_index = self.page * PER_PAGE + i
                     return
 
@@ -144,26 +154,32 @@ class GalleryScreen:
         action = event.action
         pos = getattr(event, "pos", None)
         if action == bmo_input.Action.B:
+            audio.play("back")
             self.viewer_index = None
             return
         if action == bmo_input.Action.LEFT:
             if self.viewer_index > 0:
                 self.viewer_index -= 1
+                audio.play("tick")
             return
         if action == bmo_input.Action.RIGHT:
             if self.viewer_index < len(self._files) - 1:
                 self.viewer_index += 1
+                audio.play("tick")
             return
         if action == bmo_input.Action.TAP and pos is not None:
             if self._back_btn().collidepoint(pos):
+                audio.play("back")
                 self.viewer_index = None
                 return
-            # zonas de tap: esquerda = anterior, direita = próxima, centro = volta
             if pos[0] < LOGICAL_SIZE[0] // 4 and self.viewer_index > 0:
                 self.viewer_index -= 1
+                audio.play("tick")
             elif pos[0] > 3 * LOGICAL_SIZE[0] // 4 and self.viewer_index < len(self._files) - 1:
                 self.viewer_index += 1
+                audio.play("tick")
             else:
+                audio.play("back")
                 self.viewer_index = None
 
     # ---------- layout ----------

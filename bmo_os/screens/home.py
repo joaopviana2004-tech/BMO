@@ -17,6 +17,7 @@ from ..core.widgets import (
     SAFE_INSET, draw_crt_corners, draw_scanlines,
     LOGICAL_SIZE,
 )
+from ..services import audio
 
 ITEMS = ["SLEEP", "GAMES", "TASKS", "PHOTO", "SETTINGS"]
 ICONS = ["sleep", "games", "tasks", "photo", "settings"]
@@ -119,11 +120,15 @@ class HomeScreen:
         action = event.action
         if action == bmo_input.Action.LEFT:
             self._index = (self._index - 1) % len(ITEMS)
+            audio.play("tick")
         elif action == bmo_input.Action.RIGHT:
             self._index = (self._index + 1) % len(ITEMS)
+            audio.play("tick")
         elif action == bmo_input.Action.A:
+            audio.play("select")
             self._on_select[self._index]()
         elif action == bmo_input.Action.B:
+            audio.play("back")
             self.on_back()
         elif action == bmo_input.Action.TAP and event.pos is not None:
             self._handle_tap(event.pos)
@@ -134,12 +139,15 @@ class HomeScreen:
         # pra ficar fácil acertar no touch
         if pygame.Rect(0, cy - 36, 80, 72).collidepoint(pos):
             self._index = (self._index - 1) % len(ITEMS)
+            audio.play("tick")
             return
         if pygame.Rect(LOGICAL_SIZE[0] - 80, cy - 36, 80, 72).collidepoint(pos):
             self._index = (self._index + 1) % len(ITEMS)
+            audio.play("tick")
             return
         # ícone central
         if pygame.Rect(0, 0, 80, 80).move(cx - 40, cy - 40).collidepoint(pos):
+            audio.play("select")
             self._on_select[self._index]()
 
     def update(self, dt: float) -> None:

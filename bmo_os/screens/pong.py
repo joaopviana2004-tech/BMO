@@ -14,6 +14,7 @@ import pygame
 from ..core import input as bmo_input
 from ..core import theme_state
 from ..core.theme import LOGICAL_SIZE, render_text
+from ..services import audio
 
 # ---------- paleta ----------
 BG           = (8, 10, 24)
@@ -101,10 +102,12 @@ class _PongCore:
         # bola escapou pelos lados → ponto
         if self.ball_x < 0:
             self.score_right += 1
+            audio.play("point")
             self._reset_ball(direction=1)
             return 'point_right'
         if self.ball_x > LOGICAL_SIZE[0]:
             self.score_left += 1
+            audio.play("point")
             self._reset_ball(direction=-1)
             return 'point_left'
         return None
@@ -125,6 +128,7 @@ class _PongCore:
             self.ball_x = PADDLE_LEFT_X + PADDLE_W + BALL_HALF + 1
         else:
             self.ball_x = PADDLE_RIGHT_X - PADDLE_W - BALL_HALF - 1
+        audio.play("bounce")
 
     def move_paddle(self, side: str, target_y: float, max_speed: float, dt: float) -> None:
         attr = 'left_y' if side == 'left' else 'right_y'
@@ -192,10 +196,12 @@ class PongScreen:
         action = event.action
         pos = getattr(event, "pos", None)
         if action in (bmo_input.Action.B, bmo_input.Action.MENU):
+            audio.play("back")
             self.on_back()
             return
         if action == bmo_input.Action.TAP and pos is not None:
             if self._back_btn().collidepoint(pos):
+                audio.play("back")
                 self.on_back()
                 return
             if self.winner is not None:
@@ -232,8 +238,10 @@ class PongScreen:
         # vitória
         if self.core.score_left >= WIN_SCORE:
             self.winner = 'left'
+            audio.play("win")
         elif self.core.score_right >= WIN_SCORE:
             self.winner = 'right'
+            audio.play("fail")
 
     # ---- draw ----
     def _back_btn(self) -> pygame.Rect:

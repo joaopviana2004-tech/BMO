@@ -28,6 +28,7 @@ from bmo_os.screens.shuffler import ShufflingAmbientScreen
 from bmo_os.screens.sleep import SleepScreen
 from bmo_os.screens.space_invaders import SpaceInvadersAmbientScreen, SpaceInvadersScreen
 from bmo_os.screens.tasks import TasksScreen
+from bmo_os.services import audio
 from bmo_os.services.camera import CameraService
 from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.todoist import TodoistService
@@ -132,6 +133,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--fullscreen", action="store_true")
     args = parser.parse_args()
+
+    # mixer precisa ser inicializado ANTES do pygame.init (App.__init__)
+    # pra os pre_init params (sample rate, buffer) valerem
+    audio.init()
 
     app = App(fullscreen=args.fullscreen)
     app.run(build_initial(app))

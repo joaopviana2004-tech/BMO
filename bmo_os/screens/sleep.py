@@ -13,6 +13,7 @@ import pygame
 from ..core import config, theme_state
 from ..core import input as bmo_input
 from ..core.theme import render_text
+from ..services import audio
 from ..core.widgets import (
     CRT_BLACK, CRT_DIM, CRT_WHITE,
     SAFE_INSET, draw_crt_corners, draw_scanlines,
@@ -55,7 +56,9 @@ class SleepScreen:
         action = event.action
         if action in (bmo_input.Action.LEFT, bmo_input.Action.RIGHT):
             self.index = (self.index + 1) % len(MODES)
+            audio.play("tick")
         elif action == bmo_input.Action.B:
+            audio.play("back")
             self.on_back()
         elif action == bmo_input.Action.A:
             self._select()
@@ -66,9 +69,11 @@ class SleepScreen:
                         self._select()
                     else:
                         self.index = i
+                        audio.play("tick")
                     return
 
     def _select(self) -> None:
+        audio.play("select")
         mode = MODES[self.index]
         config.set_value("ambient_mode", mode)
         if self.on_select_mode is not None:

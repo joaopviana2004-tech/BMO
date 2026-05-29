@@ -15,6 +15,7 @@ from ..core import input as bmo_input
 from ..core import theme_state
 from ..core.theme import LOGICAL_SIZE, render_text
 from ..core.widgets import CRT_BLACK, CRT_DIM, CRT_WHITE, SAFE_INSET
+from ..services import audio
 from ..services.camera import CameraService
 
 PHOTOS_DIR = Path(__file__).resolve().parent.parent.parent / "photos"
@@ -55,6 +56,7 @@ class PhotoScreen:
         action = event.action
         pos = getattr(event, "pos", None)
         if action == bmo_input.Action.B:
+            audio.play("back")
             self.on_back()
             return
         if action == bmo_input.Action.A:
@@ -62,13 +64,16 @@ class PhotoScreen:
             return
         if action == bmo_input.Action.TAP and pos is not None:
             if self._back_btn().collidepoint(pos):
+                audio.play("back")
                 self.on_back()
                 return
             if self._debug_btn_rect().collidepoint(pos):
                 self._debug = not self._debug
+                audio.play("tick")
                 return
             if self._gallery_btn_rect().collidepoint(pos):
                 if self.on_open_gallery is not None:
+                    audio.play("select")
                     self.on_open_gallery()
                 return
             if self._shoot_btn_rect().collidepoint(pos):
@@ -77,6 +82,7 @@ class PhotoScreen:
     def _capture(self) -> None:
         path = self.camera.capture_photo(PHOTOS_DIR)
         if path is not None:
+            audio.play("snap")
             self._flash_until = self._t + 0.18
             self._toast = f"salvo: {path.name}"
             self._toast_until = self._t + 2.5

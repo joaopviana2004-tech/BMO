@@ -14,6 +14,7 @@ from ..core.widgets import (
     CRT_BLACK, CRT_DIM, CRT_WHITE,
     SAFE_INSET, draw_crt_corners, draw_scanlines,
 )
+from ..services import audio
 
 GRID_COLS = 3
 ICON_SIZE = 56
@@ -42,20 +43,26 @@ class GamesScreen:
         action = event.action
         pos = getattr(event, "pos", None)
         if action == bmo_input.Action.B:
+            audio.play("back")
             self.on_back()
             return
         if action == bmo_input.Action.LEFT:
             self._index = max(0, self._index - 1)
+            audio.play("tick")
         elif action == bmo_input.Action.RIGHT:
             self._index = min(len(self.games) - 1, self._index + 1)
+            audio.play("tick")
         elif action == bmo_input.Action.UP:
             self._index = max(0, self._index - GRID_COLS)
+            audio.play("tick")
         elif action == bmo_input.Action.DOWN:
             self._index = min(len(self.games) - 1, self._index + GRID_COLS)
+            audio.play("tick")
         elif action == bmo_input.Action.A:
             self._launch_current()
         elif action == bmo_input.Action.TAP and pos is not None:
             if self._back_btn().collidepoint(pos):
+                audio.play("back")
                 self.on_back()
                 return
             for i, rect in enumerate(self._icon_rects()):
@@ -66,6 +73,7 @@ class GamesScreen:
 
     def _launch_current(self) -> None:
         if 0 <= self._index < len(self.games):
+            audio.play("select")
             self.games[self._index]["launch"]()
 
     # ---------- layout ----------

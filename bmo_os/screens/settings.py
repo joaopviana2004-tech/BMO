@@ -27,6 +27,7 @@ from ..core.widgets import (
     SAFE_INSET, draw_crt_corners, draw_scanlines,
     LOGICAL_SIZE,
 )
+from ..services import audio
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -119,8 +120,10 @@ class SettingsScreen:
         action = event.action
         if action == bmo_input.Action.UP:
             self._index = (self._index - 1) % len(ITEMS)
+            audio.play("tick")
         elif action == bmo_input.Action.DOWN:
             self._index = (self._index + 1) % len(ITEMS)
+            audio.play("tick")
         elif action == bmo_input.Action.LEFT:
             self._cycle_current(-1)
         elif action == bmo_input.Action.RIGHT:
@@ -128,6 +131,7 @@ class SettingsScreen:
         elif action == bmo_input.Action.A:
             self._activate()
         elif action == bmo_input.Action.B:
+            audio.play("back")
             self.on_back()
         elif action == bmo_input.Action.TAP and event.pos is not None:
             self._handle_tap(event.pos)
@@ -162,6 +166,7 @@ class SettingsScreen:
         new_idx = (idx + direction) % len(options)
         new_val = options[new_idx]
         config.set_value(item["key"], new_val)
+        audio.play("tick")
         if item["key"] == "ambient_mode" and self.on_ambient_changed is not None:
             self.on_ambient_changed(new_val)
 
@@ -171,9 +176,11 @@ class SettingsScreen:
             self._cycle_current(+1)
             return
         if item["key"] == "update":
+            audio.play("select")
             self._status = "Atualizando..."
             self._action = "pull"
         elif item["key"] == "shutdown":
+            audio.play("select")
             if self._t < self._shutdown_confirm_until:
                 self._status = "Desligando..."
                 self._action = "shutdown"
@@ -181,6 +188,7 @@ class SettingsScreen:
                 self._shutdown_confirm_until = self._t + SHUTDOWN_CONFIRM_S
                 self._status = "Toque DESLIGAR de novo p/ confirmar"
         elif item["key"] == "back":
+            audio.play("back")
             self.on_back()
 
     # ---------- update ----------

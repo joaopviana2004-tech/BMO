@@ -15,6 +15,7 @@ import pygame
 from ..core import input as bmo_input
 from ..core import theme_state
 from ..core.theme import LOGICAL_SIZE, render_text
+from ..services import audio
 
 # ---------- paleta ----------
 BG            = (8, 10, 24)
@@ -227,10 +228,12 @@ class SpaceInvadersScreen:
         action = event.action
         pos = getattr(event, "pos", None)
         if action in (bmo_input.Action.B, bmo_input.Action.MENU):
+            audio.play("back")
             self.on_back()
             return
         if action == bmo_input.Action.TAP and pos is not None:
             if self._back_btn().collidepoint(pos):
+                audio.play("back")
                 self.on_back()
                 return
             if self.game_over or self.victory:
@@ -260,6 +263,7 @@ class SpaceInvadersScreen:
         if self.fire_timer >= FIRE_INTERVAL_S:
             self.fire_timer = 0.0
             self.bullets.append(_Bullet(self.player_x, PLAYER_Y - PLAYER_H / 2 - 4, -PLAYER_BULLET_SPEED))
+            audio.play("laser")
 
         # bullets do player sobem
         for b in self.bullets:
@@ -269,6 +273,7 @@ class SpaceInvadersScreen:
         # marcha dos inimigos
         alive = [e for e in self.enemies if e.alive]
         if not alive:
+            audio.play("win")
             self.victory = True
             return
         dx = self.enemy_speed * dt * self.enemy_dir
@@ -308,6 +313,7 @@ class SpaceInvadersScreen:
                 if abs(b.x - e.x) < ENEMY_W / 2 and abs(b.y - e.y) < ENEMY_H / 2:
                     e.alive = False
                     self.score += 10
+                    audio.play("explosion")
                     hit = True
                     break
             if not hit:
@@ -320,7 +326,9 @@ class SpaceInvadersScreen:
             if (abs(b.x - self.player_x) < PLAYER_W / 2
                     and abs(b.y - PLAYER_Y) < PLAYER_H / 2):
                 self.lives -= 1
+                audio.play("damage")
                 if self.lives <= 0:
+                    audio.play("fail")
                     self.game_over = True
                     return
                 continue
@@ -330,6 +338,7 @@ class SpaceInvadersScreen:
         # inimigos chegam no chão
         for e in self.enemies:
             if e.alive and e.y > PLAYER_Y - 14:
+                audio.play("fail")
                 self.game_over = True
                 return
 

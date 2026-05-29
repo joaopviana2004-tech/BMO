@@ -13,6 +13,7 @@ import pygame
 from ..core import input as bmo_input
 from ..core.theme import LOGICAL_SIZE, render_text
 from ..core.widgets import CRT_BLACK, CRT_DIM, CRT_WHITE, SAFE_INSET
+from ..services import audio
 from ..services.todoist import SECTION_LABELS, SECTION_NAMES, TodoistService
 
 # Layout (400x240) — fontes maiores, menos cards visíveis
@@ -112,9 +113,11 @@ class TasksScreen:
         # Botões globais (HOME, SYNC, scroll) — funcionam em qualquer modo
         if action == bmo_input.Action.TAP and pos is not None:
             if self._back_btn().collidepoint(pos):
+                audio.play("back")
                 self.on_back()
                 return
             if self._sync_btn().collidepoint(pos):
+                audio.play("tick")
                 self.todoist.trigger_refresh()
                 self._sync_flash_until = self._t + 0.4
                 return
@@ -189,6 +192,7 @@ class TasksScreen:
         task = cards[self.cursor_idx]
         if not self.todoist.move(task.id, target_key):
             return
+        audio.play("click")
         new_cards = self.todoist.by_section().get(target_key, [])
         self.cursor_col = new_col
         try:
@@ -227,6 +231,7 @@ class TasksScreen:
         target_key = SECTION_NAMES[target_col]
         if not self.todoist.move(task.id, target_key):
             return
+        audio.play("click")
         new_cards = self.todoist.by_section().get(target_key, [])
         self.cursor_col = target_col
         try:

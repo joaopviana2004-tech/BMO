@@ -18,6 +18,7 @@ import pygame
 from ..core import input as bmo_input
 from ..core import theme_state
 from ..core.theme import render_text
+from ..services import audio  # noqa: F401  (usado abaixo no handle_event)
 from ..core.widgets import (
     CRT_BLACK as BLACK, CRT_WHITE as WHITE, CRT_DIM as DIM,
     SAFE_INSET, draw_scanlines, draw_crt_corners,
@@ -49,6 +50,7 @@ class ClockScreen:
         if event.type == bmo_input.ACTION_EVENT:
             action = event.action
             if action in (bmo_input.Action.TAP, bmo_input.Action.A, bmo_input.Action.MENU):
+                audio.play("select")
                 self.on_open_home()
 
     def update(self, dt_: float) -> None:
