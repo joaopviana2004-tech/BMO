@@ -16,6 +16,7 @@ from ..core import config
 from ..core import input as bmo_input
 from ..core import theme_state
 from ..core.theme import LOGICAL_SIZE, render_text
+from ..services import audio
 
 # Paleta inspirada nas referências
 BMO_GREEN      = (186, 247, 200)   # fundo
@@ -149,11 +150,16 @@ class BMOFaceScreen:
         self.state = "REACTING"
         self._target_ox = 0.0
         self._target_oy = 0.0
+        # voz aleatória do BMO toda vez que ele reage
+        audio.play_bmo_voice()
 
     def _start_idle_anim(self) -> None:
         self.idle_anim = random.choice(IDLE_ANIMS)
         self.idle_anim_until = self._t + IDLE_ANIM_DURATION
         self.state = "IDLE_ANIM"
+        # tagarela quando entra em SPEAK idle
+        if self.idle_anim == "SPEAK":
+            audio.play_bmo_voice()
 
     # ---------- update ----------
 

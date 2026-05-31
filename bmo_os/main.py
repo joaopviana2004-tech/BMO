@@ -27,6 +27,7 @@ from bmo_os.screens.settings import SettingsScreen
 from bmo_os.screens.shuffler import ShufflingAmbientScreen
 from bmo_os.screens.sleep import SleepScreen
 from bmo_os.screens.space_invaders import SpaceInvadersAmbientScreen, SpaceInvadersScreen
+from bmo_os.screens.suspended import SuspendedScreen
 from bmo_os.screens.tasks import TasksScreen
 from bmo_os.services import audio
 from bmo_os.services.camera import CameraService
@@ -102,12 +103,17 @@ def build_initial(app: App):
             ],
         )
 
+    def open_suspend() -> None:
+        # Suspende: display off + FPS baixo. Wake → vai direto pro ambient.
+        app.manager.push(SuspendedScreen(on_wake=go_ambient))
+
     def make_home() -> HomeScreen:
         return HomeScreen(
             on_back=go_ambient,
             on_open_sleep=lambda: app.manager.push(
                 SleepScreen(on_back=app.manager.pop, on_select_mode=select_ambient)
             ),
+            on_open_suspend=open_suspend,
             on_open_games=lambda: app.manager.push(make_games_screen()),
             on_open_tasks=lambda: app.manager.push(
                 TasksScreen(on_back=app.manager.pop, todoist=todoist)
@@ -137,6 +143,7 @@ def main() -> None:
     # mixer precisa ser inicializado ANTES do pygame.init (App.__init__)
     # pra os pre_init params (sample rate, buffer) valerem
     audio.init()
+    audio.set_volume((config.get("volume") or 100) / 100)
 
     app = App(fullscreen=args.fullscreen)
     app.run(build_initial(app))

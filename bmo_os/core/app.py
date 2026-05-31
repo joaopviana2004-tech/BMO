@@ -43,7 +43,9 @@ class App:
     def run(self, initial_screen) -> None:
         self.manager.push(initial_screen)
         while self.running:
-            dt = self.clock.tick(FPS) / 1000.0
+            # screens podem pedir um FPS menor (ex: SuspendedScreen quer 5)
+            target_fps = getattr(self.manager.current, "preferred_fps", FPS)
+            dt = self.clock.tick(target_fps) / 1000.0
             theme_state.apply_theme()
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:

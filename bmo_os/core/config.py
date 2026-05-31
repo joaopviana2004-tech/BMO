@@ -42,6 +42,7 @@ DEFAULTS: dict = {
     "ambient_mode": "clock",        # "clock" | "face" | "pong" | "invaders" | "shuffle"
     "theme": "auto",                # "auto" | "dark" | "light" — auto = claro 6h-18h
     "brightness": 100,              # 0-100 — overlay de dimming no canvas
+    "volume": 100,                  # 0-100 — multiplicado em cada Sound.play()
     "camera_face_tracking": False,  # BMO Face usa câmera pra seguir rosto? (off por padrão p/ não esquentar)
     "todoist_token": "",            # token da REST API v2 do Todoist (env TODOIST_TOKEN ganha)
     "todoist_project": "BMO",       # nome do projeto que vira o board
@@ -57,6 +58,7 @@ AMBIENT_MODE_LABELS = {
     "shuffle": "VARIADO",
 }
 BRIGHTNESS_OPTIONS = [20, 40, 60, 80, 100]
+VOLUME_OPTIONS = [0, 25, 50, 75, 100]
 
 _lock = Lock()
 _data: dict | None = None

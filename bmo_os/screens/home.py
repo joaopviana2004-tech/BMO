@@ -19,8 +19,8 @@ from ..core.widgets import (
 )
 from ..services import audio
 
-ITEMS = ["SLEEP", "GAMES", "TASKS", "PHOTO", "SETTINGS"]
-ICONS = ["sleep", "games", "tasks", "photo", "settings"]
+ITEMS = ["SLEEP", "SUSPEND", "GAMES", "TASKS", "PHOTO", "SETTINGS"]
+ICONS = ["sleep", "suspend", "games", "tasks", "photo", "settings"]
 
 
 def _icon_sleep(surf: pygame.Surface, cx: int, cy: int) -> None:
@@ -36,6 +36,15 @@ def _icon_sleep(surf: pygame.Surface, cx: int, cy: int) -> None:
     for i, ch in enumerate(["z", "z"]):
         img = render_text(ch, 8, CRT_DIM)
         surf.blit(img, (body.right + 2 + i * 6, body.top + 2 + i * 5))
+
+
+def _icon_suspend(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # crescente lunar (mais limpo que face dormindo do _icon_sleep)
+    pygame.draw.circle(surf, CRT_WHITE, (cx - 2, cy), 14)
+    pygame.draw.circle(surf, CRT_BLACK, (cx + 4, cy - 3), 14)
+    # estrelinhas em volta
+    for sx, sy in [(cx - 16, cy - 14), (cx + 14, cy + 10), (cx + 12, cy - 12)]:
+        pygame.draw.rect(surf, CRT_WHITE, (sx, sy, 2, 2))
 
 
 def _icon_games(surf: pygame.Surface, cx: int, cy: int) -> None:
@@ -92,14 +101,17 @@ def _icon_tasks(surf: pygame.Surface, cx: int, cy: int) -> None:
             pygame.draw.rect(surf, CRT_DIM, (x + 2, top_y + 18, col_w - 4, 3))
 
 
-_DRAW_ICON = [_icon_sleep, _icon_games, _icon_tasks, _icon_photo, _icon_settings]
+_DRAW_ICON = [_icon_sleep, _icon_suspend, _icon_games, _icon_tasks, _icon_photo, _icon_settings]
 
 
 class HomeScreen:
-    def __init__(self, *, on_back, on_open_sleep, on_open_games, on_open_tasks,
-                 on_open_photo, on_open_settings) -> None:
+    def __init__(self, *, on_back, on_open_sleep, on_open_suspend, on_open_games,
+                 on_open_tasks, on_open_photo, on_open_settings) -> None:
         self.on_back = on_back
-        self._on_select = [on_open_sleep, on_open_games, on_open_tasks, on_open_photo, on_open_settings]
+        self._on_select = [
+            on_open_sleep, on_open_suspend, on_open_games, on_open_tasks,
+            on_open_photo, on_open_settings,
+        ]
         self.on_open_games = on_open_games
         self.on_open_settings = on_open_settings
         self._index = 0

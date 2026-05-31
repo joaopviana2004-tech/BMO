@@ -83,6 +83,13 @@ ITEMS = [
     },
     {
         "type": "cycle",
+        "key": "volume",
+        "label": "Volume",
+        "options": config.VOLUME_OPTIONS,
+        "format": _fmt_brightness,   # mesmo formato "100%"
+    },
+    {
+        "type": "cycle",
         "key": "camera_face_tracking",
         "label": "BMO te ve",
         "options": [False, True],
@@ -166,6 +173,9 @@ class SettingsScreen:
         new_idx = (idx + direction) % len(options)
         new_val = options[new_idx]
         config.set_value(item["key"], new_val)
+        # aplica volume imediatamente pro tick subsequente sair no nível certo
+        if item["key"] == "volume":
+            audio.set_volume(new_val / 100)
         audio.play("tick")
         if item["key"] == "ambient_mode" and self.on_ambient_changed is not None:
             self.on_ambient_changed(new_val)
@@ -230,8 +240,8 @@ class SettingsScreen:
 
     def _row_rects(self):
         top = 36
-        step = 21   # comprimido pra caber 8 itens sem encostar no rodapé
-        return [pygame.Rect(20, top + i * step, LOGICAL_SIZE[0] - 40, 19) for i in range(len(ITEMS))]
+        step = 20   # comprimido pra caber 9 itens sem encostar no rodapé
+        return [pygame.Rect(20, top + i * step, LOGICAL_SIZE[0] - 40, 18) for i in range(len(ITEMS))]
 
     def _left_arrow_rect(self, row: pygame.Rect) -> pygame.Rect:
         return pygame.Rect(row.right - 38, row.top, 16, row.height)
