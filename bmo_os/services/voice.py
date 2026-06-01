@@ -18,10 +18,11 @@ Setup no Pi (resumo):
     sudo apt install libportaudio2
   - Whisper: baixe/aponte o modelo ggml small (pywhispercpp baixa sozinho na
     1a vez, ou aponte WHISPER_MODEL pra um .bin).
-  - Wake word "BIMO": crie a keyword no Picovoice Console, baixe o .ppn pra
-    assets/bimo.ppn (ou aponte PORCUPINE_KEYWORD_PATH) e ponha
-    PORCUPINE_ACCESS_KEY no .env. Sem isso o wake word fica off (mas o
-    push-to-talk continua).
+  - Wake word "robo": crie a keyword no Picovoice Console, baixe o .ppn pra
+    assets/robo.ppn (ou aponte PORCUPINE_KEYWORD_PATH) e ponha
+    PORCUPINE_ACCESS_KEY no .env. Pra testar JÁ sem criar .ppn, use uma
+    keyword embutida: PORCUPINE_KEYWORD=computer (ou jarvis, picovoice...).
+    Sem nada disso o wake word fica off (mas o push-to-talk continua).
 """
 from __future__ import annotations
 
@@ -81,8 +82,12 @@ try:
 except ValueError:
     WHISPER_AUDIO_CTX = 768
 
-_DEFAULT_PPN = Path(__file__).resolve().parent.parent / "assets" / "bimo.ppn"
+_DEFAULT_PPN = Path(__file__).resolve().parent.parent / "assets" / "robo.ppn"
 PPN_PATH = Path(os.environ.get("PORCUPINE_KEYWORD_PATH", str(_DEFAULT_PPN)))
+# Atalho pra testar JÁ: uma keyword embutida do Porcupine (ex: "computer",
+# "jarvis", "picovoice"...). Se setada, usa ela em vez do robo.ppn.
+PORCUPINE_BUILTIN = os.environ.get("PORCUPINE_KEYWORD", "").strip()
+WAKE_NAME = (PORCUPINE_BUILTIN or "ROBO").upper()
 
 # --- STT por API (compatível com OpenAI /audio/transcriptions) ---
 # Tira TODA a inferência da Pi (sem calor) e usa whisper-large-v3 (mais preciso).
@@ -151,7 +156,7 @@ class VoiceService:
     def wakeword_available(self) -> bool:
         return (HAS_AUDIO and HAS_PORCUPINE
                 and bool(os.environ.get("PORCUPINE_ACCESS_KEY"))
-                and PPN_PATH.exists())
+                and (bool(PORCUPINE_BUILTIN) or PPN_PATH.exists()))
 
     # ---------- dispositivos de microfone ----------
 
@@ -492,15 +497,21 @@ class VoiceService:
 
     def _wake_loop(self) -> None:
         try:
-            handle = pvporcupine.create(
-                access_key=os.environ["PORCUPINE_ACCESS_KEY"],
-                keyword_paths=[str(PPN_PATH)],
-            )
+            if PORCUPINE_BUILTIN:
+                handle = pvporcupine.create(
+                    access_key=os.environ["PORCUPINE_ACCESS_KEY"],
+                    keywords=[PORCUPINE_BUILTIN],
+                )
+            else:
+                handle = pvporcupine.create(
+                    access_key=os.environ["PORCUPINE_ACCESS_KEY"],
+                    keyword_paths=[str(PPN_PATH)],
+                )
         except Exception:
             self.status = "wake word falhou"
             self._wake_thread = None
             return
-        self.status = "ouvindo 'BIMO'"
+        self.status = f"ouvindo '{WAKE_NAME}'"
         try:
             with sd.InputStream(samplerate=handle.sample_rate, channels=1,
                                 dtype="int16", device=self._device_index(),
@@ -508,7 +519,7 @@ class VoiceService:
                 while not self._wake_stop.is_set():
                     block, _ = stream.read(handle.frame_length)
                     if handle.process(block[:, 0]) >= 0:
-                        # detectou "BIMO" -> grava e transcreve o comando
+                        # detectou a wake word -> grava e transcreve
                         self.wake_count += 1
                         self._last_wake = time.time()
                         self.status = "ouvindo..."
@@ -517,9 +528,9 @@ class VoiceService:
                         text = self._transcribe(audio) if audio is not None else ""
                         with self._lock:
                             self.last_text = text
-                        self._log(text, "bimo")
+                        self._log(text, "wake")
                         self._dispatch(text)
-                        self.status = "ouvindo 'BIMO'"
+                        self.status = f"ouvindo '{WAKE_NAME}'"
         except Exception:
             self.status = "wake word erro"
         finally:

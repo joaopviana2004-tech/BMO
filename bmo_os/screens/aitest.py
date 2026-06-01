@@ -32,11 +32,13 @@ def _level_color(lv: float):
 
 
 class AITestScreen:
-    def __init__(self, *, on_back, voice, camera, sysinfo=None) -> None:
+    def __init__(self, *, on_back, voice, camera, sysinfo=None, chat=None) -> None:
         self.on_back = on_back
         self.voice = voice
         self.camera = camera
         self.sysinfo = sysinfo
+        self.chat = chat
+        self._bmo_msg = ""
         self._t = 0.0
 
     def enter(self) -> None:
@@ -87,9 +89,21 @@ class AITestScreen:
         if not getattr(self.voice, "available", False) or self.voice.busy:
             audio.play("back"); return
         audio.play("select")
+        self._bmo_msg = ""
         # pausa o monitor passivo (mesmo device) e grava
         self.voice.stop_monitor()
-        self.voice.record_and_transcribe(on_done=lambda _txt: self._restart_monitor())
+        self.voice.record_and_transcribe(on_done=self._on_transcribed)
+
+    def _on_transcribed(self, text: str) -> None:
+        # roda na thread de voz (após transcrição). Religa o monitor e
+        # manda o texto pro BMO responder via OpenRouter.
+        self._restart_monitor()
+        text = (text or "").strip()
+        if not text or self.chat is None or not self.chat.available:
+            return
+        self._bmo_msg = "..."
+        reply = self.chat.ask(text)
+        self._bmo_msg = reply or ("[" + (self.chat.last_error or "sem resposta")[:40] + "]")
 
     def _restart_monitor(self) -> None:
         try:
@@ -103,7 +117,7 @@ class AITestScreen:
         return pygame.Rect(SAFE_INSET, SAFE_INSET, 52, 16)
 
     def _ptt_btn(self) -> pygame.Rect:
-        return pygame.Rect(LOGICAL_SIZE[0] // 2 - 80, 150, 160, 26)
+        return pygame.Rect(LOGICAL_SIZE[0] // 2 - 80, 142, 160, 22)
 
     # ---------- draw ----------
 
@@ -191,7 +205,8 @@ class AITestScreen:
             wc, state = Colors.YELLOW, "ok"
         else:
             wc, state = CRT_DIM, "off"
-        surface.blit(render_text(f"wake BIMO: {state}  det:{det}", 8, wc, pixel=False), (x, 94))
+        from ..services.voice import WAKE_NAME
+        surface.blit(render_text(f"wake {WAKE_NAME}: {state}  det:{det}", 8, wc, pixel=False), (x, 94))
         # info do ultimo audio gravado (mic mudo? capturou?)
         ai = getattr(self.voice, "last_audio", "") or "-"
         surface.blit(render_text(f"audio: {ai}", 8, CRT_DIM, pixel=False), (x, 106))
@@ -213,19 +228,35 @@ class AITestScreen:
         img = render_text(txt, 9, fg, pixel=False)
         surface.blit(img, img.get_rect(center=rect.center))
 
-        # log das frases reconhecidas (push-to-talk e wake word)
+        # ---- conversa: voce -> BMO ----
         y0 = rect.bottom + 6
-        surface.blit(render_text("LOG (reconhecido):", 8, CRT_DIM, pixel=False), (20, y0))
-        hist = getattr(self.voice, "history", []) or ["—"]
-        for i, line in enumerate(hist[-2:]):
-            img = render_text(self._fit_line(line, 60), 8, CRT_WHITE, pixel=False)
-            surface.blit(img, (20, y0 + 10 + i * 9))
-        # linha de debug da API (erro detalhado, se houver)
-        err = getattr(self.voice, "last_error", "")
-        api_txt = ("api: " + err) if err else "api: ok"
-        api_color = Colors.RED if err else Colors.GREEN_BTN
-        img = render_text(self._fit_line(api_txt, 60), 8, api_color, pixel=False)
-        surface.blit(img, (20, y0 + 30))
+        heard = getattr(self.voice, "last_text", "") or "—"
+        pre = render_text("voce: ", 8, CRT_DIM, pixel=False)
+        surface.blit(pre, (20, y0))
+        surface.blit(render_text(self._fit_line(heard, 52), 8, CRT_WHITE, pixel=False),
+                     (20 + pre.get_width(), y0))
+
+        # "BMO:" em ciano + a msg em branco (até 2 linhas)
+        by = y0 + 12
+        lbl = render_text("BMO: ", 9, Colors.CYAN, pixel=False)
+        surface.blit(lbl, (20, by))
+        lines = self._wrap(self._bmo_msg or "—", 50)[:2]
+        if lines:
+            surface.blit(render_text(lines[0], 9, CRT_WHITE, pixel=False),
+                         (20 + lbl.get_width(), by))
+        if len(lines) > 1:
+            surface.blit(render_text(lines[1], 9, CRT_WHITE, pixel=False), (20, by + 11))
+
+        # status compacto stt / llm
+        stt_err = getattr(self.voice, "last_error", "")
+        llm_err = getattr(self.chat, "last_error", "") if self.chat else ""
+        if stt_err or llm_err:
+            tag = ("stt " + stt_err) if stt_err else ("llm " + llm_err)
+            color = Colors.RED
+        else:
+            tag = "stt ok | llm ok"
+            color = Colors.GREEN_BTN
+        surface.blit(render_text(self._fit_line(tag, 58), 8, color, pixel=False), (20, by + 24))
 
     @staticmethod
     def _fit_line(text: str, n: int) -> str:

@@ -37,6 +37,7 @@ from bmo_os.screens.suspended import SuspendedScreen
 from bmo_os.screens.tasks import TasksScreen
 from bmo_os.services import audio
 from bmo_os.services.camera import CameraService
+from bmo_os.services.chat import ChatService
 from bmo_os.services.gcalendar import CalendarService
 from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.notifications import EventAlerter
@@ -64,8 +65,10 @@ def build_initial(app: App):
     # Pomodoro é cacheado: o tempo de foco por tarefa (e o estado do timer)
     # sobrevive ao abrir/fechar a tela.
     pomodoro = PomodoroScreen(on_back=app.manager.pop, todoist=todoist)
-    # Audição (wake word "BMO" + Whisper). No PC degrada pra "indisponivel".
+    # Audição (wake word + Whisper). No PC degrada pra "indisponivel".
     voice = VoiceService()
+    # BMO responde via LLM (OpenRouter). Degrada sem OPENROUTER_API_KEY.
+    chat = ChatService()
     # Fila de ações dos comandos de voz: o wake-loop roda em thread, então
     # empilhamos a navegação aqui e executamos no main thread (frame_hook).
     voice_queue: list = []
@@ -163,7 +166,8 @@ def build_initial(app: App):
                 SysInfoScreen(on_back=app.manager.pop, sysinfo=sysinfo)
             ),
             on_open_teste=lambda: app.manager.push(
-                AITestScreen(on_back=app.manager.pop, voice=voice, camera=camera, sysinfo=sysinfo)
+                AITestScreen(on_back=app.manager.pop, voice=voice, camera=camera,
+                             sysinfo=sysinfo, chat=chat)
             ),
             on_open_settings=lambda: app.manager.push(make_settings()),
         )
