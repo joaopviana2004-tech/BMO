@@ -358,6 +358,9 @@ class VoiceService:
         req = urllib.request.Request(STT_API_URL, data=body, method="POST")
         req.add_header("Authorization", f"Bearer {STT_API_KEY}")
         req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+        # User-Agent próprio: o padrão "Python-urllib" é barrado pelo Cloudflare
+        # do Groq (HTTP 403, erro 1010). Qualquer UA não-urllib passa.
+        req.add_header("User-Agent", "BMO-OS/1.0")
         with urllib.request.urlopen(req, timeout=20) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         return (data.get("text") or "").strip()
