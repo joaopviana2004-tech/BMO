@@ -34,9 +34,12 @@ from ..core import config
 try:
     import sounddevice as sd
     HAS_AUDIO = True
-except Exception:
+    AUDIO_ERR = ""
+except Exception as _e:
+    # erro comum no Pi: "PortAudio library not found" (falta libportaudio2)
     sd = None  # type: ignore
     HAS_AUDIO = False
+    AUDIO_ERR = str(_e)[:48]
 
 try:
     from pywhispercpp.model import Model as _WhisperModel
@@ -76,7 +79,7 @@ class VoiceService:
         self._whisper = None
 
         if not HAS_AUDIO:
-            self.status = "sem sounddevice"
+            self.status = AUDIO_ERR or "sem sounddevice"
         elif not HAS_WHISPER:
             self.status = "sem whisper"
         else:
