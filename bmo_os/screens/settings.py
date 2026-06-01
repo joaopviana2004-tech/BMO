@@ -52,6 +52,10 @@ def _fmt_onoff(v) -> str:
     return "ON" if v else "OFF"
 
 
+def _fmt_warn(v) -> str:
+    return f"{int(v)}MIN"
+
+
 ITEMS = [
     {
         "type": "cycle",
@@ -94,6 +98,13 @@ ITEMS = [
         "label": "BMO te ve",
         "options": [False, True],
         "format": _fmt_onoff,
+    },
+    {
+        "type": "cycle",
+        "key": "event_warning_min",
+        "label": "Aviso evento",
+        "options": config.EVENT_WARNING_OPTIONS,
+        "format": _fmt_warn,
     },
     {"type": "action", "key": "update", "label": "Atualizar"},
     {"type": "action", "key": "shutdown", "label": "Desligar"},
@@ -239,9 +250,9 @@ class SettingsScreen:
             surface.blit(msg, msg.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - SAFE_INSET - 4)))
 
     def _row_rects(self):
-        top = 36
-        step = 20   # comprimido pra caber 9 itens sem encostar no rodapé
-        return [pygame.Rect(20, top + i * step, LOGICAL_SIZE[0] - 40, 18) for i in range(len(ITEMS))]
+        top = 34
+        step = 18   # comprimido pra caber 10 itens sem encostar no rodapé
+        return [pygame.Rect(20, top + i * step, LOGICAL_SIZE[0] - 40, 16) for i in range(len(ITEMS))]
 
     def _left_arrow_rect(self, row: pygame.Rect) -> pygame.Rect:
         return pygame.Rect(row.right - 38, row.top, 16, row.height)

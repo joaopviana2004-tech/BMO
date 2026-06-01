@@ -19,8 +19,8 @@ from ..core.widgets import (
 )
 from ..services import audio
 
-ITEMS = ["SLEEP", "SUSPEND", "GAMES", "TASKS", "PHOTO", "SETTINGS"]
-ICONS = ["sleep", "suspend", "games", "tasks", "photo", "settings"]
+ITEMS = ["SLEEP", "SUSPEND", "GAMES", "TASKS", "AGENDA", "FOCO", "PHOTO", "SETTINGS"]
+ICONS = ["sleep", "suspend", "games", "tasks", "agenda", "pomodoro", "photo", "settings"]
 
 
 def _icon_sleep(surf: pygame.Surface, cx: int, cy: int) -> None:
@@ -101,16 +101,54 @@ def _icon_tasks(surf: pygame.Surface, cx: int, cy: int) -> None:
             pygame.draw.rect(surf, CRT_DIM, (x + 2, top_y + 18, col_w - 4, 3))
 
 
-_DRAW_ICON = [_icon_sleep, _icon_suspend, _icon_games, _icon_tasks, _icon_photo, _icon_settings]
+def _icon_agenda(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # folhinha de calendário com argolas e um dia marcado
+    body = pygame.Rect(0, 0, 36, 32)
+    body.center = (cx, cy + 2)
+    pygame.draw.rect(surf, CRT_WHITE, body, 2, border_radius=3)
+    # faixa do topo
+    pygame.draw.rect(surf, CRT_WHITE, (body.left, body.top, body.width, 7))
+    # argolas
+    pygame.draw.rect(surf, CRT_BLACK, (body.left + 8, body.top - 4, 2, 5))
+    pygame.draw.rect(surf, CRT_BLACK, (body.right - 10, body.top - 4, 2, 5))
+    pygame.draw.rect(surf, CRT_WHITE, (body.left + 8, body.top - 5, 2, 4))
+    pygame.draw.rect(surf, CRT_WHITE, (body.right - 10, body.top - 5, 2, 4))
+    # grade de dias
+    for r in range(2):
+        for c in range(3):
+            x = body.left + 6 + c * 9
+            y = body.top + 12 + r * 8
+            on = (r == 1 and c == 1)   # um dia destacado
+            pygame.draw.rect(surf, CRT_WHITE if on else CRT_DIM, (x, y, 5, 4))
+
+
+def _icon_pomodoro(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # tomate: corpo redondo + folhinha/cabinho em cima
+    pygame.draw.circle(surf, CRT_WHITE, (cx, cy + 4), 15, 2)
+    # brilho
+    pygame.draw.arc(surf, CRT_DIM, pygame.Rect(cx - 9, cy - 3, 10, 10),
+                    math.pi * 0.6, math.pi * 1.1, 2)
+    # cabinho
+    pygame.draw.rect(surf, CRT_WHITE, (cx - 1, cy - 14, 2, 5))
+    # folhas
+    pygame.draw.line(surf, CRT_WHITE, (cx, cy - 11), (cx - 6, cy - 13), 2)
+    pygame.draw.line(surf, CRT_WHITE, (cx, cy - 11), (cx + 6, cy - 13), 2)
+
+
+_DRAW_ICON = [
+    _icon_sleep, _icon_suspend, _icon_games, _icon_tasks,
+    _icon_agenda, _icon_pomodoro, _icon_photo, _icon_settings,
+]
 
 
 class HomeScreen:
     def __init__(self, *, on_back, on_open_sleep, on_open_suspend, on_open_games,
-                 on_open_tasks, on_open_photo, on_open_settings) -> None:
+                 on_open_tasks, on_open_agenda, on_open_pomodoro,
+                 on_open_photo, on_open_settings) -> None:
         self.on_back = on_back
         self._on_select = [
             on_open_sleep, on_open_suspend, on_open_games, on_open_tasks,
-            on_open_photo, on_open_settings,
+            on_open_agenda, on_open_pomodoro, on_open_photo, on_open_settings,
         ]
         self.on_open_games = on_open_games
         self.on_open_settings = on_open_settings

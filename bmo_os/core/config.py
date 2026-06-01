@@ -46,6 +46,8 @@ DEFAULTS: dict = {
     "camera_face_tracking": False,  # BMO Face usa câmera pra seguir rosto? (off por padrão p/ não esquentar)
     "todoist_token": "",            # token da REST API v2 do Todoist (env TODOIST_TOKEN ganha)
     "todoist_project": "BMO",       # nome do projeto que vira o board
+    "gcal_ics_urls": "",            # URLs secretas iCal (env GCAL_ICS_URLS ganha) — "Rotulo=url,url2"
+    "event_warning_min": 10,        # antecedência (min) do aviso de evento próximo (tela AGENDA)
 }
 
 IDLE_TIMEOUT_OPTIONS = [5, 10, 15, 30, 60, 120]
@@ -59,6 +61,7 @@ AMBIENT_MODE_LABELS = {
 }
 BRIGHTNESS_OPTIONS = [20, 40, 60, 80, 100]
 VOLUME_OPTIONS = [0, 25, 50, 75, 100]
+EVENT_WARNING_OPTIONS = [1, 5, 10, 15, 30, 60]   # minutos de antecedência
 
 _lock = Lock()
 _data: dict | None = None

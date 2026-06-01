@@ -33,6 +33,9 @@ class App:
         self.clock = pygame.time.Clock()
         self.manager = ScreenManager()
         self.running = True
+        # Hook opcional chamado todo frame (depois do update, antes do draw).
+        # Usado pra avisos de evento (main.py empilha a AlertScreen aqui).
+        self.frame_hook = None
 
     def _to_logical(self, pos: tuple[int, int]) -> tuple[int, int]:
         win_w, win_h = self.window.get_size()
@@ -59,6 +62,8 @@ class App:
                 self.manager.handle_event(event)
 
             self.manager.update(dt)
+            if self.frame_hook is not None:
+                self.frame_hook(dt)
             self.canvas.fill(Colors.BG_DARK)
             self.manager.draw(self.canvas)
             # dimming software (overlay preto translúcido por cima do canvas)

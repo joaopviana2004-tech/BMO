@@ -16,12 +16,15 @@ if __package__ in (None, ""):
 
 from bmo_os.core import config
 from bmo_os.core.app import App
+from bmo_os.screens.agenda import AgendaScreen
+from bmo_os.screens.alert import AlertScreen
 from bmo_os.screens.bmo_face import BMOFaceScreen
 from bmo_os.screens.clock import ClockScreen
 from bmo_os.screens.games import GamesScreen, draw_pong_icon, draw_space_invaders_icon
 from bmo_os.screens.home import HomeScreen
 from bmo_os.screens.gallery import GalleryScreen
 from bmo_os.screens.photo import PHOTOS_DIR, PhotoScreen
+from bmo_os.screens.pomodoro import PomodoroScreen
 from bmo_os.screens.pong import PongAmbientScreen, PongScreen
 from bmo_os.screens.settings import SettingsScreen
 from bmo_os.screens.shuffler import ShufflingAmbientScreen
@@ -31,7 +34,9 @@ from bmo_os.screens.suspended import SuspendedScreen
 from bmo_os.screens.tasks import TasksScreen
 from bmo_os.services import audio
 from bmo_os.services.camera import CameraService
+from bmo_os.services.gcalendar import CalendarService
 from bmo_os.services.git_updates import GitUpdatesService
+from bmo_os.services.notifications import EventAlerter
 from bmo_os.services.todoist import TodoistService
 
 
@@ -46,6 +51,9 @@ def build_initial(app: App):
     git_updates = GitUpdatesService()
     # Câmera (AI Camera no Pi). is_available=False quando offline (dev no PC)
     camera = CameraService()
+    # Google Calendar (URLs secretas iCal) + disparador de avisos de evento
+    calendar = CalendarService()
+    alerter = EventAlerter()
 
     def _instantiate_ambient(mode):
         if mode == "face":
@@ -118,6 +126,12 @@ def build_initial(app: App):
             on_open_tasks=lambda: app.manager.push(
                 TasksScreen(on_back=app.manager.pop, todoist=todoist)
             ),
+            on_open_agenda=lambda: app.manager.push(
+                AgendaScreen(on_back=app.manager.pop, calendar=calendar)
+            ),
+            on_open_pomodoro=lambda: app.manager.push(
+                PomodoroScreen(on_back=app.manager.pop, todoist=todoist)
+            ),
             on_open_photo=lambda: app.manager.push(
                 PhotoScreen(
                     on_back=app.manager.pop,
@@ -132,6 +146,20 @@ def build_initial(app: App):
             ),
         )
 
+    def frame_hook(_dt: float) -> None:
+        # Roda todo frame: se um evento está próximo, empilha a AlertScreen
+        # por cima da tela atual (seja qual for: relógio, jogo, suspended...).
+        if isinstance(app.manager.current, AlertScreen):
+            return
+        snap = calendar.get()
+        if not snap.ok:
+            return
+        warn = int(config.get("event_warning_min") or 10)
+        ev = alerter.check(snap.events, warn)
+        if ev is not None:
+            app.manager.push(AlertScreen(event=ev, on_dismiss=app.manager.pop))
+
+    app.frame_hook = frame_hook
     return make_ambient()
 
 
