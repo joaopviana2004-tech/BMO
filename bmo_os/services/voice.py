@@ -60,7 +60,22 @@ except Exception:
     HAS_PORCUPINE = False
 
 SAMPLE_RATE = 16000          # Whisper e Porcupine trabalham em 16kHz mono
-WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
+
+# --- Whisper: defaults otimizados pra rodar frio no Pi ---
+# Modelo: base (bom custo/beneficio). tiny = mais frio/rapido; small = +preciso.
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base")
+# Threads do whisper.cpp (Pi4 = 4 cores). Menos threads = pico menor de calor.
+try:
+    WHISPER_THREADS = int(os.environ.get("WHISPER_THREADS", "0")) or min(4, os.cpu_count() or 4)
+except ValueError:
+    WHISPER_THREADS = min(4, os.cpu_count() or 4)
+# audio_ctx menor encurta MUITO o encoder (parte mais pesada); 0 = completo (1500).
+# 768 e suficiente pra comandos curtos e corta ~metade do trabalho.
+try:
+    WHISPER_AUDIO_CTX = int(os.environ.get("WHISPER_AUDIO_CTX", "768"))
+except ValueError:
+    WHISPER_AUDIO_CTX = 768
+
 _DEFAULT_PPN = Path(__file__).resolve().parent.parent / "assets" / "bimo.ppn"
 PPN_PATH = Path(os.environ.get("PORCUPINE_KEYWORD_PATH", str(_DEFAULT_PPN)))
 
@@ -178,18 +193,45 @@ class VoiceService:
 
     def _ensure_whisper(self):
         if self._whisper is None and HAS_WHISPER:
-            self._whisper = _WhisperModel(WHISPER_MODEL)
+            try:
+                self._whisper = _WhisperModel(WHISPER_MODEL, redirect_whispercpp_logs_to=False)
+            except Exception:
+                self._whisper = _WhisperModel(WHISPER_MODEL)
         return self._whisper
+
+    def _whisper_params(self) -> dict:
+        """Parâmetros enxutos: comando curto, sem fallback, encoder reduzido."""
+        p = dict(
+            language="pt",
+            n_threads=WHISPER_THREADS,
+            translate=False,
+            single_segment=True,     # comando = uma frase curta
+            no_context=True,         # não acumula contexto entre falas
+            temperature_inc=0.0,     # desliga o fallback (não re-roda o modelo)
+            print_progress=False,
+            print_realtime=False,
+        )
+        if WHISPER_AUDIO_CTX > 0:
+            p["audio_ctx"] = WHISPER_AUDIO_CTX
+        return p
 
     def _transcribe(self, audio: "np.ndarray") -> str:
         model = self._ensure_whisper()
         if model is None:
             return ""
-        try:
-            segs = model.transcribe(audio, language="pt")
-            return " ".join(s.text for s in segs).strip()
-        except Exception:
-            return ""
+        # tenta os params otimizados; cai pra versões mais simples se a build
+        # do pywhispercpp não aceitar algum parâmetro.
+        for params in (self._whisper_params(),
+                       {"language": "pt", "n_threads": WHISPER_THREADS},
+                       {"language": "pt"}):
+            try:
+                segs = model.transcribe(audio, **params)
+                return " ".join(s.text for s in segs).strip()
+            except (TypeError, AttributeError):
+                continue
+            except Exception:
+                return ""
+        return ""
 
     def _record_utterance(self) -> "np.ndarray | None":
         """Grava do mic até o silêncio (ou MAX_UTTERANCE_S). Bloqueante."""
