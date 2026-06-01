@@ -94,8 +94,12 @@ class CameraService:
         # BMO_CAMERA: "auto" (padrão) | "usb" (força webcam USB) | "pi" (só picamera2)
         pref = os.environ.get("BMO_CAMERA", "auto").strip().lower()
 
-        # 1) tenta câmera Pi (CSI / AI cam) via picamera2 — pulada se pref=usb
-        if HAS_PICAMERA and pref in ("auto", "pi"):
+        # 1) câmera Pi (CSI / AI cam) via picamera2.
+        # Em "auto", se o libcamera só enxerga uma webcam USB, deixamos ela pro
+        # OpenCV (cores corretas + sem inteligência) em vez do pipeline picamera2,
+        # que inverte os canais (a pessoa fica "azul") em câmeras USB.
+        lk = self._libcamera_kind() if (HAS_PICAMERA and pref in ("auto", "pi")) else "none"
+        if HAS_PICAMERA and (pref == "pi" or lk in ("ai", "csi")):
             try:
                 self._picam = Picamera2()
                 kwargs = dict(main={"size": PREVIEW_SIZE, "format": "RGB888"})
@@ -104,7 +108,7 @@ class CameraService:
                 config = self._picam.create_preview_configuration(**kwargs)
                 self._picam.configure(config)
                 # NÃO chama start() — espera primeiro acquire() pra ligar a câmera
-                self.kind = self._detect_picam_kind()
+                self.kind = lk if lk in ("ai", "csi") else "csi"
                 self._mode = "picam"
                 self.is_available = True
             except Exception as e:
@@ -135,14 +139,24 @@ class CameraService:
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
-    def _detect_picam_kind(self) -> str:
-        """Distingue Pi AI Camera (IMX500) de uma CSI comum pelo modelo do sensor."""
+    def _libcamera_kind(self) -> str:
+        """O que o libcamera enxerga: 'ai' (IMX500) | 'csi' | 'usb' | 'none'.
+
+        Webcams USB também aparecem no libcamera em Pi OS recentes; detectamos
+        pelo Id (caminho contém 'usb') pra poder roteá-las pro OpenCV.
+        """
         try:
-            for info in Picamera2.global_camera_info():
-                if "imx500" in str(info.get("Model", "")).lower():
-                    return "ai"
+            infos = Picamera2.global_camera_info()
         except Exception:
-            pass
+            return "none"
+        if not infos:
+            return "none"
+        for info in infos:
+            if "imx500" in str(info.get("Model", "")).lower():
+                return "ai"
+        for info in infos:
+            if "usb" in str(info.get("Id", "")).lower():
+                return "usb"
         return "csi"
 
     def _open_usb_capture(self):
