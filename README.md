@@ -101,25 +101,32 @@ bmo_os/
     tasks.py           # kanban Todoist 3 colunas (touch drag)
     photo.py           # camera fullscreen + debug overlay + galeria btn
     gallery.py         # grid 3x2 de thumbs + viewer
-    settings.py        # cyclers + atualizar + desligar
+    settings.py        # cyclers + atualizar (git pull + os.execv) + desligar
+    suspended.py       # tela SUSPENSO: display off + FPS baixo, toque acorda
     placeholder.py     # stub genérico (legado)
   services/
     weather.py         # Open-Meteo, thread + lock + último bom em cache
     todoist.py         # API v1, thread + trigger_refresh
     git_updates.py     # fetch + drift detection
     camera.py          # picamera2 + cv2, refcount lazy (acquire/release)
+    audio.py           # sons 8-bit gerados em runtime (numpy) + voz do BMO
   assets/
     fonts/             # PressStart2P.ttf (ver "Fontes pixel" abaixo)
   references/          # .webp/.png das fotos do BMO físico e refs de face
+scripts/               # deploy no Pi (ver "Áudio Bluetooth" abaixo)
+  bmo-bt-setup.sh        # instalador 1-comando do alto-falante Bluetooth
+  bmo-bt-speaker.sh      # conecta no speaker + define sink padrão (roda no boot)
+  bmo-bt-speaker.service # serviço systemd --user que roda o script acima
+  bluetooth.md           # passo a passo do Bluetooth
 ```
 
 ## Setup (Windows, pra desenvolver)
 
 ```powershell
-cd "D:\Meus Projetos\BMO"
+cd "D:\Projetos Pessoais\BMO\BMO"
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r bmo_os/requirements.txt
+pip install -r requirements.txt
 python -m bmo_os.main
 ```
 
@@ -128,68 +135,58 @@ tudo funciona normal.
 
 ## Setup (Raspberry Pi 4B)
 
+O Pi roda **Raspberry Pi OS (Bookworm)** com o desktop **Wayland (labwc)** padrão.
+O BMO sobe como uma aplicação fullscreen **dentro da sessão do desktop** — não é
+kiosk no console/framebuffer. Usa o **Python do sistema** (`/usr/bin/python3`), sem
+venv; pygame e as libs da câmera vêm do `apt`.
+
 ```bash
 sudo apt update
-sudo apt install python3-pip python3-venv libsdl2-dev \
+sudo apt install python3-pygame python3-numpy \
                  python3-picamera2 python3-opencv
+git clone <repo> ~/BMO
 cd ~/BMO
-python3 -m venv .venv --system-site-packages   # importante p/ usar picamera2 + cv2
-source .venv/bin/activate
-pip install -r bmo_os/requirements.txt
-
-# rodar sem X (modo kiosk direto no framebuffer):
-SDL_VIDEODRIVER=kmsdrm python -m bmo_os.main --fullscreen
+python3 -m bmo_os.main --fullscreen   # teste manual dentro do desktop
 ```
 
-> Use `--system-site-packages` no venv porque `picamera2` e `opencv` foram
-> instalados via `apt` (não pip). Sem essa flag o venv não enxerga eles.
-
-**Permissões pra usar KMS sem desktop:**
-```bash
-sudo usermod -aG video,render,input pi   # ou seu user
-# logout / login
-```
-
-KMS ativo (não o "fkms" antigo) em `/boot/firmware/config.txt`:
-```
-dtoverlay=vc4-kms-v3d
-```
-
-**Shutdown sem senha** (pra o botão DESLIGAR funcionar):
+**Shutdown sem senha** (pro botão DESLIGAR do Settings funcionar):
 ```bash
 sudo visudo
-# adicionar:
+# adicionar (troca `gravae` pelo seu user):
 gravae ALL=(ALL) NOPASSWD: /sbin/shutdown
 ```
-(troca `gravae` pelo seu user)
 
-### Boot automático com systemd
+### Autostart com o desktop
 
-Crie `/etc/systemd/system/bmo-os.service`:
+O BMO inicia junto com o desktop via um arquivo `.desktop` em `~/.config/autostart/`:
 
 ```ini
-[Unit]
-Description=BMO OS
-After=multi-user.target
-
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi/BMO
-Environment="SDL_VIDEODRIVER=kmsdrm"
-ExecStart=/home/pi/BMO/.venv/bin/python -m bmo_os.main --fullscreen
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
+# ~/.config/autostart/bmo.desktop
+[Desktop Entry]
+Type=Application
+Name=BMO OS
+Comment=Inicia o BMO automaticamente com o desktop
+Exec=/usr/bin/python3 /home/gravae/BMO/bmo_os/main.py --fullscreen
+Terminal=false
 ```
+
+> O `Exec` é um caminho **absoluto** — se mover/renomear a pasta do repo, atualize
+> essa linha, senão o autostart falha calado no boot.
+
+O botão **Atualizar** do Settings faz `git pull --ff-only` e reinicia o processo
+in-place via `os.execv` (não depende de systemd).
+
+### Áudio Bluetooth (opcional)
+
+Pra conectar num alto-falante Bluetooth automaticamente no boot, use o instalador
+de um comando só:
 
 ```bash
-sudo systemctl enable --now bmo-os
+bash ~/BMO/scripts/bmo-bt-setup.sh             # sem MAC: escaneia e lista os aparelhos
+bash ~/BMO/scripts/bmo-bt-setup.sh AA:BB:CC:DD:EE:FF   # com o MAC: faz tudo
 ```
 
-> `Restart=always` deixa o botão "Atualizar" do menu Settings funcionar mesmo
-> sem `os.execv` — qualquer exit vira reinício automático.
+Detalhes em [`scripts/bluetooth.md`](scripts/bluetooth.md).
 
 ## Configuração local (.env + bmo_config.json)
 
@@ -287,7 +284,7 @@ perde a vibe de fliperama). Tasks e overlays usam Consolas propositalmente
 | Confirmar | Toque no item   | Enter / Espaço  | Botão vermelho A  |
 | Voltar    | Botão HOME      | Esc / Backspace | Botão verde B     |
 | Menu      | Tap no relógio  | Tab             | Triângulo azul    |
-| Sair      | -               | F4              | -                 |
+| Sair      | -               | F4 / F          | -                 |
 
 Cada jogo/tela tem seus próprios atalhos touch (botão SHOOT no invaders, drag
 do paddle no pong, drag do card no kanban, etc.) — sempre com HOME button no
