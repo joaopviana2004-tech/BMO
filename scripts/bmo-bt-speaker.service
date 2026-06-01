@@ -1,0 +1,15 @@
+[Unit]
+Description=BMO — conecta no alto-falante Bluetooth no boot
+# Espera o stack de Bluetooth e de som subir antes de tentar.
+After=bluetooth.target sound.target
+Wants=bluetooth.target
+
+[Service]
+Type=oneshot
+# O MAC (e opcoes) vem deste arquivo. O '-' faz o service nao falhar se faltar.
+EnvironmentFile=-%h/.config/bmo/bt.env
+# %h = home do usuario. Assume o repo clonado em ~/BMO (igual ao README).
+ExecStart=%h/BMO/scripts/bmo-bt-speaker.sh
+
+[Install]
+WantedBy=default.target
