@@ -39,8 +39,7 @@ class AlertScreen:
         self._dismissed = False
 
     def enter(self) -> None:
-        audio.play("select")
-        audio.play_bmo_voice()
+        audio.play("plim")
 
     def exit(self) -> None: ...
 

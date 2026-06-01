@@ -1,25 +1,28 @@
-"""Tela POMODORO — timer de foco estilo CRT P&B.
+"""Tela POMODORO — timer de foco estilo CRT P&B (minimalista).
 
 Ciclo clássico: FOCO 25min -> PAUSA 5min, e a cada 4 focos uma PAUSA LONGA
-de 15min. Countdown MM:SS gigante (igual ao relógio), label da fase, e 4
-"tomates" indicando o progresso até a pausa longa.
+de 15min. Countdown MM:SS gigante, label da fase e 4 "tomates" de progresso.
+Na troca automática de fase toca um "alarm" discreto (bip-bip-bip).
 
-Integração leve (read-only) com o Todoist: se houver tarefa em DOING, mostra
-"FOCANDO: <tarefa>" embaixo do timer. NÃO mexe no board — zero risco pra tela
-de TASKS. Sem token/sem tarefa, a linha some.
+Integração com o Todoist (tarefas em DOING):
+- mostra a tarefa atual e deixa escolher entre as de DOING com ‹ › (ou
+  LEFT/RIGHT) — direto daqui, sem abrir o board;
+- o botão FINALIZAR move a tarefa pra DONE (todoist.move) e já seleciona a
+  próxima de DOING. Não mexe no tasks.py.
+
+Sem token/sem tarefas em DOING, o seletor e o FINALIZAR somem (só o timer).
 
 Controles:
     A / toque no centro  -> play / pause
-    MENU / botão RESET   -> zera a fase atual
-    botão PULAR          -> vai pra próxima fase
+    ‹ › / LEFT / RIGHT   -> troca a tarefa em foco
+    FINALIZAR            -> conclui a tarefa atual e vai pra próxima
+    RESET / MENU         -> zera a fase atual
     B                    -> volta pra home
 
 Obs: o timer só corre enquanto a tela está visível (o ScreenManager só faz
-update da tela do topo). Sair pra home pausa o relógio na prática.
+update da tela do topo).
 """
 from __future__ import annotations
-
-import math
 
 import pygame
 
@@ -40,6 +43,8 @@ CYCLES_BEFORE_LONG = 4
 PHASE_LABELS = {"focus": "FOCO", "short": "PAUSA", "long": "PAUSA LONGA"}
 PHASE_DUR = {"focus": FOCUS_S, "short": SHORT_S, "long": LONG_S}
 
+CX = LOGICAL_SIZE[0] // 2
+
 
 class PomodoroScreen:
     def __init__(self, *, on_back, todoist=None) -> None:
@@ -48,7 +53,8 @@ class PomodoroScreen:
         self.phase = "focus"
         self.remaining = float(FOCUS_S)
         self.running = False
-        self.completed = 0      # focos concluídos (pra "tomates" e pausa longa)
+        self.completed = 0          # focos concluídos (pra "tomates" e pausa longa)
+        self._focus_id = None       # id da tarefa DOING em foco
         self._t = 0.0
 
     def enter(self) -> None: ...
@@ -58,32 +64,69 @@ class PomodoroScreen:
 
     def update(self, dt: float) -> None:
         self._t += dt
+        self._sync_focus()
         if not self.running:
             return
         self.remaining -= dt
         if self.remaining <= 0:
-            self._advance(auto=True)
+            self._advance()
 
-    def _advance(self, *, auto: bool) -> None:
+    def _advance(self) -> None:
+        """Troca de fase automática quando o tempo acaba (toca alarme)."""
         if self.phase == "focus":
             self.completed += 1
-            if self.completed % CYCLES_BEFORE_LONG == 0:
-                self._set_phase("long")
-            else:
-                self._set_phase("short")
-            if auto:
-                audio.play("win")
-                audio.play_bmo_voice()
+            self.phase = "long" if self.completed % CYCLES_BEFORE_LONG == 0 else "short"
         else:
-            self._set_phase("focus")
-            if auto:
-                audio.play("select")
-        # auto-continua rodando na transição automática; manual cai pausado
-        self.running = auto
+            self.phase = "focus"
+        self.remaining = float(PHASE_DUR[self.phase])
+        self.running = True
+        audio.play("alarm")
 
-    def _set_phase(self, phase: str) -> None:
-        self.phase = phase
-        self.remaining = float(PHASE_DUR[phase])
+    # ---------- tarefas (Todoist, DOING) ----------
+
+    def _doing_tasks(self) -> list:
+        if self.todoist is None:
+            return []
+        try:
+            return self.todoist.by_section().get("doing", [])
+        except Exception:
+            return []
+
+    def _sync_focus(self) -> None:
+        ids = [t.id for t in self._doing_tasks()]
+        if self._focus_id not in ids:
+            self._focus_id = ids[0] if ids else None
+
+    def _current_task(self):
+        for t in self._doing_tasks():
+            if t.id == self._focus_id:
+                return t
+        return None
+
+    def _cycle_task(self, direction: int) -> None:
+        ids = [t.id for t in self._doing_tasks()]
+        if len(ids) < 2:
+            return
+        i = ids.index(self._focus_id) if self._focus_id in ids else 0
+        self._focus_id = ids[(i + direction) % len(ids)]
+        audio.play("tick")
+
+    def _finish_task(self) -> None:
+        tasks = self._doing_tasks()
+        ids = [t.id for t in tasks]
+        if self._focus_id is None or self._focus_id not in ids:
+            return
+        i = ids.index(self._focus_id)
+        if not self.todoist or not self.todoist.move(self._focus_id, "done"):
+            return
+        audio.play("click")
+        # já aponta pra próxima de DOING (vizinha na ordem atual)
+        if i + 1 < len(ids):
+            self._focus_id = ids[i + 1]
+        elif i - 1 >= 0:
+            self._focus_id = ids[i - 1]
+        else:
+            self._focus_id = None
 
     # ---------- input ----------
 
@@ -97,6 +140,10 @@ class PomodoroScreen:
             self.on_back()
         elif action == bmo_input.Action.A:
             self._toggle()
+        elif action == bmo_input.Action.LEFT:
+            self._cycle_task(-1)
+        elif action == bmo_input.Action.RIGHT:
+            self._cycle_task(+1)
         elif action == bmo_input.Action.MENU:
             self._reset()
         elif action == bmo_input.Action.TAP and pos is not None:
@@ -106,12 +153,21 @@ class PomodoroScreen:
         if self._back_btn().collidepoint(pos):
             audio.play("back")
             self.on_back()
-        elif self._reset_btn().collidepoint(pos):
+            return
+        if self._reset_btn().collidepoint(pos):
             self._reset()
-        elif self._skip_btn().collidepoint(pos):
-            audio.play("tick")
-            self._advance(auto=False)
-        elif self._center_btn().collidepoint(pos):
+            return
+        if self._current_task() is not None and self._finish_btn().collidepoint(pos):
+            self._finish_task()
+            return
+        if len(self._doing_tasks()) > 1:
+            if self._task_prev_btn().collidepoint(pos):
+                self._cycle_task(-1)
+                return
+            if self._task_next_btn().collidepoint(pos):
+                self._cycle_task(+1)
+                return
+        if self._center_btn().collidepoint(pos):
             self._toggle()
 
     def _toggle(self) -> None:
@@ -129,15 +185,23 @@ class PomodoroScreen:
         return pygame.Rect(SAFE_INSET, SAFE_INSET, 52, 16)
 
     def _center_btn(self) -> pygame.Rect:
-        r = pygame.Rect(0, 0, 180, 80)
-        r.center = (LOGICAL_SIZE[0] // 2, 120)
+        r = pygame.Rect(0, 0, 200, 70)
+        r.center = (CX, 100)
         return r
 
-    def _reset_btn(self) -> pygame.Rect:
-        return pygame.Rect(SAFE_INSET + 16, LOGICAL_SIZE[1] - SAFE_INSET - 22, 64, 18)
+    def _task_prev_btn(self) -> pygame.Rect:
+        return pygame.Rect(SAFE_INSET + 14, 168, 18, 16)
 
-    def _skip_btn(self) -> pygame.Rect:
-        return pygame.Rect(LOGICAL_SIZE[0] - SAFE_INSET - 80, LOGICAL_SIZE[1] - SAFE_INSET - 22, 64, 18)
+    def _task_next_btn(self) -> pygame.Rect:
+        return pygame.Rect(LOGICAL_SIZE[0] - SAFE_INSET - 32, 168, 18, 16)
+
+    def _reset_btn(self) -> pygame.Rect:
+        return pygame.Rect(SAFE_INSET + 8, LOGICAL_SIZE[1] - SAFE_INSET - 22, 56, 18)
+
+    def _finish_btn(self) -> pygame.Rect:
+        w = 104
+        return pygame.Rect(LOGICAL_SIZE[0] - SAFE_INSET - 8 - w,
+                           LOGICAL_SIZE[1] - SAFE_INSET - 22, w, 18)
 
     # ---------- draw ----------
 
@@ -148,30 +212,22 @@ class PomodoroScreen:
         theme_state.draw_status_bar(surface, top_pad=SAFE_INSET + 4, right_pad=SAFE_INSET + 4)
         self._draw_back_btn(surface)
 
-        cx = LOGICAL_SIZE[0] // 2
         # label da fase
         label = render_text(PHASE_LABELS[self.phase], 12, CRT_DIM)
-        surface.blit(label, label.get_rect(midtop=(cx, SAFE_INSET + 6)))
+        surface.blit(label, label.get_rect(midtop=(CX, SAFE_INSET + 6)))
 
         # countdown MM:SS gigante
         m, s = divmod(max(0, int(self.remaining)), 60)
         big = render_text(f"{m:02d}:{s:02d}", 56, CRT_WHITE)
-        surface.blit(big, big.get_rect(center=(cx, 108)))
+        surface.blit(big, big.get_rect(center=(CX, 96)))
 
-        # ícone play/pause discreto sob o timer
-        self._draw_state_icon(surface, cx, 142)
-
-        # tomates (progresso até a pausa longa)
-        self._draw_tomatoes(surface, cx, 162)
-
-        # linha de foco do Todoist (opcional)
-        self._draw_focus_task(surface, cx, 180)
-
+        self._draw_state_icon(surface, CX, 130)
+        self._draw_tomatoes(surface, CX, 148)
+        self._draw_task_selector(surface)
         self._draw_buttons(surface)
 
     def _draw_state_icon(self, surface, cx: int, cy: int) -> None:
         if self.running:
-            # pulsa de leve quando rodando
             on = (self._t % 1.0) < 0.5
             color = CRT_WHITE if on else CRT_DIM
             pygame.draw.rect(surface, color, (cx - 5, cy - 5, 3, 10))
@@ -183,12 +239,10 @@ class PomodoroScreen:
 
     def _draw_tomatoes(self, surface, cx: int, cy: int) -> None:
         done = self.completed % CYCLES_BEFORE_LONG
-        # se acabou de fechar um ciclo completo, mostra os 4 cheios
         if self.completed > 0 and done == 0 and self.phase == "long":
             done = CYCLES_BEFORE_LONG
         gap = 14
-        total_w = (CYCLES_BEFORE_LONG - 1) * gap
-        sx = cx - total_w // 2
+        sx = cx - (CYCLES_BEFORE_LONG - 1) * gap // 2
         for i in range(CYCLES_BEFORE_LONG):
             x = sx + i * gap
             if i < done:
@@ -196,34 +250,41 @@ class PomodoroScreen:
             else:
                 pygame.draw.circle(surface, CRT_DIM, (x, cy), 4, 1)
 
-    def _draw_focus_task(self, surface, cx: int, cy: int) -> None:
-        task = self._doing_task()
-        if not task:
+    def _draw_task_selector(self, surface) -> None:
+        task = self._current_task()
+        if task is None:
             return
-        prefix = render_text("FOCANDO: ", 8, CRT_DIM, pixel=False)
-        name = render_text(self._fit(task, 30), 8, CRT_WHITE, pixel=False)
-        total = prefix.get_width() + name.get_width()
-        x = cx - total // 2
-        surface.blit(prefix, (x, cy))
-        surface.blit(name, (x + prefix.get_width(), cy))
-
-    def _doing_task(self) -> str:
-        if self.todoist is None:
-            return ""
-        try:
-            doing = self.todoist.by_section().get("doing", [])
-        except Exception:
-            return ""
-        return doing[0].content if doing else ""
+        tasks = self._doing_tasks()
+        y = 176
+        # setas só quando há mais de uma tarefa pra escolher
+        if len(tasks) > 1:
+            la = self._task_prev_btn()
+            pygame.draw.polygon(surface, CRT_DIM, [
+                (la.right - 4, la.centery - 5), (la.right - 4, la.centery + 5),
+                (la.left + 2, la.centery),
+            ])
+            ra = self._task_next_btn()
+            pygame.draw.polygon(surface, CRT_DIM, [
+                (ra.left + 4, ra.centery - 5), (ra.left + 4, ra.centery + 5),
+                (ra.right - 2, ra.centery),
+            ])
+        name = render_text(self._fit(task.content, 30), 9, CRT_WHITE, pixel=False)
+        surface.blit(name, name.get_rect(center=(CX, y)))
 
     def _draw_buttons(self, surface) -> None:
-        self._draw_text_btn(surface, self._reset_btn(), "RESET")
-        self._draw_text_btn(surface, self._skip_btn(), "PULAR")
+        self._draw_text_btn(surface, self._reset_btn(), "RESET", strong=False)
+        if self._current_task() is not None:
+            self._draw_text_btn(surface, self._finish_btn(), "FINALIZAR", strong=True)
 
-    def _draw_text_btn(self, surface, rect: pygame.Rect, text: str) -> None:
-        pygame.draw.rect(surface, CRT_BLACK, rect)
-        pygame.draw.rect(surface, CRT_DIM, rect, 1)
-        img = render_text(text, 8, CRT_WHITE, pixel=False)
+    def _draw_text_btn(self, surface, rect: pygame.Rect, text: str, *, strong: bool) -> None:
+        if strong:
+            pygame.draw.rect(surface, CRT_WHITE, rect)
+            fg = CRT_BLACK
+        else:
+            pygame.draw.rect(surface, CRT_BLACK, rect)
+            pygame.draw.rect(surface, CRT_DIM, rect, 1)
+            fg = CRT_WHITE
+        img = render_text(text, 8, fg, pixel=False)
         surface.blit(img, img.get_rect(center=rect.center))
 
     def _draw_back_btn(self, surface) -> None:

@@ -22,6 +22,8 @@ Sons disponíveis:
     bounce      — pong: paddle bate na bola
     point       — pong: ponto marcado
     snap        — câmera dispara
+    alarm       — pomodoro troca de fase (bip-bip-bip discreto)
+    plim        — notificação chegou (ding leve)
 
 Latência:
     Pre_init em 44100Hz + buffer 256 samples = ~5.8ms só do mixer (era 11.6ms
@@ -96,6 +98,22 @@ def _noise(duration: float, volume: float = 0.5) -> pygame.mixer.Sound:
     wave = np.random.uniform(-1, 1, n).astype(np.float32) * volume
     env = _envelope(n, 0.01, 0.4)
     return _to_stereo((wave * env * 32767).astype(np.int16))
+
+
+def _beeps(freq: float, count: int, on: float, off: float,
+           volume: float = 0.35) -> pygame.mixer.Sound:
+    """Sequência de bips curtos iguais (bip-bip-bip), volume baixo e discreto."""
+    n_on = int(SAMPLE_RATE * on)
+    n_off = int(SAMPLE_RATE * off)
+    t = np.arange(n_on, dtype=np.float32) / SAMPLE_RATE
+    tone = np.sign(np.sin(2 * np.pi * freq * t)) * volume * _envelope(n_on, 0.08, 0.35)
+    silence = np.zeros(n_off, dtype=np.float32)
+    chunks = []
+    for i in range(count):
+        chunks.append(tone)
+        if i < count - 1:
+            chunks.append(silence)
+    return _to_stereo((np.concatenate(chunks) * 32767).astype(np.int16))
 
 
 def _two_tone(f1: float, f2: float, dur1: float, dur2: float,
@@ -186,6 +204,8 @@ def init() -> None:
             "bounce":    _square_wave(1320, 0.05, 0.55),
             "point":     _two_tone(880, 1320, 0.06, 0.10, 0.55),
             "snap":      _noise(0.06, 0.75),
+            "alarm":     _beeps(740, 3, 0.08, 0.07, 0.32),
+            "plim":      _two_tone(988, 1319, 0.05, 0.14, 0.4),
         }
         _bmo_voices = [_voice_phrase(notes, durs)
                        for notes, durs in _BMO_VOICE_PATTERNS]
