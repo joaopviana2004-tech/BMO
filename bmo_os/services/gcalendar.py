@@ -1,26 +1,25 @@
-"""Leitor de Google Calendar via iCal (read-only, multi-conta).
+"""Leitor de Google Calendar (read-only, multi-conta). Duas fontes:
 
-Baixa .ics, expande eventos recorrentes e devolve só os eventos de HOJE.
+1) iCal (sem login) — env GCAL_ICS_URLS, separadas por vírgula, rótulo
+   opcional `Rotulo=...`. Cada fonte pode ser:
+     - URL .ics completa: secreta ("Endereço secreto no formato iCal") OU
+       pública (calendário tornado público);
+     - só o ID/e-mail de um calendário PÚBLICO — a URL pública é montada.
 
-Cada fonte (separadas por vírgula, rótulo opcional `Rotulo=...`) pode ser:
-  - uma URL .ics completa: secreta (Configurações -> "Endereço secreto no
-    formato iCal") OU pública (calendário tornado público);
-  - só o ID/e-mail de um calendário PÚBLICO (ex: seu@gmail.com ou
-    `xxx@group.calendar.google.com`) — a gente monta a URL pública sozinho.
+2) OAuth (login com a conta) — pra calendário PRIVADO, inclusive Google
+   Workspace onde o admin bloqueia compartilhamento/endereço secreto. Lê a
+   API do Calendar com um refresh token salvo em `gcal_tokens.json` (gerado
+   pelo `scripts/gcal_auth.py`). Precisa de GCAL_CLIENT_ID/GCAL_CLIENT_SECRET
+   no .env. A API já expande recorrência (singleEvents), então a fonte OAuth
+   funciona mesmo SEM a lib icalendar. Implementação em urllib puro.
 
-Cada conta ganha uma cor pra diferenciar na tela AGENDA.
-
-Config:
-    env GCAL_ICS_URLS  (ganha de config['gcal_ics_urls'])
-    formato: "Pessoal=https://...,Feriados=br#holiday@group.v.calendar.google.com"
-
+As duas fontes podem coexistir; cada conta ganha uma cor na tela AGENDA.
 Roda em thread (igual weather/todoist) e mantém o último snapshot bom.
-Sem as libs `icalendar`/`recurring_ical_events` -> snapshot.ok=False com
-mensagem amigável (degrada igual a câmera no Windows).
 """
 from __future__ import annotations
 
 import datetime as dt
+import json
 import os
 import threading
 import time
@@ -129,6 +128,48 @@ def _resolve_sources() -> list[tuple[str, str]]:
     return _parse_sources(raw)
 
 
+# ---------- OAuth (calendário privado / Workspace) ----------
+
+OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
+CAL_API = "https://www.googleapis.com/calendar/v3/calendars"
+TOKENS_PATH = config.REPO_ROOT / "gcal_tokens.json"
+
+
+def _oauth_creds() -> tuple[str, str]:
+    cid = os.environ.get("GCAL_CLIENT_ID", "").strip()
+    csec = os.environ.get("GCAL_CLIENT_SECRET", "").strip()
+    return cid, csec
+
+
+def _resolve_oauth_accounts() -> list[dict]:
+    """Contas OAuth salvas em gcal_tokens.json (vazio se sem client/credenciais)."""
+    if not _oauth_creds()[0]:
+        return []
+    if not TOKENS_PATH.exists():
+        return []
+    try:
+        data = json.loads(TOKENS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    accounts = data.get("accounts", []) if isinstance(data, dict) else []
+    return [a for a in accounts if a.get("refresh_token")]
+
+
+def _parse_api_dt(node: dict):
+    """Converte o {start|end} da API v3 em datetime/date pra cair no _to_local.
+
+    dateTime: RFC3339 (com offset, às vezes 'Z'); date: all-day.
+    """
+    if not node:
+        return None, False
+    if "dateTime" in node:
+        raw = node["dateTime"].replace("Z", "+00:00")
+        return dt.datetime.fromisoformat(raw), False
+    if "date" in node:
+        return dt.date.fromisoformat(node["date"]), True
+    return None, False
+
+
 def _to_local(value) -> tuple[dt.datetime, bool]:
     """Normaliza DTSTART/DTEND do ics pra datetime aware local.
 
@@ -156,12 +197,18 @@ class CalendarService:
         self.snapshot = CalendarSnapshot()
         self._lock = threading.Lock()
         self._wake = threading.Event()
+        # cache de access_token por refresh_token: refresh -> (token, expira_em)
+        self._token_cache: dict[str, tuple[str, float]] = {}
 
-        if not HAS_ICAL:
-            self.snapshot = CalendarSnapshot(ok=False, error="sem libs")
-            return
-        if not _resolve_sources():
+        ical_sources = _resolve_sources()
+        oauth_accounts = _resolve_oauth_accounts()
+
+        if not ical_sources and not oauth_accounts:
             self.snapshot = CalendarSnapshot(ok=False, error="sem URLs")
+            return
+        # só tem iCal e falta a lib -> não dá pra parsear nada
+        if ical_sources and not oauth_accounts and not HAS_ICAL:
+            self.snapshot = CalendarSnapshot(ok=False, error="sem libs")
             return
 
         self._thread = threading.Thread(target=self._loop, daemon=True)
@@ -182,7 +229,13 @@ class CalendarService:
     # ---------- fetch ----------
 
     def _fetch(self) -> None:
-        sources = _resolve_sources()
+        # fontes unificadas: ("ical", label, url) e ("oauth", label, conta)
+        sources: list[tuple[str, str, object]] = []
+        for label, url in _resolve_sources():
+            sources.append(("ical", label, url))
+        for acc in _resolve_oauth_accounts():
+            sources.append(("oauth", acc.get("label", "conta"), acc))
+
         if not sources:
             self._set(CalendarSnapshot(ok=False, error="sem URLs"))
             return
@@ -194,11 +247,16 @@ class CalendarService:
 
         events: list[CalEvent] = []
         errors: list[str] = []
-        for idx, (label, url) in enumerate(sources):
+        for idx, (kind, label, payload) in enumerate(sources):
             color = ACCOUNT_COLORS[idx % len(ACCOUNT_COLORS)]
             try:
-                events += self._fetch_one(url, label, color, start, end)
-            except Exception as e:  # rede / parse de uma conta não derruba as outras
+                if kind == "oauth":
+                    events += self._fetch_oauth(payload, label, color, start, end)
+                elif not HAS_ICAL:
+                    errors.append("falta icalendar")
+                else:
+                    events += self._fetch_one(payload, label, color, start, end)
+            except Exception as e:  # uma conta falhando não derruba as outras
                 errors.append(str(e)[:40])
 
         if not events and errors:
@@ -249,6 +307,65 @@ class CalendarService:
                     continue
 
             title = str(comp.get("SUMMARY", "(sem titulo)")).strip() or "(sem titulo)"
+            out.append(CalEvent(
+                title=title,
+                start=ev_start,
+                end=ev_end,
+                all_day=all_day,
+                cal_label=label,
+                color=color,
+            ))
+        return out
+
+    # ---------- OAuth ----------
+
+    def _access_token(self, refresh_token: str) -> str:
+        """Troca o refresh token por um access token (cacheado até expirar)."""
+        now = time.time()
+        cached = self._token_cache.get(refresh_token)
+        if cached and cached[1] - 60 > now:
+            return cached[0]
+        cid, csec = _oauth_creds()
+        body = urllib.parse.urlencode({
+            "client_id": cid,
+            "client_secret": csec,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        }).encode("utf-8")
+        req = urllib.request.Request(OAUTH_TOKEN_URL, data=body, method="POST")
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            tok = json.load(resp)
+        access = tok["access_token"]
+        expires = now + int(tok.get("expires_in", 3600))
+        self._token_cache[refresh_token] = (access, expires)
+        return access
+
+    def _fetch_oauth(self, account: dict, label: str, color, start, end) -> list[CalEvent]:
+        token = self._access_token(account["refresh_token"])
+        cal_id = account.get("calendar_id") or "primary"
+        params = urllib.parse.urlencode({
+            "timeMin": start.isoformat(),
+            "timeMax": end.isoformat(),
+            "singleEvents": "true",     # expande recorrência no servidor
+            "orderBy": "startTime",
+            "maxResults": "50",
+        })
+        url = f"{CAL_API}/{urllib.parse.quote(cal_id, safe='')}/events?{params}"
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+            data = json.load(resp)
+
+        out: list[CalEvent] = []
+        for item in data.get("items", []):
+            if item.get("status") == "cancelled":
+                continue
+            s_val, all_day = _parse_api_dt(item.get("start", {}))
+            if s_val is None:
+                continue
+            e_val, _ = _parse_api_dt(item.get("end", {}))
+            ev_start, _ = _to_local(s_val)
+            ev_end, _ = _to_local(e_val) if e_val is not None else (ev_start, all_day)
+            title = (item.get("summary") or "(sem titulo)").strip() or "(sem titulo)"
             out.append(CalEvent(
                 title=title,
                 start=ev_start,

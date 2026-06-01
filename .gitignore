@@ -189,6 +189,9 @@ weather_cache.json
 # Config local do BMO OS — guarda preferências e token do Todoist, nunca commitar
 bmo_config.json
 
+# Tokens OAuth do Google Calendar (refresh tokens) — NUNCA commitar
+gcal_tokens.json
+
 # =============================================================
 # Raspberry Pi / deployment
 # =============================================================
