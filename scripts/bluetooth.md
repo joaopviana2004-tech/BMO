@@ -3,14 +3,34 @@
 Faz o BMO conectar automaticamente num alto-falante Bluetooth quando o Raspberry
 Pi liga, e define ele como saída de áudio padrão.
 
-São dois arquivos neste diretório:
-- `bmo-bt-speaker.sh` — script que conecta no speaker (com retry) e define o sink padrão.
-- `bmo-bt-speaker.service` — serviço systemd **de usuário** que roda o script no boot.
+Arquivos neste diretório:
+- `bmo-bt-setup.sh` — **instalador "um comando só"**. Faz tudo (parear, conectar, instalar o serviço, etc.).
+- `bmo-bt-speaker.sh` — script que conecta no speaker (com retry) e define o sink padrão. Rodado no boot.
+- `bmo-bt-speaker.service` — serviço systemd **de usuário** que roda o `bmo-bt-speaker.sh` no boot.
 
 O MAC do speaker **não** fica em nenhum arquivo versionado — ele vive em
 `~/.config/bmo/bt.env` no Pi (assim sobrevive a `git pull`).
 
 > Tudo abaixo roda **no Raspberry Pi**, não no PC de desenvolvimento.
+
+## Jeito rápido (recomendado): o instalador
+
+```bash
+# Não sabe o MAC? Liga o speaker em modo pareamento e roda sem argumento —
+# ele escaneia e lista os aparelhos por perto:
+bash ~/BMO/scripts/bmo-bt-setup.sh
+
+# Com o MAC em mãos, roda de novo passando ele:
+bash ~/BMO/scripts/bmo-bt-setup.sh AA:BB:CC:DD:EE:FF
+```
+
+Esse segundo comando pareia, dá trust, conecta, salva o MAC, instala e ativa o
+serviço de boot, liga o linger e define o speaker como áudio padrão. Pode rodar
+de novo quando quiser (é idempotente) — se a conexão falhar (speaker desligado,
+por ex.), é só repetir com ele ligado.
+
+O resto deste documento é o **passo a passo manual**, caso você prefira fazer na
+mão ou precise depurar algo.
 
 ## 1. Descobrir o MAC do alto-falante (uma vez)
 
