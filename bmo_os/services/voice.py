@@ -1,4 +1,4 @@
-"""Audição do BMO — wake word "BMO" + comando de voz (Whisper.cpp).
+"""Audição do BMO — wake word "BIMO" + comando de voz (Whisper.cpp).
 
 Pipeline (só roda no Pi com as libs; no PC degrada e mostra "indisponível"):
   microfone (sounddevice) -> wake word (Porcupine) -> grava a fala até o
@@ -10,14 +10,18 @@ normal e a tela de TESTE / settings mostram o status. O push-to-talk
 (record_and_transcribe) funciona sem wake word, então dá pra testar o Whisper
 sozinho antes de configurar o Porcupine.
 
+Debug (pra tela TESTE): wake_count (ativações do wake word), last_wake (quando),
+history (últimas frases reconhecidas, push-to-talk e wake word).
+
 Setup no Pi (resumo):
     pip install sounddevice pywhispercpp pvporcupine
     sudo apt install libportaudio2
   - Whisper: baixe/aponte o modelo ggml small (pywhispercpp baixa sozinho na
     1a vez, ou aponte WHISPER_MODEL pra um .bin).
-  - Wake word "BMO": crie a keyword no Picovoice Console, baixe o .ppn pra
-    assets/bmo.ppn e ponha PORCUPINE_ACCESS_KEY no .env. Sem isso, o wake word
-    fica off (mas o push-to-talk continua).
+  - Wake word "BIMO": crie a keyword no Picovoice Console, baixe o .ppn pra
+    assets/bimo.ppn (ou aponte PORCUPINE_KEYWORD_PATH) e ponha
+    PORCUPINE_ACCESS_KEY no .env. Sem isso o wake word fica off (mas o
+    push-to-talk continua).
 """
 from __future__ import annotations
 
@@ -57,7 +61,8 @@ except Exception:
 
 SAMPLE_RATE = 16000          # Whisper e Porcupine trabalham em 16kHz mono
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
-PPN_PATH = Path(__file__).resolve().parent.parent / "assets" / "bmo.ppn"
+_DEFAULT_PPN = Path(__file__).resolve().parent.parent / "assets" / "bimo.ppn"
+PPN_PATH = Path(os.environ.get("PORCUPINE_KEYWORD_PATH", str(_DEFAULT_PPN)))
 
 # endpointing simples por energia (grava a fala até o silêncio)
 SILENCE_RMS = 0.012          # abaixo disso = silêncio
@@ -77,6 +82,10 @@ class VoiceService:
         self._wake_stop = threading.Event()
         self._commands: list[tuple[list[str], object]] = []
         self._whisper = None
+        # --- debug ---
+        self.wake_count = 0          # quantas vezes o wake word disparou
+        self._last_wake = 0.0        # time.time() da última ativação
+        self.history: list = []      # últimas frases reconhecidas ("src: texto")
 
         if not HAS_AUDIO:
             self.status = AUDIO_ERR or "sem sounddevice"
@@ -228,6 +237,7 @@ class VoiceService:
             text = self._transcribe(audio) if audio is not None else ""
             with self._lock:
                 self.last_text = text
+            self._log(text, "fala")
             self.status = "pronto"
             self._busy = False
             if on_done:
@@ -259,6 +269,21 @@ class VoiceService:
                 except Exception:
                     pass
                 return
+
+    # ---------- debug ----------
+
+    def _log(self, text: str, src: str) -> None:
+        entry = f"{src}: {(text or '').strip() or '—'}"
+        with self._lock:
+            self.history.append(entry)
+            self.history = self.history[-8:]
+
+    @property
+    def listening(self) -> bool:
+        return self._wake_thread is not None
+
+    def seconds_since_wake(self):
+        return (time.time() - self._last_wake) if self._last_wake else None
 
     # ---------- wake word (loop em background) ----------
 
@@ -295,7 +320,7 @@ class VoiceService:
             self.status = "wake word falhou"
             self._wake_thread = None
             return
-        self.status = "ouvindo 'BMO'"
+        self.status = "ouvindo 'BIMO'"
         try:
             with sd.InputStream(samplerate=handle.sample_rate, channels=1,
                                 dtype="int16", device=self._device_index(),
@@ -303,15 +328,18 @@ class VoiceService:
                 while not self._wake_stop.is_set():
                     block, _ = stream.read(handle.frame_length)
                     if handle.process(block[:, 0]) >= 0:
-                        # detectou "BMO" -> grava e transcreve o comando
+                        # detectou "BIMO" -> grava e transcreve o comando
+                        self.wake_count += 1
+                        self._last_wake = time.time()
                         self.status = "ouvindo..."
                         audio = self._record_utterance()
                         self.status = "processando..."
                         text = self._transcribe(audio) if audio is not None else ""
                         with self._lock:
                             self.last_text = text
+                        self._log(text, "bimo")
                         self._dispatch(text)
-                        self.status = "ouvindo 'BMO'"
+                        self.status = "ouvindo 'BIMO'"
         except Exception:
             self.status = "wake word erro"
         finally:

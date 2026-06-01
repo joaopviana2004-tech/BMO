@@ -164,8 +164,15 @@ class AITestScreen:
         sc = CRT_WHITE if avail else Colors.RED
         surface.blit(render_text(f"whisper: {status}", 8, sc, pixel=False), (x, 82))
         ww = getattr(self.voice, "wakeword_available", False)
-        wc = Colors.GREEN_BTN if ww else CRT_DIM
-        surface.blit(render_text(f"wake 'BMO': {'ok' if ww else 'off'}", 8, wc, pixel=False), (x, 94))
+        listening = getattr(self.voice, "listening", False)
+        det = getattr(self.voice, "wake_count", 0)
+        if ww and listening:
+            wc, state = Colors.GREEN_BTN, "ouvindo"
+        elif ww:
+            wc, state = Colors.YELLOW, "ok"
+        else:
+            wc, state = CRT_DIM, "off"
+        surface.blit(render_text(f"wake BIMO: {state}  det:{det}", 8, wc, pixel=False), (x, 94))
 
     def _draw_ptt(self, surface) -> None:
         rect = self._ptt_btn()
@@ -184,13 +191,17 @@ class AITestScreen:
         img = render_text(txt, 9, fg, pixel=False)
         surface.blit(img, img.get_rect(center=rect.center))
 
-        # transcrição reconhecida
-        text = getattr(self.voice, "last_text", "") or ""
-        label = render_text("reconhecido:", 8, CRT_DIM, pixel=False)
-        surface.blit(label, label.get_rect(midtop=(LOGICAL_SIZE[0] // 2, rect.bottom + 8)))
-        for i, line in enumerate(self._wrap(text or "—", 44)[:2]):
-            img = render_text(line, 9, CRT_WHITE, pixel=False)
-            surface.blit(img, img.get_rect(midtop=(LOGICAL_SIZE[0] // 2, rect.bottom + 20 + i * 12)))
+        # log das frases reconhecidas (push-to-talk e wake word)
+        y0 = rect.bottom + 8
+        surface.blit(render_text("LOG (reconhecido):", 8, CRT_DIM, pixel=False), (20, y0))
+        hist = getattr(self.voice, "history", []) or ["—"]
+        for i, line in enumerate(hist[-3:]):
+            img = render_text(self._fit_line(line, 58), 8, CRT_WHITE, pixel=False)
+            surface.blit(img, (20, y0 + 11 + i * 10))
+
+    @staticmethod
+    def _fit_line(text: str, n: int) -> str:
+        return text if len(text) <= n else text[: n - 1] + "."
 
     @staticmethod
     def _wrap(text: str, width: int) -> list:

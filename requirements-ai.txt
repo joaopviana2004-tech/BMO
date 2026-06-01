@@ -5,8 +5,8 @@
 # Dependências de sistema (Raspberry Pi OS):
 #     sudo apt install libportaudio2 python3-opencv
 #
-# Wake word "BMO": crie a keyword no Picovoice Console, baixe o .ppn pra
-# bmo_os/assets/bmo.ppn e ponha PORCUPINE_ACCESS_KEY no .env.
+# Wake word "BIMO": crie a keyword no Picovoice Console, baixe o .ppn pra
+# bmo_os/assets/bimo.ppn e ponha PORCUPINE_ACCESS_KEY no .env.
 # Whisper: pywhispercpp baixa o modelo ggml na 1a vez (ou aponte WHISPER_MODEL).
 
 sounddevice>=0.4.6        # captura do microfone (audição)
