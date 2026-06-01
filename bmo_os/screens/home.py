@@ -19,8 +19,8 @@ from ..core.widgets import (
 )
 from ..services import audio
 
-ITEMS = ["SLEEP", "SUSPEND", "GAMES", "TASKS", "AGENDA", "FOCO", "PHOTO", "SISTEMA", "SETTINGS"]
-ICONS = ["sleep", "suspend", "games", "tasks", "agenda", "pomodoro", "photo", "sysinfo", "settings"]
+ITEMS = ["SLEEP", "SUSPEND", "GAMES", "TASKS", "AGENDA", "FOCO", "PHOTO", "SISTEMA", "TESTE", "SETTINGS"]
+ICONS = ["sleep", "suspend", "games", "tasks", "agenda", "pomodoro", "photo", "sysinfo", "aitest", "settings"]
 
 
 def _icon_sleep(surf: pygame.Surface, cx: int, cy: int) -> None:
@@ -148,21 +148,35 @@ def _icon_sysinfo(surf: pygame.Surface, cx: int, cy: int) -> None:
         pygame.draw.line(surf, CRT_WHITE, (body.right, body.top + 13 + off), (body.right + 4, body.top + 13 + off), 2)
 
 
+def _icon_aitest(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # microfone: cápsula + haste + base, com ondinhas de som
+    cap = pygame.Rect(0, 0, 14, 22)
+    cap.center = (cx, cy - 4)
+    pygame.draw.rect(surf, CRT_WHITE, cap, 2, border_radius=7)
+    # arco do suporte
+    pygame.draw.arc(surf, CRT_WHITE, pygame.Rect(cx - 12, cy - 10, 24, 26), math.pi, 2 * math.pi, 2)
+    # haste + base
+    pygame.draw.line(surf, CRT_WHITE, (cx, cy + 12), (cx, cy + 18), 2)
+    pygame.draw.line(surf, CRT_WHITE, (cx - 7, cy + 18), (cx + 7, cy + 18), 2)
+    # ondinhas
+    pygame.draw.arc(surf, CRT_DIM, pygame.Rect(cx + 10, cy - 12, 10, 18), -1.0, 1.0, 2)
+
+
 _DRAW_ICON = [
     _icon_sleep, _icon_suspend, _icon_games, _icon_tasks,
-    _icon_agenda, _icon_pomodoro, _icon_photo, _icon_sysinfo, _icon_settings,
+    _icon_agenda, _icon_pomodoro, _icon_photo, _icon_sysinfo, _icon_aitest, _icon_settings,
 ]
 
 
 class HomeScreen:
     def __init__(self, *, on_back, on_open_sleep, on_open_suspend, on_open_games,
                  on_open_tasks, on_open_agenda, on_open_pomodoro,
-                 on_open_photo, on_open_sysinfo, on_open_settings) -> None:
+                 on_open_photo, on_open_sysinfo, on_open_teste, on_open_settings) -> None:
         self.on_back = on_back
         self._on_select = [
             on_open_sleep, on_open_suspend, on_open_games, on_open_tasks,
             on_open_agenda, on_open_pomodoro, on_open_photo, on_open_sysinfo,
-            on_open_settings,
+            on_open_teste, on_open_settings,
         ]
         self.on_open_games = on_open_games
         self.on_open_settings = on_open_settings

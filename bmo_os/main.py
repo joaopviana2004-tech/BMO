@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 from pathlib import Path
 
 # permite rodar tanto como módulo quanto como script direto
@@ -17,6 +18,7 @@ if __package__ in (None, ""):
 from bmo_os.core import config
 from bmo_os.core.app import App
 from bmo_os.screens.agenda import AgendaScreen
+from bmo_os.screens.aitest import AITestScreen
 from bmo_os.screens.alert import AlertScreen
 from bmo_os.screens.bmo_face import BMOFaceScreen
 from bmo_os.screens.clock import ClockScreen
@@ -40,6 +42,7 @@ from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.notifications import EventAlerter
 from bmo_os.services.sysinfo import SysInfoService
 from bmo_os.services.todoist import TodoistService
+from bmo_os.services.voice import VoiceService
 
 
 def build_initial(app: App):
@@ -61,6 +64,16 @@ def build_initial(app: App):
     # Pomodoro é cacheado: o tempo de foco por tarefa (e o estado do timer)
     # sobrevive ao abrir/fechar a tela.
     pomodoro = PomodoroScreen(on_back=app.manager.pop, todoist=todoist)
+    # Audição (wake word "BMO" + Whisper). No PC degrada pra "indisponivel".
+    voice = VoiceService()
+    # Fila de ações dos comandos de voz: o wake-loop roda em thread, então
+    # empilhamos a navegação aqui e executamos no main thread (frame_hook).
+    voice_queue: list = []
+    voice_lock = threading.Lock()
+
+    def voice_enqueue(fn):
+        with voice_lock:
+            voice_queue.append(fn)
 
     def _instantiate_ambient(mode):
         if mode == "face":
@@ -149,14 +162,63 @@ def build_initial(app: App):
             on_open_sysinfo=lambda: app.manager.push(
                 SysInfoScreen(on_back=app.manager.pop, sysinfo=sysinfo)
             ),
-            on_open_settings=lambda: app.manager.push(
-                SettingsScreen(on_back=app.manager.pop, on_ambient_changed=lambda _m: None)
+            on_open_teste=lambda: app.manager.push(
+                AITestScreen(on_back=app.manager.pop, voice=voice, camera=camera)
             ),
+            on_open_settings=lambda: app.manager.push(make_settings()),
         )
 
+    def on_setting_change(key, value) -> None:
+        if key == "voice_enabled":
+            voice.set_enabled(bool(value))
+        elif key == "mic_device" and config.get("voice_enabled"):
+            # reabre a escuta no novo microfone
+            voice.set_enabled(False)
+            voice.set_enabled(True)
+
+    def make_settings() -> SettingsScreen:
+        return SettingsScreen(
+            on_back=app.manager.pop,
+            on_open=app.manager.push,
+            on_change=on_setting_change,
+            mic_options=voice.list_input_devices,
+        )
+
+    # ---- comandos de voz -> navegação (executados no main thread) ----
+    def _cmd(fn):
+        return lambda: voice_enqueue(fn)
+
+    voice.register_command(["agenda", "calendario", "compromisso"],
+                           _cmd(lambda: app.manager.push(AgendaScreen(on_back=app.manager.pop, calendar=calendar))))
+    voice.register_command(["foco", "pomodoro", "concentra"],
+                           _cmd(lambda: app.manager.push(pomodoro)))
+    voice.register_command(["tarefa", "tarefas", "kanban", "board"],
+                           _cmd(lambda: app.manager.push(TasksScreen(on_back=app.manager.pop, todoist=todoist))))
+    voice.register_command(["sistema", "hardware", "temperatura", "cpu"],
+                           _cmd(lambda: app.manager.push(SysInfoScreen(on_back=app.manager.pop, sysinfo=sysinfo))))
+    voice.register_command(["foto", "fotos", "camera"],
+                           _cmd(lambda: app.manager.push(
+                               PhotoScreen(on_back=app.manager.pop, camera=camera,
+                                           on_open_gallery=lambda: app.manager.push(
+                                               GalleryScreen(on_back=app.manager.pop, photos_dir=PHOTOS_DIR))))))
+    voice.register_command(["configura", "ajuste", "settings"], _cmd(lambda: app.manager.push(make_settings())))
+    voice.register_command(["menu", "inicio", "casa", "home"], _cmd(open_home))
+    voice.register_command(["relogio", "horas", "tela inicial", "descanso"], _cmd(go_ambient))
+
     def frame_hook(_dt: float) -> None:
-        # Roda todo frame: se um evento está próximo, empilha a AlertScreen
-        # por cima da tela atual (seja qual for: relógio, jogo, suspended...).
+        # Roda todo frame (main thread).
+        # 1) drena comandos de voz pendentes (a thread de voz só enfileira)
+        while True:
+            with voice_lock:
+                fn = voice_queue.pop(0) if voice_queue else None
+            if fn is None:
+                break
+            try:
+                fn()
+            except Exception:
+                pass
+        # 2) se um evento está próximo, empilha a AlertScreen por cima de
+        # qualquer tela (relógio, jogo, suspended...)
         if isinstance(app.manager.current, AlertScreen):
             return
         snap = calendar.get()

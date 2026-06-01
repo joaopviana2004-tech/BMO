@@ -48,6 +48,8 @@ DEFAULTS: dict = {
     "todoist_project": "BMO",       # nome do projeto que vira o board
     "gcal_ics_urls": "",            # URLs secretas iCal (env GCAL_ICS_URLS ganha) — "Rotulo=url,url2"
     "event_warning_min": 10,        # antecedência (min) do aviso de evento próximo (tela AGENDA)
+    "voice_enabled": False,         # "BMO me Ouve" — wake word + comando de voz (Whisper)
+    "mic_device": "",               # nome (ou trecho) do microfone de entrada; "" = padrão do sistema
 }
 
 IDLE_TIMEOUT_OPTIONS = [5, 10, 15, 30, 60, 120]

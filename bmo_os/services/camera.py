@@ -43,10 +43,12 @@ try:
 except Exception:
     pass
 
-HAS_CV2 = False
+HAS_CV2 = False          # cascade pronto → face detection
+HAS_CV2_MODULE = False   # só o módulo cv2 → captura de webcam USB
 _face_cascade = None
 try:
     import cv2  # type: ignore
+    HAS_CV2_MODULE = True
     _cascade_file = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     if Path(_cascade_file).exists():
         _face_cascade = cv2.CascadeClassifier(_cascade_file)
@@ -74,47 +76,84 @@ class CameraService:
         self.is_available = False
         self.error = ""
         self.fps = 0.0
+        self.kind = "none"      # "ai" (Pi AI/IMX500) | "csi" (Pi cam) | "usb" | "none"
+        self._mode = None       # "picam" | "usb"
         self._picam = None
+        self._usb_cap = None
         self._lock = threading.Lock()
         self._latest_frame: Optional[pygame.Surface] = None
         self._latest_faces: list[tuple[int, int, int, int]] = []
         self._last_face_request = 0.0
         self._frame_count = 0
         self._fps_window_start = time.time()
-        self._active = False    # picam.start() já foi chamado?
+        self._active = False    # captura ligada? (picam.start() ou loop USB)
         self._users = 0         # refcount de quem pediu a câmera
         self._stop_flag = False
 
-        if not HAS_PICAMERA:
-            self.error = "picamera2 nao instalada"
+        # 1) tenta câmera Pi (CSI / AI cam) via picamera2
+        if HAS_PICAMERA:
+            try:
+                self._picam = Picamera2()
+                kwargs = dict(main={"size": PREVIEW_SIZE, "format": "RGB888"})
+                if Transform is not None:
+                    kwargs["transform"] = Transform(hflip=True)
+                config = self._picam.create_preview_configuration(**kwargs)
+                self._picam.configure(config)
+                # NÃO chama start() — espera primeiro acquire() pra ligar a câmera
+                self.kind = self._detect_picam_kind()
+                self._mode = "picam"
+                self.is_available = True
+            except Exception as e:
+                self.error = f"camera: {str(e)[:40]}"
+                self._picam = None
+
+        # 2) fallback: webcam USB via OpenCV (sem inteligência por enquanto)
+        if not self.is_available and HAS_CV2_MODULE:
+            try:
+                cap = cv2.VideoCapture(0)
+                if cap is not None and cap.isOpened():
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, PREVIEW_W)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, PREVIEW_H)
+                    self._usb_cap = cap
+                    self.kind = "usb"
+                    self._mode = "usb"
+                    self.is_available = True
+                elif cap is not None:
+                    cap.release()
+            except Exception as e:
+                self.error = f"usb cam: {str(e)[:40]}"
+
+        if not self.is_available:
+            if not self.error:
+                self.error = "nenhuma camera" if HAS_PICAMERA or HAS_CV2_MODULE else "picamera2 nao instalada"
             return
 
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def _detect_picam_kind(self) -> str:
+        """Distingue Pi AI Camera (IMX500) de uma CSI comum pelo modelo do sensor."""
         try:
-            self._picam = Picamera2()
-            kwargs = dict(main={"size": PREVIEW_SIZE, "format": "RGB888"})
-            if Transform is not None:
-                kwargs["transform"] = Transform(hflip=True)
-            config = self._picam.create_preview_configuration(**kwargs)
-            self._picam.configure(config)
-            # NÃO chama start() — espera primeiro acquire() pra ligar a câmera
-            self.is_available = True
-            self._thread = threading.Thread(target=self._loop, daemon=True)
-            self._thread.start()
-        except Exception as e:
-            self.error = f"camera: {str(e)[:40]}"
+            for info in Picamera2.global_camera_info():
+                if "imx500" in str(info.get("Model", "")).lower():
+                    return "ai"
+        except Exception:
+            pass
+        return "csi"
 
     # ---------- lifecycle (refcount) ----------
 
     def acquire(self) -> None:
         """Marca um usuário ativo. No primeiro, liga a câmera."""
-        if not self.is_available or self._picam is None:
+        if not self.is_available:
             return
         with self._lock:
             was_zero = self._users == 0
             self._users += 1
         if was_zero:
             try:
-                self._picam.start()
+                if self._mode == "picam":
+                    self._picam.start()
                 with self._lock:
                     self._active = True
                     self._fps_window_start = time.time()
@@ -125,7 +164,7 @@ class CameraService:
 
     def release(self) -> None:
         """Marca usuário inativo. No último, desliga a câmera."""
-        if not self.is_available or self._picam is None:
+        if not self.is_available:
             return
         with self._lock:
             if self._users <= 0:
@@ -135,10 +174,11 @@ class CameraService:
             if should_stop:
                 self._active = False
         if should_stop:
-            try:
-                self._picam.stop()
-            except Exception:
-                pass
+            if self._mode == "picam":
+                try:
+                    self._picam.stop()
+                except Exception:
+                    pass
             with self._lock:
                 self._latest_frame = None
                 self._latest_faces = []
@@ -158,9 +198,15 @@ class CameraService:
                 continue
             t0 = time.time()
             try:
-                arr = self._picam.capture_array("main")
-                # picamera2 'RGB888' é na verdade BGR — inverte canais
-                # depois transpoe (H,W,3) → (W,H,3) pro pygame.surfarray
+                if self._mode == "usb":
+                    ok, arr = self._usb_cap.read()   # BGR
+                    if not ok or arr is None:
+                        time.sleep(frame_dt)
+                        continue
+                else:
+                    arr = self._picam.capture_array("main")
+                # 'RGB888' do picamera2 é na verdade BGR (igual cv2) — inverte
+                # canais e transpõe (H,W,3) → (W,H,3) pro pygame.surfarray
                 surf = pygame.surfarray.make_surface(arr[:, :, ::-1].transpose([1, 0, 2]))
                 with self._lock:
                     self._latest_frame = surf
@@ -172,9 +218,10 @@ class CameraService:
                     self.fps = self._frame_count / window
                     self._frame_count = 0
                     self._fps_window_start = now
-                # Face detection só se alguém pediu recentemente
+                # Face detection só em câmera Pi (USB não tem inteligência) e
+                # só se alguém pediu recentemente
                 face_skip += 1
-                wants_faces = (HAS_CV2
+                wants_faces = (HAS_CV2 and self.kind in ("ai", "csi")
                                and time.time() - self._last_face_request < FACE_REQUEST_TIMEOUT_S)
                 if wants_faces and face_skip >= 3:
                     face_skip = 0
@@ -217,13 +264,19 @@ class CameraService:
             return list(self._latest_faces)
 
     def capture_photo(self, target_dir: Path) -> Optional[Path]:
-        """Captura uma foto em alta resolução. Retorna o Path ou None."""
-        if not self.is_available or self._picam is None:
+        """Captura uma foto. Retorna o Path ou None."""
+        if not self.is_available:
             return None
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
             filename = target_dir / f"photo_{int(time.time())}.jpg"
-            self._picam.capture_file(str(filename))
+            if self._mode == "usb":
+                ok, arr = self._usb_cap.read()
+                if not ok or arr is None:
+                    return None
+                cv2.imwrite(str(filename), arr)
+            else:
+                self._picam.capture_file(str(filename))
             return filename
         except Exception:
             return None
@@ -235,11 +288,27 @@ class CameraService:
                 self._picam.stop()
             except Exception:
                 pass
+        if self._usb_cap is not None:
+            try:
+                self._usb_cap.release()
+            except Exception:
+                pass
         self.is_available = False
 
     @property
+    def intelligence_active(self) -> bool:
+        """True quando a câmera suporta inteligência (Pi cam, não USB)."""
+        return self.kind in ("ai", "csi") and HAS_CV2
+
+    @property
+    def kind_label(self) -> str:
+        return {"ai": "PI AI CAM", "csi": "PI CAM", "usb": "USB", "none": "--"}.get(self.kind, "--")
+
+    @property
     def detector_status(self) -> str:
-        """ACTIVE se cv2 tá rodando agora; IDLE se ngm pediu; OFF se sem cv2."""
+        """ACTIVE se cv2 tá rodando agora; IDLE se ngm pediu; OFF caso contrário."""
+        if self.kind == "usb":
+            return "OFF (usb)"
         if not HAS_CV2:
             return "OFF (no cv2)"
         if not self._active:
