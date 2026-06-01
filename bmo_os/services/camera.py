@@ -20,6 +20,7 @@ Setup no Pi:
 """
 from __future__ import annotations
 
+import os
 import threading
 import time
 from pathlib import Path
@@ -90,8 +91,11 @@ class CameraService:
         self._users = 0         # refcount de quem pediu a câmera
         self._stop_flag = False
 
-        # 1) tenta câmera Pi (CSI / AI cam) via picamera2
-        if HAS_PICAMERA:
+        # BMO_CAMERA: "auto" (padrão) | "usb" (força webcam USB) | "pi" (só picamera2)
+        pref = os.environ.get("BMO_CAMERA", "auto").strip().lower()
+
+        # 1) tenta câmera Pi (CSI / AI cam) via picamera2 — pulada se pref=usb
+        if HAS_PICAMERA and pref in ("auto", "pi"):
             try:
                 self._picam = Picamera2()
                 kwargs = dict(main={"size": PREVIEW_SIZE, "format": "RGB888"})
@@ -104,28 +108,28 @@ class CameraService:
                 self._mode = "picam"
                 self.is_available = True
             except Exception as e:
-                self.error = f"camera: {str(e)[:40]}"
+                self.error = f"picam: {str(e)[:40]}"
                 self._picam = None
 
-        # 2) fallback: webcam USB via OpenCV (sem inteligência por enquanto)
-        if not self.is_available and HAS_CV2_MODULE:
-            try:
-                cap = cv2.VideoCapture(0)
-                if cap is not None and cap.isOpened():
-                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, PREVIEW_W)
-                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, PREVIEW_H)
-                    self._usb_cap = cap
-                    self.kind = "usb"
-                    self._mode = "usb"
-                    self.is_available = True
-                elif cap is not None:
-                    cap.release()
-            except Exception as e:
-                self.error = f"usb cam: {str(e)[:40]}"
+        # 2) webcam USB via OpenCV (sem inteligência) — pulada se pref=pi
+        if not self.is_available and HAS_CV2_MODULE and pref in ("auto", "usb"):
+            cap = self._open_usb_capture()
+            if cap is not None:
+                self._usb_cap = cap
+                self.kind = "usb"
+                self._mode = "usb"
+                self.is_available = True
+            else:
+                self.error = "webcam USB nao abriu"
 
         if not self.is_available:
             if not self.error:
-                self.error = "nenhuma camera" if HAS_PICAMERA or HAS_CV2_MODULE else "picamera2 nao instalada"
+                if pref == "usb" and not HAS_CV2_MODULE:
+                    self.error = "instale opencv (cv2)"
+                elif not HAS_PICAMERA and not HAS_CV2_MODULE:
+                    self.error = "sem picamera2/opencv"
+                else:
+                    self.error = "nenhuma camera"
             return
 
         self._thread = threading.Thread(target=self._loop, daemon=True)
@@ -140,6 +144,28 @@ class CameraService:
         except Exception:
             pass
         return "csi"
+
+    def _open_usb_capture(self):
+        """Abre a 1a webcam USB que responder (tenta índices 0..3). cv2.VideoCapture."""
+        for idx in range(4):
+            try:
+                cap = cv2.VideoCapture(idx)
+            except Exception:
+                continue
+            if cap is None:
+                continue
+            if cap.isOpened():
+                # confirma que realmente entrega frame (alguns índices "abrem" vazios)
+                ok, _ = cap.read()
+                if ok:
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, PREVIEW_W)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, PREVIEW_H)
+                    return cap
+            try:
+                cap.release()
+            except Exception:
+                pass
+        return None
 
     # ---------- lifecycle (refcount) ----------
 

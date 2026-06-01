@@ -39,7 +39,7 @@ class AlertScreen:
         self._dismissed = False
 
     def enter(self) -> None:
-        audio.play("plim")
+        audio.play("alarm")   # pipipi (mesmo do pomodoro)
 
     def exit(self) -> None: ...
 

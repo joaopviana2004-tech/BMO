@@ -39,6 +39,10 @@ class AITestScreen:
 
     def enter(self) -> None:
         try:
+            self._mics = self.voice.list_input_devices()
+        except Exception:
+            self._mics = []
+        try:
             self.voice.start_monitor()
         except Exception:
             pass
@@ -125,8 +129,10 @@ class AITestScreen:
             scaled = pygame.transform.scale(prev, (box.w - 2, box.h - 2))
             surface.blit(scaled, (box.x + 1, box.y + 1))
         else:
-            msg = render_text("sem video", 8, CRT_DIM, pixel=False)
-            surface.blit(msg, msg.get_rect(center=box.center))
+            err = getattr(self.camera, "error", "") or "sem video"
+            for i, line in enumerate(self._wrap(err, 20)[:3]):
+                m = render_text(line, 8, CRT_DIM, pixel=False)
+                surface.blit(m, m.get_rect(center=(box.centerx, box.centery - 8 + i * 10)))
         # tipo + inteligência
         kind = getattr(self.camera, "kind_label", "--")
         intel = getattr(self.camera, "intelligence_active", False)
@@ -150,8 +156,9 @@ class AITestScreen:
         # dispositivo + status
         from ..core import config
         dev = (config.get("mic_device") or "padrao")
-        dev = dev if len(dev) <= 22 else dev[:21] + "."
-        surface.blit(render_text(f"dev: {dev}", 8, CRT_DIM, pixel=False), (x, 70))
+        dev = dev if len(dev) <= 16 else dev[:15] + "."
+        n = len(getattr(self, "_mics", []))
+        surface.blit(render_text(f"dev: {dev} ({n} mics)", 8, CRT_DIM, pixel=False), (x, 70))
         status = getattr(self.voice, "status", "?")
         avail = getattr(self.voice, "available", False)
         sc = CRT_WHITE if avail else Colors.RED
