@@ -50,7 +50,7 @@ class App:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
-                elif event.type == pygame.KEYDOWN and event.key == pygame.K_F4:
+                elif event.type == pygame.KEYDOWN and event.key in (pygame.K_F4, pygame.K_f):
                     self.running = False
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     bmo_input.dispatch_touch(self._to_logical(event.pos))
