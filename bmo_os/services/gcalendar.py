@@ -1,16 +1,18 @@
-"""Leitor de Google Calendar via URL secreta iCal (read-only, multi-conta).
+"""Leitor de Google Calendar via iCal (read-only, multi-conta).
 
-Cada calendário do Google expõe um "Endereço secreto no formato iCal"
-(Configurações do calendário -> Integrar agenda). Aqui a gente baixa esses
-.ics, expande eventos recorrentes e devolve só os eventos de HOJE.
+Baixa .ics, expande eventos recorrentes e devolve só os eventos de HOJE.
 
-Multi-conta: várias URLs separadas por vírgula, cada uma com um rótulo
-opcional no formato `Rotulo=https://...`. Cada conta ganha uma cor pra
-diferenciar na tela AGENDA.
+Cada fonte (separadas por vírgula, rótulo opcional `Rotulo=...`) pode ser:
+  - uma URL .ics completa: secreta (Configurações -> "Endereço secreto no
+    formato iCal") OU pública (calendário tornado público);
+  - só o ID/e-mail de um calendário PÚBLICO (ex: seu@gmail.com ou
+    `xxx@group.calendar.google.com`) — a gente monta a URL pública sozinho.
+
+Cada conta ganha uma cor pra diferenciar na tela AGENDA.
 
 Config:
     env GCAL_ICS_URLS  (ganha de config['gcal_ics_urls'])
-    formato: "Pessoal=https://...,Trabalho=https://...,https://..."
+    formato: "Pessoal=https://...,Feriados=br#holiday@group.v.calendar.google.com"
 
 Roda em thread (igual weather/todoist) e mantém o último snapshot bom.
 Sem as libs `icalendar`/`recurring_ical_events` -> snapshot.ok=False com
@@ -22,6 +24,7 @@ import datetime as dt
 import os
 import threading
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
@@ -78,24 +81,42 @@ class CalendarSnapshot:
     fetched_at: float = 0.0
 
 
-def _parse_sources(raw: str) -> list[tuple[str, str]]:
-    """Quebra "Rotulo=url,url2" em [(rotulo, url), ...].
+# URL pública iCal de um calendário (montada a partir do ID/e-mail).
+PUBLIC_ICS = "https://calendar.google.com/calendar/ical/{}/public/basic.ics"
 
-    URL secreta do Google não tem '=' nem ',', então o split é seguro.
+
+def _to_ics_url(value: str) -> str:
+    """Resolve a fonte numa URL .ics.
+
+    - http(s):// ou webcal:// -> usa como está (URL secreta ou pública pronta);
+    - qualquer outra coisa -> trata como ID de calendário público e monta a URL.
+    """
+    value = value.strip()
+    if value.startswith("webcal://"):
+        return "https://" + value[len("webcal://"):]
+    if value.startswith(("http://", "https://")):
+        return value
+    # ID/e-mail de calendário público (precisa estar "público" no Google)
+    return PUBLIC_ICS.format(urllib.parse.quote(value, safe=""))
+
+
+def _parse_sources(raw: str) -> list[tuple[str, str]]:
+    """Quebra "Rotulo=fonte,fonte2" em [(rotulo, url_ics), ...].
+
+    'fonte' pode ser URL completa ou ID de calendário público. URL secreta e
+    IDs do Google não têm ',' e o ID não tem '=', então os splits são seguros.
     """
     out: list[tuple[str, str]] = []
     for i, chunk in enumerate(raw.split(",")):
         chunk = chunk.strip()
         if not chunk:
             continue
-        if "=" in chunk:
-            label, _, url = chunk.partition("=")
-            label, url = label.strip(), url.strip()
+        if "=" in chunk and not chunk.startswith(("http://", "https://", "webcal://")):
+            label, _, src = chunk.partition("=")
+            label, src = label.strip(), src.strip()
         else:
-            label, url = f"Conta {i + 1}", chunk
-        # aceita webcal:// (Google às vezes oferece esse esquema)
-        if url.startswith("webcal://"):
-            url = "https://" + url[len("webcal://"):]
+            label, src = f"Conta {i + 1}", chunk
+        url = _to_ics_url(src)
         if url:
             out.append((label, url))
     return out
