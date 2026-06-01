@@ -38,7 +38,6 @@ class AITestScreen:
         self.camera = camera
         self.sysinfo = sysinfo
         self.chat = chat
-        self._bmo_msg = ""
         self._t = 0.0
 
     def enter(self) -> None:
@@ -89,21 +88,17 @@ class AITestScreen:
         if not getattr(self.voice, "available", False) or self.voice.busy:
             audio.play("back"); return
         audio.play("select")
-        self._bmo_msg = ""
         # pausa o monitor passivo (mesmo device) e grava
         self.voice.stop_monitor()
         self.voice.record_and_transcribe(on_done=self._on_transcribed)
 
     def _on_transcribed(self, text: str) -> None:
-        # roda na thread de voz (após transcrição). Religa o monitor e
-        # manda o texto pro BMO responder via OpenRouter.
+        # roda na thread de voz (após transcrição). Religa o monitor e manda o
+        # texto pro BMO responder (chat.ask atualiza chat.last_msg, que a UI lê).
         self._restart_monitor()
         text = (text or "").strip()
-        if not text or self.chat is None or not self.chat.available:
-            return
-        self._bmo_msg = "..."
-        reply = self.chat.ask(text)
-        self._bmo_msg = reply or ("[" + (self.chat.last_error or "sem resposta")[:40] + "]")
+        if text and self.chat is not None and self.chat.available:
+            self.chat.ask(text)
 
     def _restart_monitor(self) -> None:
         try:
@@ -240,7 +235,8 @@ class AITestScreen:
         by = y0 + 12
         lbl = render_text("BMO: ", 9, Colors.CYAN, pixel=False)
         surface.blit(lbl, (20, by))
-        lines = self._wrap(self._bmo_msg or "—", 50)[:2]
+        bmo_msg = getattr(self.chat, "last_msg", "") if self.chat else ""
+        lines = self._wrap(bmo_msg or "—", 50)[:2]
         if lines:
             surface.blit(render_text(lines[0], 9, CRT_WHITE, pixel=False),
                          (20 + lbl.get_width(), by))

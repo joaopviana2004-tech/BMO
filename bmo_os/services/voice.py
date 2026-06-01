@@ -114,6 +114,7 @@ class VoiceService:
         self._monitor_stream = None
         self._wake_thread = None
         self._wake_stop = threading.Event()
+        self._hold = False           # push-to-talk físico: True enquanto o botão está pressionado
         self._commands: list[tuple[list[str], object]] = []
         self._whisper = None
         # --- debug ---
@@ -433,6 +434,57 @@ class VoiceService:
             self._dispatch(text)
 
         threading.Thread(target=work, daemon=True).start()
+
+    # ---------- push-to-talk físico (botão GPIO: grava enquanto segura) ----------
+
+    def ptt_begin(self, on_done=None) -> None:
+        """Começa a gravar (chamado ao PRESSIONAR o botão). Grava até ptt_end()."""
+        if self._busy or not self.available or not HAS_AUDIO:
+            return
+        self._busy = True
+        self._hold = True
+        self.status = "gravando..."
+        threading.Thread(target=self._hold_worker, args=(on_done,), daemon=True).start()
+
+    def ptt_end(self) -> None:
+        """Para de gravar (chamado ao SOLTAR o botão) — o worker transcreve."""
+        self._hold = False
+
+    def _hold_worker(self, on_done) -> None:
+        chunks: list = []
+        try:
+            with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+                                device=self._device_index(), blocksize=1024) as stream:
+                while self._hold:
+                    block, _ = stream.read(1024)
+                    mono = block[:, 0]
+                    chunks.append(mono.copy())
+                    rms = float(np.sqrt(np.mean(np.square(mono))))
+                    with self._lock:
+                        self._level = min(1.0, rms * 4.0)
+        except Exception as e:
+            self.last_error = f"mic: {str(e)[:50]}"
+        with self._lock:
+            self._level = 0.0
+        audio = np.concatenate(chunks) if chunks else None
+        self.status = "processando..."
+        text = self._transcribe(audio) if audio is not None else ""
+        with self._lock:
+            self.last_text = text
+        self._log(text, "ptt")
+        if text:
+            self.status = "pronto"
+        elif self.last_error:
+            self.status = self.last_error[:40]
+        else:
+            self.status = "vazio (sem fala?)"
+        self._busy = False
+        if on_done:
+            try:
+                on_done(text)
+            except Exception:
+                pass
+        self._dispatch(text)
 
     @property
     def busy(self) -> bool:

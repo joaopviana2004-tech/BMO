@@ -7,6 +7,7 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import threading
 from pathlib import Path
@@ -39,6 +40,7 @@ from bmo_os.services import audio
 from bmo_os.services.camera import CameraService
 from bmo_os.services.chat import ChatService
 from bmo_os.services.gcalendar import CalendarService
+from bmo_os.services.gpio_button import GPIOButton
 from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.notifications import EventAlerter
 from bmo_os.services.sysinfo import SysInfoService
@@ -69,6 +71,19 @@ def build_initial(app: App):
     voice = VoiceService()
     # BMO responde via LLM (OpenRouter). Degrada sem OPENROUTER_API_KEY.
     chat = ChatService()
+
+    # Botão físico de push-to-talk (GPIO): segura = grava, solta = transcreve
+    # + BMO responde. No PC degrada (ok=False); use o botão da tela TESTE.
+    def _ptt_done(text):
+        if text and chat.available:
+            chat.ask(text)   # atualiza chat.last_msg (a UI lê)
+
+    ptt_pin = int(os.environ.get("PTT_GPIO", "17"))
+    ptt_button = GPIOButton(
+        ptt_pin,
+        on_press=lambda: voice.ptt_begin(on_done=_ptt_done),
+        on_release=voice.ptt_end,
+    )
     # Fila de ações dos comandos de voz: o wake-loop roda em thread, então
     # empilhamos a navegação aqui e executamos no main thread (frame_hook).
     voice_queue: list = []

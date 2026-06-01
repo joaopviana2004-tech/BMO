@@ -33,19 +33,22 @@ SYSTEM_PROMPT = (
 class ChatService:
     def __init__(self) -> None:
         self.last_error = ""
+        self.last_msg = ""       # última resposta do BMO (pra UI ler)
 
     @property
     def available(self) -> bool:
         return bool(OPENROUTER_API_KEY)
 
     def ask(self, text: str) -> str:
-        """Manda o texto pro LLM e retorna a msg do BMO (ou "" + last_error)."""
+        """Manda o texto pro LLM e retorna a msg do BMO (ou "" + last_error).
+        Atualiza self.last_msg ("..." enquanto pensa) pra UI exibir."""
         self.last_error = ""
         if not OPENROUTER_API_KEY:
             self.last_error = "falta OPENROUTER_API_KEY"
             return ""
         if not (text or "").strip():
             return ""
+        self.last_msg = "..."
         body = json.dumps({
             "model": OPENROUTER_MODEL,
             "messages": [
@@ -66,7 +69,8 @@ class ChatService:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             content = data["choices"][0]["message"]["content"]
-            return self._extract_msg(content)
+            self.last_msg = self._extract_msg(content)
+            return self.last_msg
         except urllib.error.HTTPError as e:
             raw = ""
             try:
@@ -79,12 +83,15 @@ class ChatService:
             except Exception:
                 pass
             self.last_error = f"HTTP {e.code}: {(msg or '').strip()[:90]}"
+            self.last_msg = ""
             return ""
         except urllib.error.URLError as e:
             self.last_error = f"rede: {str(e.reason)[:70]}"
+            self.last_msg = ""
             return ""
         except Exception as e:
             self.last_error = f"erro: {str(e)[:70]}"
+            self.last_msg = ""
             return ""
 
     @staticmethod
