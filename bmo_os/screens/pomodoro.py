@@ -55,6 +55,7 @@ class PomodoroScreen:
         self.running = False
         self.completed = 0          # focos concluídos (pra "tomates" e pausa longa)
         self._focus_id = None       # id da tarefa DOING em foco
+        self._work_time: dict = {}  # tempo de FOCO acumulado por task_id (segundos)
         self._t = 0.0
 
     def enter(self) -> None: ...
@@ -67,6 +68,9 @@ class PomodoroScreen:
         self._sync_focus()
         if not self.running:
             return
+        # acumula tempo de trabalho da tarefa atual (só em FOCO)
+        if self.phase == "focus" and self._focus_id is not None:
+            self._work_time[self._focus_id] = self._work_time.get(self._focus_id, 0.0) + dt
         self.remaining -= dt
         if self.remaining <= 0:
             self._advance()
@@ -120,6 +124,8 @@ class PomodoroScreen:
         if not self.todoist or not self.todoist.move(self._focus_id, "done"):
             return
         audio.play("click")
+        # zera o tempo de trabalho da tarefa concluída (timer reinicia)
+        self._work_time.pop(self._focus_id, None)
         # já aponta pra próxima de DOING (vizinha na ordem atual)
         if i + 1 < len(ids):
             self._focus_id = ids[i + 1]
@@ -224,6 +230,7 @@ class PomodoroScreen:
         self._draw_state_icon(surface, CX, 130)
         self._draw_tomatoes(surface, CX, 148)
         self._draw_task_selector(surface)
+        self._draw_work_time(surface)
         self._draw_buttons(surface)
 
     def _draw_state_icon(self, surface, cx: int, cy: int) -> None:
@@ -270,6 +277,32 @@ class PomodoroScreen:
             ])
         name = render_text(self._fit(task.content, 30), 9, CRT_WHITE, pixel=False)
         surface.blit(name, name.get_rect(center=(CX, y)))
+
+    def _draw_work_time(self, surface) -> None:
+        """Tempo de FOCO acumulado na tarefa atual (relógiozinho + tempo)."""
+        if self._current_task() is None:
+            return
+        secs = self._work_time.get(self._focus_id, 0.0)
+        txt = self._fmt_dur(secs)
+        img = render_text(txt, 8, CRT_DIM, pixel=False)
+        y = 192
+        total_w = 10 + img.get_width()
+        x = CX - total_w // 2
+        # relógiozinho
+        cxi, cyi = x + 4, y + 4
+        pygame.draw.circle(surface, CRT_DIM, (cxi, cyi), 4, 1)
+        pygame.draw.line(surface, CRT_DIM, (cxi, cyi), (cxi, cyi - 2), 1)
+        pygame.draw.line(surface, CRT_DIM, (cxi, cyi), (cxi + 2, cyi), 1)
+        surface.blit(img, (x + 10, y))
+
+    @staticmethod
+    def _fmt_dur(secs: float) -> str:
+        s = int(secs)
+        h, rem = divmod(s, 3600)
+        m, ss = divmod(rem, 60)
+        if h:
+            return f"{h}:{m:02d}:{ss:02d}"
+        return f"{m:02d}:{ss:02d}"
 
     def _draw_buttons(self, surface) -> None:
         self._draw_text_btn(surface, self._reset_btn(), "RESET", strong=False)

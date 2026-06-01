@@ -27,6 +27,7 @@ from bmo_os.screens.photo import PHOTOS_DIR, PhotoScreen
 from bmo_os.screens.pomodoro import PomodoroScreen
 from bmo_os.screens.pong import PongAmbientScreen, PongScreen
 from bmo_os.screens.settings import SettingsScreen
+from bmo_os.screens.sysinfo import SysInfoScreen
 from bmo_os.screens.shuffler import ShufflingAmbientScreen
 from bmo_os.screens.sleep import SleepScreen
 from bmo_os.screens.space_invaders import SpaceInvadersAmbientScreen, SpaceInvadersScreen
@@ -37,6 +38,7 @@ from bmo_os.services.camera import CameraService
 from bmo_os.services.gcalendar import CalendarService
 from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.notifications import EventAlerter
+from bmo_os.services.sysinfo import SysInfoService
 from bmo_os.services.todoist import TodoistService
 
 
@@ -54,6 +56,11 @@ def build_initial(app: App):
     # Google Calendar (URLs secretas iCal) + disparador de avisos de evento
     calendar = CalendarService()
     alerter = EventAlerter()
+    # Telemetria de hardware (tela SISTEMA). No PC mostra "--".
+    sysinfo = SysInfoService()
+    # Pomodoro é cacheado: o tempo de foco por tarefa (e o estado do timer)
+    # sobrevive ao abrir/fechar a tela.
+    pomodoro = PomodoroScreen(on_back=app.manager.pop, todoist=todoist)
 
     def _instantiate_ambient(mode):
         if mode == "face":
@@ -129,9 +136,7 @@ def build_initial(app: App):
             on_open_agenda=lambda: app.manager.push(
                 AgendaScreen(on_back=app.manager.pop, calendar=calendar)
             ),
-            on_open_pomodoro=lambda: app.manager.push(
-                PomodoroScreen(on_back=app.manager.pop, todoist=todoist)
-            ),
+            on_open_pomodoro=lambda: app.manager.push(pomodoro),
             on_open_photo=lambda: app.manager.push(
                 PhotoScreen(
                     on_back=app.manager.pop,
@@ -140,6 +145,9 @@ def build_initial(app: App):
                         GalleryScreen(on_back=app.manager.pop, photos_dir=PHOTOS_DIR)
                     ),
                 )
+            ),
+            on_open_sysinfo=lambda: app.manager.push(
+                SysInfoScreen(on_back=app.manager.pop, sysinfo=sysinfo)
             ),
             on_open_settings=lambda: app.manager.push(
                 SettingsScreen(on_back=app.manager.pop, on_ambient_changed=lambda _m: None)

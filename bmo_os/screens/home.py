@@ -19,8 +19,8 @@ from ..core.widgets import (
 )
 from ..services import audio
 
-ITEMS = ["SLEEP", "SUSPEND", "GAMES", "TASKS", "AGENDA", "FOCO", "PHOTO", "SETTINGS"]
-ICONS = ["sleep", "suspend", "games", "tasks", "agenda", "pomodoro", "photo", "settings"]
+ITEMS = ["SLEEP", "SUSPEND", "GAMES", "TASKS", "AGENDA", "FOCO", "PHOTO", "SISTEMA", "SETTINGS"]
+ICONS = ["sleep", "suspend", "games", "tasks", "agenda", "pomodoro", "photo", "sysinfo", "settings"]
 
 
 def _icon_sleep(surf: pygame.Surface, cx: int, cy: int) -> None:
@@ -135,20 +135,34 @@ def _icon_pomodoro(surf: pygame.Surface, cx: int, cy: int) -> None:
     pygame.draw.line(surf, CRT_WHITE, (cx, cy - 11), (cx + 6, cy - 13), 2)
 
 
+def _icon_sysinfo(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # chip/processador: corpo quadrado, die interno e perninhas nos 4 lados
+    body = pygame.Rect(0, 0, 26, 26)
+    body.center = (cx, cy)
+    pygame.draw.rect(surf, CRT_WHITE, body, 2)
+    pygame.draw.rect(surf, CRT_DIM, body.inflate(-12, -12))
+    for off in (-7, 0, 7):
+        pygame.draw.line(surf, CRT_WHITE, (body.left + 13 + off, body.top - 4), (body.left + 13 + off, body.top), 2)
+        pygame.draw.line(surf, CRT_WHITE, (body.left + 13 + off, body.bottom), (body.left + 13 + off, body.bottom + 4), 2)
+        pygame.draw.line(surf, CRT_WHITE, (body.left - 4, body.top + 13 + off), (body.left, body.top + 13 + off), 2)
+        pygame.draw.line(surf, CRT_WHITE, (body.right, body.top + 13 + off), (body.right + 4, body.top + 13 + off), 2)
+
+
 _DRAW_ICON = [
     _icon_sleep, _icon_suspend, _icon_games, _icon_tasks,
-    _icon_agenda, _icon_pomodoro, _icon_photo, _icon_settings,
+    _icon_agenda, _icon_pomodoro, _icon_photo, _icon_sysinfo, _icon_settings,
 ]
 
 
 class HomeScreen:
     def __init__(self, *, on_back, on_open_sleep, on_open_suspend, on_open_games,
                  on_open_tasks, on_open_agenda, on_open_pomodoro,
-                 on_open_photo, on_open_settings) -> None:
+                 on_open_photo, on_open_sysinfo, on_open_settings) -> None:
         self.on_back = on_back
         self._on_select = [
             on_open_sleep, on_open_suspend, on_open_games, on_open_tasks,
-            on_open_agenda, on_open_pomodoro, on_open_photo, on_open_settings,
+            on_open_agenda, on_open_pomodoro, on_open_photo, on_open_sysinfo,
+            on_open_settings,
         ]
         self.on_open_games = on_open_games
         self.on_open_settings = on_open_settings
