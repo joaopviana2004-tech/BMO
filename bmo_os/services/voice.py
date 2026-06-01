@@ -25,9 +25,13 @@ Setup no Pi (resumo):
 """
 from __future__ import annotations
 
+import io
+import json
 import os
 import threading
 import time
+import urllib.request
+import wave
 from pathlib import Path
 
 import numpy as np
@@ -79,6 +83,15 @@ except ValueError:
 _DEFAULT_PPN = Path(__file__).resolve().parent.parent / "assets" / "bimo.ppn"
 PPN_PATH = Path(os.environ.get("PORCUPINE_KEYWORD_PATH", str(_DEFAULT_PPN)))
 
+# --- STT por API (compatível com OpenAI /audio/transcriptions) ---
+# Tira TODA a inferência da Pi (sem calor) e usa whisper-large-v3 (mais preciso).
+# Default: Groq (rápido, tier grátis). Serve qualquer endpoint compatível
+# (OpenAI, NVIDIA, ou um faster-whisper-server self-hosted).
+STT_BACKEND = os.environ.get("STT_BACKEND", "auto").strip().lower()   # auto|api|local
+STT_API_URL = os.environ.get("STT_API_URL", "https://api.groq.com/openai/v1/audio/transcriptions")
+STT_API_MODEL = os.environ.get("STT_API_MODEL", "whisper-large-v3-turbo")
+STT_API_KEY = os.environ.get("STT_API_KEY", "").strip()
+
 # endpointing simples por energia (grava a fala até o silêncio)
 SILENCE_RMS = 0.012          # abaixo disso = silêncio
 MAX_UTTERANCE_S = 6.0
@@ -104,6 +117,8 @@ class VoiceService:
 
         if not HAS_AUDIO:
             self.status = AUDIO_ERR or "sem sounddevice"
+        elif self._use_api():
+            self.status = "pronto (api)" if STT_API_KEY else "falta STT_API_KEY"
         elif not HAS_WHISPER:
             self.status = "sem whisper"
         else:
@@ -114,9 +129,20 @@ class VoiceService:
 
     # ---------- disponibilidade ----------
 
+    def _use_api(self) -> bool:
+        if STT_BACKEND == "local":
+            return False
+        if STT_BACKEND == "api":
+            return True
+        return bool(STT_API_KEY)   # auto: usa API se tiver chave
+
     @property
     def available(self) -> bool:
-        return HAS_AUDIO and HAS_WHISPER
+        if not HAS_AUDIO:
+            return False
+        if self._use_api():
+            return bool(STT_API_KEY)
+        return HAS_WHISPER
 
     @property
     def wakeword_available(self) -> bool:
@@ -215,7 +241,25 @@ class VoiceService:
             p["audio_ctx"] = WHISPER_AUDIO_CTX
         return p
 
+    @staticmethod
+    def _normalize(audio: "np.ndarray") -> "np.ndarray":
+        """Ganho automático: mic de webcam costuma ser baixo. Ganho capado em 8x
+        pra não estourar ruído quando não há fala."""
+        if audio is None or audio.size == 0:
+            return audio
+        peak = float(np.max(np.abs(audio)))
+        if peak <= 0:
+            return audio
+        gain = min(8.0, 0.9 / peak)
+        return (audio * gain).astype(np.float32)
+
     def _transcribe(self, audio: "np.ndarray") -> str:
+        audio = self._normalize(audio)
+        if self._use_api():
+            return self._transcribe_api(audio)
+        return self._transcribe_local(audio)
+
+    def _transcribe_local(self, audio: "np.ndarray") -> str:
         model = self._ensure_whisper()
         if model is None:
             return ""
@@ -232,6 +276,59 @@ class VoiceService:
             except Exception:
                 return ""
         return ""
+
+    # ---------- STT por API (OpenAI-compatible) ----------
+
+    def _transcribe_api(self, audio: "np.ndarray") -> str:
+        if not STT_API_KEY:
+            self.status = "falta STT_API_KEY"
+            return ""
+        try:
+            text = self._post_transcription(self._to_wav_bytes(audio))
+            return text
+        except Exception as e:
+            self.status = f"api erro: {str(e)[:28]}"
+            return ""
+
+    @staticmethod
+    def _to_wav_bytes(audio: "np.ndarray") -> bytes:
+        pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(SAMPLE_RATE)
+            w.writeframes(pcm)
+        return buf.getvalue()
+
+    @staticmethod
+    def _post_transcription(wav: bytes) -> str:
+        boundary = "----BMOFormBoundary8x4tZqueV0iceBMO"
+        sep = ("--" + boundary).encode()
+        parts: list = []
+
+        def field(name: str, value: str) -> None:
+            parts.append(sep + b"\r\n")
+            parts.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
+            parts.append(str(value).encode() + b"\r\n")
+
+        field("model", STT_API_MODEL)
+        field("language", "pt")
+        field("response_format", "json")
+        field("temperature", "0")
+        parts.append(sep + b"\r\n")
+        parts.append(b'Content-Disposition: form-data; name="file"; filename="audio.wav"\r\n')
+        parts.append(b"Content-Type: audio/wav\r\n\r\n")
+        parts.append(wav + b"\r\n")
+        parts.append(("--" + boundary + "--\r\n").encode())
+        body = b"".join(parts)
+
+        req = urllib.request.Request(STT_API_URL, data=body, method="POST")
+        req.add_header("Authorization", f"Bearer {STT_API_KEY}")
+        req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return (data.get("text") or "").strip()
 
     def _record_utterance(self) -> "np.ndarray | None":
         """Grava do mic até o silêncio (ou MAX_UTTERANCE_S). Bloqueante."""

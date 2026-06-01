@@ -7,9 +7,10 @@
 #
 # Wake word "BIMO": crie a keyword no Picovoice Console, baixe o .ppn pra
 # bmo_os/assets/bimo.ppn e ponha PORCUPINE_ACCESS_KEY no .env.
-# Whisper: pywhispercpp baixa o modelo ggml na 1a vez (ou aponte WHISPER_MODEL).
+# Transcrição: RECOMENDADO usar a API (Groq) no .env (STT_API_KEY) — tira o
+# calor da Pi. O pywhispercpp (local) só é necessário com STT_BACKEND=local.
 
-sounddevice>=0.4.6        # captura do microfone (audição)
-pywhispercpp>=1.2.0       # Whisper.cpp — transcrição (modelo small)
-pvporcupine>=3.0.0        # wake word "BMO"
+sounddevice>=0.4.6        # captura do microfone (audição) — sempre necessário
+pvporcupine>=3.0.0        # wake word "BIMO"
+# pywhispercpp>=1.2.0     # Whisper.cpp LOCAL (esquenta o Pi) — só p/ STT_BACKEND=local
 # opencv-python>=4.5.0    # webcam USB no PC (no Pi prefira: apt install python3-opencv)
