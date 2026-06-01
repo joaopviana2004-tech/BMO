@@ -16,6 +16,8 @@ import re
 import urllib.error
 import urllib.request
 
+from ..core import config  # noqa: F401 — importar dispara o _load_dotenv (.env)
+
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = os.environ.get(
     "OPENROUTER_MODEL", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
