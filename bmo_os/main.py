@@ -163,7 +163,7 @@ def build_initial(app: App):
                 SysInfoScreen(on_back=app.manager.pop, sysinfo=sysinfo)
             ),
             on_open_teste=lambda: app.manager.push(
-                AITestScreen(on_back=app.manager.pop, voice=voice, camera=camera)
+                AITestScreen(on_back=app.manager.pop, voice=voice, camera=camera, sysinfo=sysinfo)
             ),
             on_open_settings=lambda: app.manager.push(make_settings()),
         )

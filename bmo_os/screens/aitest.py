@@ -20,6 +20,7 @@ from ..core.widgets import (
     SAFE_INSET, draw_crt_corners, draw_scanlines,
 )
 from ..services import audio
+from .sysinfo import _temp_color   # mesmos limiares verde/amarelo/vermelho
 
 
 def _level_color(lv: float):
@@ -31,10 +32,11 @@ def _level_color(lv: float):
 
 
 class AITestScreen:
-    def __init__(self, *, on_back, voice, camera) -> None:
+    def __init__(self, *, on_back, voice, camera, sysinfo=None) -> None:
         self.on_back = on_back
         self.voice = voice
         self.camera = camera
+        self.sysinfo = sysinfo
         self._t = 0.0
 
     def enter(self) -> None:
@@ -113,9 +115,26 @@ class AITestScreen:
         title = render_text("TESTE IA", 10, CRT_DIM)
         surface.blit(title, title.get_rect(midtop=(LOGICAL_SIZE[0] // 2, SAFE_INSET + 1)))
 
+        self._draw_temp(surface)
         self._draw_camera(surface)
         self._draw_mic(surface)
         self._draw_ptt(surface)
+
+    def _draw_temp(self, surface) -> None:
+        """Quadradinho de debug da temperatura da Pi (canto sup-direito)."""
+        t = None
+        if self.sysinfo is not None:
+            try:
+                t = self.sysinfo.get().temp_c
+            except Exception:
+                t = None
+        color = _temp_color(t)
+        sq = pygame.Rect(LOGICAL_SIZE[0] - SAFE_INSET - 12, SAFE_INSET + 1, 11, 11)
+        pygame.draw.rect(surface, color, sq)
+        pygame.draw.rect(surface, CRT_WHITE, sq, 1)
+        txt = f"{t:.0f}C" if t is not None else "--C"
+        img = render_text(txt, 9, color, pixel=False)
+        surface.blit(img, img.get_rect(midright=(sq.left - 4, sq.centery)))
 
     def _draw_camera(self, surface) -> None:
         box = pygame.Rect(20, 38, 150, 86)
