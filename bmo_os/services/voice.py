@@ -30,6 +30,7 @@ import json
 import os
 import threading
 import time
+import urllib.error
 import urllib.request
 import wave
 from pathlib import Path
@@ -114,6 +115,8 @@ class VoiceService:
         self.wake_count = 0          # quantas vezes o wake word disparou
         self._last_wake = 0.0        # time.time() da última ativação
         self.history: list = []      # últimas frases reconhecidas ("src: texto")
+        self.last_error = ""         # último erro de transcrição (HTTP/rede/vazio)
+        self.last_audio = ""         # info do último áudio gravado (dur/peak)
 
         if not HAS_AUDIO:
             self.status = AUDIO_ERR or "sem sounddevice"
@@ -253,7 +256,18 @@ class VoiceService:
         gain = min(8.0, 0.9 / peak)
         return (audio * gain).astype(np.float32)
 
+    def _note_audio(self, audio) -> None:
+        """Guarda duração + pico do áudio CRU (pré-normalização) pra debug."""
+        if audio is None or getattr(audio, "size", 0) == 0:
+            self.last_audio = "0s (nada gravado)"
+            return
+        dur = audio.size / SAMPLE_RATE
+        peak = float(np.max(np.abs(audio)))
+        self.last_audio = f"{dur:.1f}s pico{peak:.2f}"
+
     def _transcribe(self, audio: "np.ndarray") -> str:
+        self.last_error = ""
+        self._note_audio(audio)               # info do áudio cru (pré-normalização)
         audio = self._normalize(audio)
         if self._use_api():
             return self._transcribe_api(audio)
@@ -281,13 +295,31 @@ class VoiceService:
 
     def _transcribe_api(self, audio: "np.ndarray") -> str:
         if not STT_API_KEY:
-            self.status = "falta STT_API_KEY"
+            self.last_error = "falta STT_API_KEY"
             return ""
         try:
             text = self._post_transcription(self._to_wav_bytes(audio))
+            if not text:
+                self.last_error = "api: resposta vazia (audio mudo?)"
             return text
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", "ignore")
+            except Exception:
+                pass
+            msg = body
+            try:
+                msg = json.loads(body).get("error", {}).get("message", body)
+            except Exception:
+                pass
+            self.last_error = f"HTTP {e.code}: {(msg or '').strip()[:90]}"
+            return ""
+        except urllib.error.URLError as e:
+            self.last_error = f"rede: {str(e.reason)[:70]}"
+            return ""
         except Exception as e:
-            self.status = f"api erro: {str(e)[:28]}"
+            self.last_error = f"erro: {str(e)[:70]}"
             return ""
 
     @staticmethod
@@ -377,7 +409,13 @@ class VoiceService:
             with self._lock:
                 self.last_text = text
             self._log(text, "fala")
-            self.status = "pronto"
+            # status reflete o resultado (não sobrescreve o erro com "pronto")
+            if text:
+                self.status = "pronto"
+            elif self.last_error:
+                self.status = self.last_error[:40]
+            else:
+                self.status = "vazio (sem fala?)"
             self._busy = False
             if on_done:
                 try:

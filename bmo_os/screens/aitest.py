@@ -192,6 +192,9 @@ class AITestScreen:
         else:
             wc, state = CRT_DIM, "off"
         surface.blit(render_text(f"wake BIMO: {state}  det:{det}", 8, wc, pixel=False), (x, 94))
+        # info do ultimo audio gravado (mic mudo? capturou?)
+        ai = getattr(self.voice, "last_audio", "") or "-"
+        surface.blit(render_text(f"audio: {ai}", 8, CRT_DIM, pixel=False), (x, 106))
 
     def _draw_ptt(self, surface) -> None:
         rect = self._ptt_btn()
@@ -211,12 +214,18 @@ class AITestScreen:
         surface.blit(img, img.get_rect(center=rect.center))
 
         # log das frases reconhecidas (push-to-talk e wake word)
-        y0 = rect.bottom + 8
+        y0 = rect.bottom + 6
         surface.blit(render_text("LOG (reconhecido):", 8, CRT_DIM, pixel=False), (20, y0))
         hist = getattr(self.voice, "history", []) or ["—"]
-        for i, line in enumerate(hist[-3:]):
-            img = render_text(self._fit_line(line, 58), 8, CRT_WHITE, pixel=False)
-            surface.blit(img, (20, y0 + 11 + i * 10))
+        for i, line in enumerate(hist[-2:]):
+            img = render_text(self._fit_line(line, 60), 8, CRT_WHITE, pixel=False)
+            surface.blit(img, (20, y0 + 10 + i * 9))
+        # linha de debug da API (erro detalhado, se houver)
+        err = getattr(self.voice, "last_error", "")
+        api_txt = ("api: " + err) if err else "api: ok"
+        api_color = Colors.RED if err else Colors.GREEN_BTN
+        img = render_text(self._fit_line(api_txt, 60), 8, api_color, pixel=False)
+        surface.blit(img, (20, y0 + 30))
 
     @staticmethod
     def _fit_line(text: str, n: int) -> str:
