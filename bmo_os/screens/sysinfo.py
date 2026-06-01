@@ -156,14 +156,11 @@ class SysInfoScreen:
             surface.blit(msg, msg.get_rect(center=(gx + gw // 2, gy + gh // 2)))
             return
 
-        # usa os últimos gw pontos (1px por amostra), alinhado à direita
-        pts = hist[-gw:]
-        n = len(pts)
-        x0 = gx + gw - n
-        line = [(x0 + i, ty(t)) for i, t in enumerate(pts)]
-        if len(line) >= 2:
-            color = _temp_color(pts[-1])
-            pygame.draw.lines(surface, color, False, line, 1)
+        # estica as amostras (até 5 min) pela largura toda do gráfico
+        n = len(hist)
+        line = [(gx + int(i * (gw - 1) / (n - 1)), ty(t)) for i, t in enumerate(hist)]
+        color = _temp_color(hist[-1])
+        pygame.draw.lines(surface, color, False, line, 2)
 
     def _draw_footer(self, surface, snap) -> None:
         y = LOGICAL_SIZE[1] - SAFE_INSET - 8

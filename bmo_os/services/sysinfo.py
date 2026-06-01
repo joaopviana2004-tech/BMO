@@ -21,7 +21,7 @@ from collections import deque
 from dataclasses import dataclass
 
 POLL_S = 2.0
-HISTORY_LEN = 100            # ~3 min de histórico de temperatura a 2s
+HISTORY_LEN = 150            # 5 min de histórico de temperatura a 2s
 GPU_MAX_MHZ = 600.0          # nominal pra estimar "uso" do V3D (proxy)
 
 # bits do get_throttled que indicam problema ACONTECENDO agora
