@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -261,7 +262,25 @@ def build_initial(app: App):
     voice.register_command(["menu", "inicio", "casa", "home"], _cmd(open_home))
     voice.register_command(["relogio", "horas", "tela inicial", "descanso"], _cmd(go_ambient))
 
-    # ---- LLM pode abrir telas: chave (do JSON do chat) -> navegação ----
+    def do_update() -> None:
+        """Baixa a última versão (git reset --hard origin/main) e reinicia.
+        Libera o hardware antes do execv (ver cleanup_hardware)."""
+        try:
+            cleanup_hardware()
+        except Exception:
+            pass
+        root = str(config.REPO_ROOT)
+        try:
+            subprocess.run(["git", "-C", root, "fetch", "--quiet", "origin", "main"],
+                           timeout=60, check=False)
+            subprocess.run(["git", "-C", root, "reset", "--hard", "origin/main"],
+                           timeout=60, check=False)
+        except Exception:
+            pass
+        pygame.quit()
+        os.execv(sys.executable, [sys.executable, *sys.argv])
+
+    # ---- LLM pode abrir telas / agir: chave (do JSON do chat) -> ação ----
     # As chaves espelham SCREENS_DOC em services/chat.py.
     screen_actions = {
         "agenda": lambda: app.manager.push(AgendaScreen(on_back=app.manager.pop, calendar=calendar)),
@@ -273,17 +292,27 @@ def build_initial(app: App):
                         on_open_gallery=lambda: app.manager.push(
                             GalleryScreen(on_back=app.manager.pop, photos_dir=PHOTOS_DIR)))),
         "jogos": lambda: app.manager.push(make_games_screen()),
+        "pong": lambda: app.manager.push(PongScreen(on_back=app.manager.pop)),
+        "invaders": lambda: app.manager.push(SpaceInvadersScreen(on_back=app.manager.pop)),
         "configuracoes": lambda: app.manager.push(make_settings()),
-        "relogio": go_ambient,
+        # relógio explícito (NÃO o ambient configurado, que pode ser face/pong)
+        "relogio": lambda: app.manager.replace(_instantiate_ambient("clock")),
         "home": open_home,
+        "atualizar": do_update,
     }
 
     def handle_ai_response(text: str) -> None:
-        """Roda na thread de voz: manda o texto pro LLM e, se ele pedir uma
-        tela, enfileira a navegação pra rodar na main thread (frame_hook)."""
+        """Roda na thread de voz: manda o texto pro LLM e, conforme a resposta,
+        cria tarefa no Todoist e/ou enfileira a navegação pra main thread."""
         if not (text and chat.available):
             return
-        chat.ask(text)   # atualiza chat.last_msg / last_error / last_screen
+        chat.ask(text)   # atualiza last_msg / last_error / last_screen / last_task
+        task = (getattr(chat, "last_task", "") or "").strip()
+        if task:
+            try:
+                todoist.create(task)
+            except Exception:
+                pass
         action = screen_actions.get((getattr(chat, "last_screen", "") or "").strip())
         if action is not None:
             voice_enqueue(action)
@@ -324,18 +353,19 @@ def build_initial(app: App):
         busy = getattr(voice, "busy", False)
         status = (getattr(voice, "status", "") or "").lower()
         now = time.time()
-        # detecta nova resposta do BMO pra exibir por RESP_SHOW_S segundos
         msg = (getattr(chat, "last_msg", "") or "").strip()
+        thinking = (msg == "...")   # LLM em andamento (chat.ask marca "...")
+        # detecta nova resposta do BMO pra exibir por RESP_SHOW_S segundos
         if msg and msg != "..." and msg != ai_overlay["msg"]:
             ai_overlay["msg"] = msg
             ai_overlay["until"] = now + RESP_SHOW_S
         showing_resp = now < ai_overlay["until"] and bool(ai_overlay["msg"])
-        if not (busy or showing_resp):
+        if not (busy or thinking or showing_resp):
             return
 
         if busy and ("grav" in status or "ouv" in status):
             label, color, body = "GRAVANDO", Colors.RED, ""
-        elif busy:
+        elif busy or thinking:
             label, color, body = "PENSANDO", Colors.YELLOW, ""
         else:
             label, color, body = "BMO", Colors.CYAN, ai_overlay["msg"]

@@ -43,6 +43,7 @@ class Task:
 class TodoistSnapshot:
     ok: bool = False
     error: str = ""
+    project_id: str = ""                                     # id do projeto BMO
     sections: dict[str, str] = field(default_factory=dict)  # key -> section_id
     tasks: list[Task] = field(default_factory=list)
     fetched_at: float = 0.0
@@ -174,6 +175,7 @@ class TodoistService:
                 self.snapshot = TodoistSnapshot(
                     ok=True,
                     error="",
+                    project_id=str(project_id),
                     sections=sections,
                     tasks=tasks,
                     fetched_at=time.time(),
@@ -186,6 +188,7 @@ class TodoistService:
             self.snapshot = TodoistSnapshot(
                 ok=False,
                 error=msg,
+                project_id=self.snapshot.project_id,
                 sections=self.snapshot.sections,
                 tasks=self.snapshot.tasks,
                 fetched_at=time.time(),
@@ -241,3 +244,32 @@ class TodoistService:
         else:
             time.sleep(2)
             self.trigger_refresh()
+
+    # ---------- create ----------
+
+    def create(self, content: str, section_key: str = "to-do") -> bool:
+        """Cria uma tarefa no projeto BMO (seção 'to-do' por padrão). Roda em
+        thread pra não travar o frame. Retorna False se não dá pra criar."""
+        content = (content or "").strip()
+        if not content:
+            return False
+        token = _resolve_token()
+        if not token:
+            return False
+        snap = self.get()
+        body: dict = {"content": content}
+        section_id = snap.sections.get(section_key)
+        if section_id:
+            body["section_id"] = section_id   # section_id já define o projeto
+        elif snap.project_id:
+            body["project_id"] = snap.project_id
+        # senão, vai pra Inbox (fallback) — melhor criar lá do que falhar
+
+        def work():
+            status, _ = _request("POST", f"{API_BASE}/tasks", token, body=body)
+            if status in (200, 201):
+                time.sleep(1)
+                self.trigger_refresh()
+
+        threading.Thread(target=work, daemon=True).start()
+        return True

@@ -34,18 +34,23 @@ SCREENS_DOC = (
     "- foco: timer pomodoro pra focar numa tarefa.\n"
     "- sistema: hardware da Raspberry Pi (CPU, temperatura, memoria).\n"
     "- foto: abre a camera pra tirar foto.\n"
-    "- jogos: menu de jogos (Pong, Space Invaders).\n"
+    "- jogos: menu de jogos.\n"
+    "- pong: abre direto o jogo Pong.\n"
+    "- invaders: abre direto o jogo Space Invaders.\n"
     "- configuracoes: ajustes (volume, brilho, tema, etc.).\n"
     "- relogio: tela de descanso com o relogio (modo ambiente).\n"
     "- home: o menu principal do BMO.\n"
+    "- atualizar: baixa a ultima versao do BMO e reinicia (so se pedirem).\n"
 )
 
 SYSTEM_PROMPT = (
     "Voce e o BMO, o consolinho fofo e prestativo de Hora de Aventura. "
     "Responda em portugues do Brasil, curto (1-2 frases), simpatico e direto.\n"
     + SCREENS_DOC +
+    'Voce tambem pode CRIAR uma tarefa no Todoist: preencha "task" com o texto '
+    'da tarefa (ex.: "comprar pao"); senao deixe "task" vazio "".\n'
     'Responda SEMPRE apenas com um JSON valido no formato '
-    '{"msg": "sua resposta", "screen": "uma das chaves acima"}. '
+    '{"msg": "sua resposta", "screen": "uma das chaves acima", "task": ""}. '
     'Use "screen" diferente de "none" SO quando o usuario pedir ou fizer claro '
     'sentido abrir aquela tela; em conversa normal use "none". '
     "Nada alem do JSON."
@@ -57,6 +62,7 @@ class ChatService:
         self.last_error = ""
         self.last_msg = ""       # última resposta do BMO (pra UI ler)
         self.last_screen = ""    # tela que o BMO pediu pra abrir ("" = nenhuma)
+        self.last_task = ""      # tarefa que o BMO pediu pra criar ("" = nenhuma)
 
     @property
     def available(self) -> bool:
@@ -67,6 +73,7 @@ class ChatService:
         Atualiza self.last_msg ("..." enquanto pensa) pra UI exibir."""
         self.last_error = ""
         self.last_screen = ""
+        self.last_task = ""
         if not OPENROUTER_API_KEY:
             self.last_error = "falta OPENROUTER_API_KEY"
             return ""
@@ -96,7 +103,7 @@ class ChatService:
                 data = json.loads(resp.read().decode("utf-8"))
             msg_obj = data["choices"][0]["message"]
             content = msg_obj.get("content")
-            self.last_msg, self.last_screen = self._parse(content)
+            self.last_msg, self.last_screen, self.last_task = self._parse(content)
             if not self.last_msg:
                 # content veio vazio: típico de modelo reasoning que estourou o
                 # max_tokens só pensando. Sinaliza pra UI em vez de mostrar "—".
@@ -131,12 +138,12 @@ class ChatService:
             return ""
 
     # chaves de tela aceitas (espelha SCREENS_DOC e o registro do main.py)
-    _SCREENS = {"agenda", "tarefas", "foco", "sistema", "foto",
-                "jogos", "configuracoes", "relogio", "home"}
+    _SCREENS = {"agenda", "tarefas", "foco", "sistema", "foto", "jogos",
+                "pong", "invaders", "configuracoes", "relogio", "home", "atualizar"}
 
-    def _parse(self, content: str) -> tuple[str, str]:
-        """Extrai (msg, screen) do JSON. Tolerante: tenta o JSON inteiro, depois
-        um objeto no meio do texto. screen vira "" se ausente/'none'/invalido."""
+    def _parse(self, content: str) -> tuple[str, str, str]:
+        """Extrai (msg, screen, task) do JSON. Tolerante: tenta o JSON inteiro,
+        depois um objeto no meio do texto. screen vira "" se ausente/invalido."""
         content = (content or "").strip()
         # remove blocos de raciocínio <think>...</think> de modelos reasoning
         content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
@@ -155,5 +162,6 @@ class ChatService:
             screen = str(obj.get("screen", "") or "").strip().lower()
             if screen not in self._SCREENS:
                 screen = ""
-            return (msg or content), screen
-        return content, ""
+            task = str(obj.get("task", "") or "").strip()
+            return (msg or content), screen, task
+        return content, "", ""
