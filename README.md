@@ -44,13 +44,19 @@ Mini-relógio HH:MM no topo das telas ambient (exceto clock que já tem o grand�
   - Toggle DEBUG (i): mostra FPS, resolução, status do detector
   - Botão GALERIA: abre grid de thumbnails das fotos tiradas
 - **GALERIA** — grid 3×2 de thumbs + viewer fullscreen (tap esq/dir = nav)
+- **TESTE (IA)** — diagnóstico de IA: medidor de nível do mic, status do
+  Whisper/STT e do wake word, estado do botão físico de fala, preview da câmera,
+  e push-to-talk pra testar transcrição + conversa com o BMO (LLM)
 - **SETTINGS** — lista vertical com cyclers e ações:
   - **Standby** (5/10/15/30/60/120s) — timer de auto-volta da home
   - **Ambient** — qual lock screen usar
   - **Tema** — auto/escuro/claro. *Auto* alterna por hora (6h-18h = claro)
   - **Brilho** — 20/40/60/80/100% via overlay de dimming
   - **BMO te vê** — liga/desliga face tracking pela câmera
-  - **Atualizar** — `git pull --ff-only` + restart in-place
+  - **BMO me ouve** — liga/desliga wake word + comando de voz
+  - **Microfone** — escolhe o dispositivo de entrada
+  - **Voz BMO** — volume da fala (TTS), separado do volume dos efeitos
+  - **Atualizar** — `git reset --hard origin/main` + restart in-place
   - **Desligar** — shutdown com confirmação dupla em 3s
   - **Voltar**
 
@@ -75,6 +81,14 @@ BMO — todas as telas CRT respeitam isso, content e corners empurrados pra dent
 - **Camera** — picamera2 lazy: só liga quando `PhotoScreen` ou `BMOFaceScreen+BMO TE VE`
   pedem. Stop automático no release pra economizar calor/bateria. Face detect via
   OpenCV Haar cascade roda apenas quando alguém pede `get_faces()` recentemente.
+- **Voice** — push-to-talk + (opcional) wake word. Captura do mic via
+  sounddevice, transcrição (STT) por Whisper local (`pywhispercpp`) ou API
+  compatível OpenAI (Groq por padrão). **Acesso exclusivo ao mic** (ALSA só
+  permite 1 captura por vez): monitor, wake e gravação se revezam, com retry ao
+  abrir o stream.
+- **Chat** — o BMO responde via LLM ([OpenRouter](https://openrouter.ai)). Pede
+  ao modelo um JSON `{"msg", "screen", "task"}` e, além de responder, pode **abrir
+  uma tela** ou **criar uma tarefa** no Todoist (ver seção "IA" abaixo).
 
 ## Estrutura
 
@@ -101,15 +115,20 @@ bmo_os/
     tasks.py           # kanban Todoist 3 colunas (touch drag)
     photo.py           # camera fullscreen + debug overlay + galeria btn
     gallery.py         # grid 3x2 de thumbs + viewer
-    settings.py        # cyclers + atualizar (git pull + os.execv) + desligar
+    aitest.py          # TESTE IA: mic/STT/câmera/botão + push-to-talk + chat
+    settings.py        # cyclers + atualizar (git reset --hard + os.execv) + desligar
     suspended.py       # tela SUSPENSO: display off + FPS baixo, toque acorda
     placeholder.py     # stub genérico (legado)
   services/
     weather.py         # Open-Meteo, thread + lock + último bom em cache
-    todoist.py         # API v1, thread + trigger_refresh
+    todoist.py         # API v1, thread + trigger_refresh + create
     git_updates.py     # fetch + drift detection
     camera.py          # picamera2 + cv2, refcount lazy (acquire/release)
     audio.py           # sons 8-bit gerados em runtime (numpy) + voz do BMO
+    voice.py           # mic + STT (Whisper local / API Groq) + push-to-talk + wake
+    chat.py            # LLM via OpenRouter -> JSON {msg, screen, task}
+    tts.py             # voz falada (Piper/eSpeak) — DESATIVADO por ora, dormente
+    gpio_button.py     # botão físico de push-to-talk (gpiozero)
   assets/
     fonts/             # PressStart2P.ttf (ver "Fontes pixel" abaixo)
   references/          # .webp/.png das fotos do BMO físico e refs de face
@@ -173,8 +192,11 @@ Terminal=false
 > O `Exec` é um caminho **absoluto** — se mover/renomear a pasta do repo, atualize
 > essa linha, senão o autostart falha calado no boot.
 
-O botão **Atualizar** do Settings faz `git pull --ff-only` e reinicia o processo
-in-place via `os.execv` (não depende de systemd).
+O botão **Atualizar** do Settings (ou o comando de voz *"se atualiza"*) faz
+`git reset --hard origin/main` e reinicia o processo in-place via `os.execv`
+(não depende de systemd). Antes do `execv` o BMO **libera o hardware** (câmera,
+GPIO, mic) — libs em C deixam file descriptors abertos que sobreviveriam ao
+`execv` e travariam o processo novo.
 
 ### Áudio Bluetooth (opcional)
 
@@ -223,7 +245,49 @@ Pra a tela TASKS funcionar:
 3. Bota no `.env`: `TODOIST_TOKEN=xxxx`.
 
 Cria tarefas no Todoist pelo PC/celular como sempre, e arrasta entre colunas
-pelo touch do BMO. SYNC força refresh imediato.
+pelo touch do BMO. SYNC força refresh imediato. O BMO também cria tarefas por
+voz/IA (ver seção abaixo).
+
+## IA — conversa com o BMO (LLM + push-to-talk)
+
+O BMO ouve um comando de voz, transcreve, manda pro LLM e responde — e a
+resposta pode **abrir uma tela** ou **criar uma tarefa**. Funciona em **qualquer
+tela**: um rodapé global mostra `GRAVANDO` → `PENSANDO` → a resposta do BMO.
+
+**Fluxo:** segura o botão físico (push-to-talk) → fala → solta → o áudio é
+transcrito (STT) → o texto vai pro LLM → o BMO responde e age.
+
+- **Botão físico (GPIO):** segura = grava, solta = transcreve. Pino padrão
+  `GPIO17` (muda com `PTT_GPIO`). Botão entre o pino e o GND (pull-up interno,
+  sem resistor). No PC, use o botão **TOCAR P/ FALAR** da tela TESTE.
+- **STT (fala → texto):** Whisper local (`pywhispercpp`) **ou** uma API
+  compatível com OpenAI (Groq por padrão — sem inferência na Pi, sem calor).
+  Com `STT_API_KEY` setada, usa a API; senão tenta o Whisper local.
+- **LLM (resposta):** [OpenRouter](https://openrouter.ai). O BMO responde sempre
+  com um JSON `{"msg", "screen", "task"}`.
+
+**Telas/ações que o BMO pode disparar** (campo `screen`):
+`agenda`, `tarefas`, `foco`, `sistema`, `foto`, `jogos`, `pong`, `invaders`,
+`configuracoes`, `relogio`, `home`, `atualizar` (ou `none` pra só conversar).
+O campo `task` (texto) cria uma tarefa no Todoist. Ex.: *"abre o pong"*,
+*"cria uma tarefa: comprar pão"*, *"se atualiza"*, *"que horas são?"*.
+
+> A **voz falada** (TTS, `services/tts.py`) está **desativada por ora** — o BMO
+> só responde por texto no rodapé. O módulo segue no repo, dormente; pra religar
+> é só voltar a instanciar `TTSService()` no `main.py`.
+
+**Setup (`.env`):**
+```
+OPENROUTER_API_KEY=sk-or-xxxx           # obrigatório p/ o chat (openrouter.ai/keys)
+# OPENROUTER_MODEL=...                   # default é um modelo free; troque por um
+                                         # NÃO-reasoning se a resposta vier vazia
+# STT_API_KEY=gsk_xxxx                   # API de transcrição (Groq); sem ela usa Whisper local
+# STT_API_MODEL=whisper-large-v3-turbo
+# PTT_GPIO=17                            # pino do botão de push-to-talk
+```
+
+Sem `OPENROUTER_API_KEY` o chat fica indisponível (a tela TESTE mostra o erro).
+Sem mic/STT, o push-to-talk degrada e a tela TESTE mostra "indisponivel".
 
 ## Câmera (AI Camera / IMX500)
 
@@ -261,7 +325,8 @@ quando o código no disco diverge do processo rodando — seja porque alguém
 pushou de outra máquina (e o fetch pegou commits novos), seja porque o auto-commit
 local advançou o HEAD enquanto o BMO ainda roda código antigo.
 
-Pra atualizar: SETTINGS → ATUALIZAR (faz `git pull --ff-only` + restart).
+Pra atualizar: SETTINGS → ATUALIZAR (faz `git reset --hard origin/main` +
+restart), ou peça por voz: *"BMO, se atualiza"*.
 
 ## Fontes pixel
 
@@ -302,9 +367,13 @@ canto superior esquerdo pra sair.
 - [x] **V1.7** — Face tracking via câmera (BMO te vê)
 - [x] **V1.8** — Status bar (sol/lua + sinal + bateria mock) + alerta de update
 - [x] **V1.9** — Shuffle ambient (cicla telas idle aleatoriamente)
-- [ ] **V2.0** — input GPIO (gpiozero) quando os botões físicos chegarem
-- [ ] **V2.1** — RetroArch launcher (subprocess) — Games vira lista de ROMs
-- [ ] **V2.2** — gestos de mão (MediaPipe Hands) pra controle sem toque
+- [x] **V2.0** — IA: push-to-talk (GPIO) + STT (Whisper/Groq) + chat LLM
+  (OpenRouter) que abre telas e cria tarefas; tela TESTE IA; cleanup de hardware
+  no restart
+- [ ] **V2.1** — input GPIO completo (D-pad + A/B/MENU) quando os botões chegarem
+- [ ] **V2.2** — TTS (voz falada do BMO) — código pronto em `tts.py`, só religar
+- [ ] **V2.3** — RetroArch launcher (subprocess) — Games vira lista de ROMs
+- [ ] **V2.4** — gestos de mão (MediaPipe Hands) pra controle sem toque
 - [ ] **V3** — IMX500 native inference (objeto/pose direto no chip da câmera)
 - [ ] **V3** — sensores reais (DHT22/BME280 via I2C) em vez/além do clima online
-- [ ] **V3** — speech-to-text (USB mic + Vosk offline) pra "BMO me ouve"
+- [ ] **V3** — wake word offline ("BMO me ouve" sem push-to-talk)
