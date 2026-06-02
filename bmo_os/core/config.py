@@ -49,6 +49,7 @@ DEFAULTS: dict = {
     "gcal_ics_urls": "",            # URLs secretas iCal (env GCAL_ICS_URLS ganha) — "Rotulo=url,url2"
     "event_warning_min": 10,        # antecedência (min) do aviso de evento próximo (tela AGENDA)
     "voice_enabled": False,         # "BMO me Ouve" — wake word + comando de voz (Whisper)
+    "mic_button_enabled": True,     # botão de mic virtual nas telas (descanso/foco/kanban/agenda)
     "mic_device": "",               # nome (ou trecho) do microfone de entrada; "" = padrão do sistema
     "tts_volume": 100,              # 0-100 — volume da voz do BMO (eSpeak-NG), separado do volume dos efeitos
     # --- LLM do chat (BMO responde) — escolhível em SETTINGS -> IA ---

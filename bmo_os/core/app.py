@@ -51,6 +51,7 @@ class App:
 
     def _mic_visible(self) -> bool:
         return (self.mic_button is not None
+                and config.get("mic_button_enabled")
                 and getattr(self.manager.current, "show_mic_button", False))
 
     def _mic_hit(self, logical_pos) -> bool:

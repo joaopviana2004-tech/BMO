@@ -114,6 +114,8 @@ def _ia_items():
          "provider_key": "vision_provider", "models": "vision"},
         {"type": "cycle", "key": "voice_enabled", "label": "BMO me ouve",
          "options": [False, True], "format": _fmt_onoff},
+        {"type": "cycle", "key": "mic_button_enabled", "label": "Botao de fala",
+         "options": [False, True], "format": _fmt_onoff},
         {"type": "mic", "key": "mic_device", "label": "Microfone"},
         {"type": "cycle", "key": "tts_volume", "label": "Voz BMO",
          "options": config.VOLUME_OPTIONS, "format": _fmt_pct},
@@ -385,7 +387,9 @@ class SettingsListScreen:
     def _row_rects(self):
         # passo/altura menores quando a categoria tem muitos itens (IA), pra caber tudo
         n = len(self._rows)
-        if n > 9:
+        if n > 10:
+            step, top, hgt = 17, 30, 15
+        elif n > 9:
             step, top, hgt = 19, 32, 17
         elif n > 7:
             step, top, hgt = 20, 36, 18

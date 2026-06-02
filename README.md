@@ -66,9 +66,9 @@ push-to-talk físico), sem precisar do botão GPIO.
     (antecedência do alerta da AGENDA); Atualizar (`git reset --hard origin/main`
     + restart); Desligar (confirmação dupla em 3s)
   - **IA:** Provedor + Modelo de **chat** (OpenRouter/NVIDIA/Grok); Provedor +
-    Modelo de **visão**; BMO me ouve (wake word); Microfone; Voz BMO (volume do
-    TTS); BMO te vê (face tracking); **Gerar vozes** (gera o cache de fala
-    faltante)
+    Modelo de **visão**; BMO me ouve (wake word); **Botão de fala** (liga/desliga
+    o mic virtual nas telas); Microfone; Voz BMO (volume do TTS); BMO te vê (face
+    tracking); **Gerar vozes** (gera o cache de fala faltante)
 
 **Status bar** (canto superior direito de todas as telas CRT): sol/lua (auto
 pelo horário), nível de sinal (mock 4/4), bateria (mock 100%). Ícone de
