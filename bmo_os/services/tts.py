@@ -23,11 +23,11 @@ Teste rápido no terminal do Pi:
 """
 from __future__ import annotations
 
-import io
 import os
 import queue
 import shutil
 import subprocess
+import tempfile
 import threading
 
 import pygame
@@ -111,20 +111,25 @@ class TTSService:
     def _say(self, text: str) -> None:
         cmd_common = [ESPEAK_BIN, "-v", VOICE, "-s", str(SPEED),
                       "-p", str(PITCH), "-g", str(GAP)]
-        # 1) preferido: gera WAV e toca pelo mixer do pygame (volume + sem
-        #    disputa de device). Só se o mixer estiver de pé.
+        # 1) preferido: gera WAV num ARQUIVO (seekable) e toca pelo mixer do
+        #    pygame (controle de volume, sem disputa de device). Importante:
+        #    NÃO usar pipe/--stdout — em pipe o eSpeak não volta pra preencher
+        #    o tamanho no header WAV e o som carrega mudo.
         if pygame.mixer.get_init():
+            path = None
             try:
+                fd, path = tempfile.mkstemp(suffix=".wav", prefix="bmo_tts_")
+                os.close(fd)
                 proc = subprocess.Popen(
-                    cmd_common + ["--stdout", text],
-                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                    cmd_common + ["-w", path, text],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 with self._lock:
                     self._proc = proc
-                wav, _ = proc.communicate()
+                proc.wait()
                 with self._lock:
                     self._proc = None
-                if wav:
-                    snd = pygame.mixer.Sound(file=io.BytesIO(wav))
+                if os.path.getsize(path) > 44:   # > header WAV vazio
+                    snd = pygame.mixer.Sound(path)
                     snd.set_volume(self._volume())
                     ch = snd.play()
                     if ch is not None:
@@ -133,6 +138,12 @@ class TTSService:
                     return
             except Exception:
                 pass
+            finally:
+                if path:
+                    try:
+                        os.remove(path)
+                    except Exception:
+                        pass
         # 2) fallback: o próprio eSpeak-NG toca direto (sai no ALSA padrão).
         #    Sem mixer pra controlar volume, usamos a amplitude do eSpeak (-a,
         #    0-200) a partir do tts_volume.
