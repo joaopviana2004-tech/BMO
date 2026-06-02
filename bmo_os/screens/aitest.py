@@ -44,8 +44,7 @@ class AITestScreen:
         self.button = button         # GPIOButton (push-to-talk físico); None no PC
         self.on_respond = on_respond  # callback que manda o texto pro LLM + navega
         self._t = 0.0
-        self._vision_busy = False
-        self._vision_text = ""       # última descrição da câmera (teste de visão)
+        self._vision_busy = False    # rodando a descrição de visão? (estado do botão)
 
     def enter(self) -> None:
         try:
@@ -113,31 +112,41 @@ class AITestScreen:
 
     def _run_vision(self) -> None:
         """Captura um frame e manda pro modelo de VISÃO (config próprio) descrever.
-        Roda em thread (a chamada HTTP bloqueia). Resultado em self._vision_text."""
+        Roda em thread (a chamada HTTP bloqueia). A descrição aparece no MESMO
+        campo "BMO" da fala (via chat.last_msg) + no rodapé global de voz."""
         if self._vision_busy:
             return
         if self.chat is None or not getattr(self.chat, "vision_available", False):
             audio.play("back")
-            self._vision_text = "visao indisponivel (chave/modelo)"
+            if self.chat is not None:
+                self.chat.last_msg = ""
+                self.chat.last_error = "visao indisponivel (chave/modelo)"
             return
         if not getattr(self.camera, "is_available", False):
             audio.play("back")
-            self._vision_text = "camera offline"
+            self.chat.last_msg = ""
+            self.chat.last_error = "camera offline"
             return
         audio.play("select")
         self._vision_busy = True
-        self._vision_text = ""
+        # "..." flui pro campo do BMO/rodapé como PENSANDO, igual à fala
+        self.chat.last_msg = "..."
+        self.chat.last_error = ""
 
         def work():
             try:
                 jpeg = self.camera.capture_jpeg()
                 txt = self.chat.ask_vision(jpeg) if jpeg else ""
-                if not txt:
-                    txt = (getattr(self.chat, "last_vision_error", "")
-                           or ("sem imagem" if not jpeg else "sem resposta"))
-                self._vision_text = txt
+                if txt:
+                    self.chat.last_msg = txt
+                    self.chat.last_error = ""
+                else:
+                    self.chat.last_msg = ""
+                    self.chat.last_error = (getattr(self.chat, "last_vision_error", "")
+                                            or ("sem imagem" if not jpeg else "sem resposta"))
             except Exception as e:
-                self._vision_text = f"erro: {str(e)[:50]}"
+                self.chat.last_msg = ""
+                self.chat.last_error = f"erro: {str(e)[:50]}"
             finally:
                 self._vision_busy = False
 
@@ -207,18 +216,7 @@ class AITestScreen:
             fg, txt = CRT_DIM, "VISAO N/D"
         img = render_text(txt, 8, fg, pixel=False)
         surface.blit(img, img.get_rect(center=rect.center))
-        # legenda sobre o rodapé do preview da câmera (box de _draw_camera)
-        if self._vision_text:
-            box = pygame.Rect(20, 38, 150, 86)
-            lines = self._wrap(self._vision_text, 30)[:3]
-            strip_h = 6 + 9 * len(lines)
-            strip = pygame.Surface((box.w, strip_h))
-            strip.set_alpha(205)
-            strip.fill((0, 0, 0))
-            surface.blit(strip, (box.x, box.bottom - strip_h))
-            for i, ln in enumerate(lines):
-                m = render_text(ln, 7, CRT_WHITE, pixel=False)
-                surface.blit(m, (box.x + 3, box.bottom - strip_h + 3 + i * 9))
+        # a descrição em si aparece no campo "BMO" (ver _draw_ptt), igual à fala
 
     def _draw_temp(self, surface) -> None:
         """Quadradinho de debug da temperatura da Pi (canto sup-direito)."""
