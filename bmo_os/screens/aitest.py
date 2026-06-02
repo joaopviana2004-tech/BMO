@@ -319,6 +319,10 @@ class AITestScreen:
             fg, txt = CRT_BLACK, "TESTAR VOZ"
         img = render_text(txt, 8, fg, pixel=False)
         surface.blit(img, img.get_rect(center=rect.center))
+        # backend ativo (piper / espeak / none) logo abaixo
+        bk = getattr(self.tts, "backend", "none") if self.tts else "none"
+        lbl = render_text(bk, 7, CRT_DIM, pixel=False)
+        surface.blit(lbl, lbl.get_rect(midtop=(rect.centerx, rect.bottom + 1)))
 
     def _draw_back_btn(self, surface) -> None:
         rect = self._back_btn()

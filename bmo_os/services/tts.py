@@ -1,25 +1,29 @@
-"""Voz do BMO (TTS) — fala robótica via eSpeak-NG.
+"""Voz do BMO (TTS) — Piper (neural, natural) ou eSpeak-NG (robótico).
 
-O eSpeak-NG gera o WAV em `--stdout` e tocamos pelo **mixer do pygame** (mesma
-saída dos efeitos), então respeita o volume do BMO e não disputa o device de
-playback com o ALSA. Sem pygame mixer, cai pro modo em que o próprio eSpeak-NG
-toca direto.
+Backend por env BMO_TTS_BACKEND: "piper" | "espeak" | "auto" (default).
+auto = usa Piper se houver binário + modelo, senão cai pro eSpeak-NG.
 
-Fala em thread (fila) — `speak()` não bloqueia o render loop. Degrada com
-elegância: sem eSpeak-NG instalado, `available=False` e `speak()` é no-op (no
-PC de dev é o caso comum).
+Sintetiza num WAV temporário e toca pelo **mixer do pygame** (respeita o volume
+da config `tts_volume`, sem disputar o device). Fala em thread (fila) — `speak()`
+não bloqueia o render loop. Degrada: sem backend, `available=False` e é no-op.
 
+--- Piper (recomendado: voz pt-BR natural) ---
 Setup no Pi:
+    pip install piper-tts                 # instala o binário 'piper'
+    mkdir -p bmo_os/assets/piper
+    cd bmo_os/assets/piper
+    # baixe um modelo pt-BR (.onnx + .onnx.json), ex. faber-medium:
+    BASE=https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR/faber/medium
+    wget $BASE/pt_BR-faber-medium.onnx
+    wget $BASE/pt_BR-faber-medium.onnx.json
+Env:
+    BMO_TTS_PIPER_BIN     binário do piper (default: 'piper' no PATH)
+    BMO_TTS_PIPER_MODEL   caminho do .onnx (default: 1º .onnx em assets/piper/)
+    BMO_TTS_PIPER_LENGTH  ritmo (default 1.0; >1 = mais devagar)
+
+--- eSpeak-NG (fallback robótico) ---
     sudo apt install espeak-ng
-
-Ajuste fino por env (voz robótica = pitch baixo + fala um pouco lenta):
-    BMO_TTS_VOICE  voz/idioma do eSpeak (default pt-br; tente pt-br+m1..m7)
-    BMO_TTS_SPEED  palavras/min (default 150; menor = mais robótico/claro)
-    BMO_TTS_PITCH  tom 0-99 (default 30; menor = mais grave/robô)
-    BMO_TTS_GAP    pausa entre palavras x10ms (default 6)
-
-Teste rápido no terminal do Pi:
-    espeak-ng -v pt-br -s 150 -p 30 "Oi, eu sou o BMO"
+    BMO_TTS_VOICE / BMO_TTS_SPEED / BMO_TTS_PITCH / BMO_TTS_GAP
 """
 from __future__ import annotations
 
@@ -29,23 +33,60 @@ import shutil
 import subprocess
 import tempfile
 import threading
+from pathlib import Path
 
 import pygame
 
 from ..core import config
 
-ESPEAK_BIN = shutil.which("espeak-ng") or shutil.which("espeak")
+# ----- Piper -----
+PIPER_BIN = shutil.which(os.environ.get("BMO_TTS_PIPER_BIN", "piper"))
+PIPER_LENGTH = os.environ.get("BMO_TTS_PIPER_LENGTH", "1.0")
+_ASSETS_PIPER = Path(__file__).resolve().parent.parent / "assets" / "piper"
 
+
+def _find_piper_model() -> str:
+    env = os.environ.get("BMO_TTS_PIPER_MODEL", "").strip()
+    if env:
+        return env if Path(env).exists() else ""
+    if _ASSETS_PIPER.exists():
+        models = sorted(_ASSETS_PIPER.glob("*.onnx"))
+        if models:
+            return str(models[0])
+    return ""
+
+
+PIPER_MODEL = _find_piper_model()
+
+# ----- eSpeak-NG -----
+ESPEAK_BIN = shutil.which("espeak-ng") or shutil.which("espeak")
 VOICE = os.environ.get("BMO_TTS_VOICE", "pt-br")
 SPEED = os.environ.get("BMO_TTS_SPEED", "150")
 PITCH = os.environ.get("BMO_TTS_PITCH", "30")
 GAP = os.environ.get("BMO_TTS_GAP", "6")
 
+BACKEND_PREF = os.environ.get("BMO_TTS_BACKEND", "auto").strip().lower()
+
+
+def _resolve_backend() -> str:
+    piper_ok = bool(PIPER_BIN and PIPER_MODEL)
+    if BACKEND_PREF == "piper":
+        return "piper" if piper_ok else "none"
+    if BACKEND_PREF == "espeak":
+        return "espeak" if ESPEAK_BIN else "none"
+    # auto: prefere piper (mais natural), senão espeak
+    if piper_ok:
+        return "piper"
+    if ESPEAK_BIN:
+        return "espeak"
+    return "none"
+
 
 class TTSService:
     def __init__(self) -> None:
-        self.available = ESPEAK_BIN is not None
-        self.error = "" if self.available else "espeak-ng nao instalado"
+        self.backend = _resolve_backend()
+        self.available = self.backend in ("piper", "espeak")
+        self.error = "" if self.available else self._why_unavailable()
         self.last_text = ""
         self._speaking = False
         self._q: "queue.Queue[str]" = queue.Queue()
@@ -53,6 +94,13 @@ class TTSService:
         self._lock = threading.Lock()
         if self.available:
             threading.Thread(target=self._loop, daemon=True).start()
+
+    def _why_unavailable(self) -> str:
+        if BACKEND_PREF == "piper" and not PIPER_BIN:
+            return "piper nao instalado"
+        if BACKEND_PREF == "piper" and not PIPER_MODEL:
+            return "falta modelo .onnx do piper"
+        return "sem piper/espeak"
 
     @property
     def speaking(self) -> bool:
@@ -109,50 +157,69 @@ class TTSService:
                 self._speaking = False
 
     def _say(self, text: str) -> None:
-        cmd_common = [ESPEAK_BIN, "-v", VOICE, "-s", str(SPEED),
-                      "-p", str(PITCH), "-g", str(GAP)]
-        # 1) preferido: gera WAV num ARQUIVO (seekable) e toca pelo mixer do
-        #    pygame (controle de volume, sem disputa de device). Importante:
-        #    NÃO usar pipe/--stdout — em pipe o eSpeak não volta pra preencher
-        #    o tamanho no header WAV e o som carrega mudo.
-        if pygame.mixer.get_init():
-            path = None
+        # sintetiza num arquivo WAV (seekable — header correto) e toca pelo
+        # mixer do pygame com o volume da config.
+        path = None
+        try:
+            fd, path = tempfile.mkstemp(suffix=".wav", prefix="bmo_tts_")
+            os.close(fd)
+            if not self._synth(text, path) or os.path.getsize(path) <= 44:
+                return
+            if pygame.mixer.get_init():
+                snd = pygame.mixer.Sound(path)
+                snd.set_volume(self._volume())
+                ch = snd.play()
+                if ch is not None:
+                    while ch.get_busy():
+                        pygame.time.wait(40)
+            else:
+                # sem mixer (raro): toca via aplay
+                ap = shutil.which("aplay")
+                if ap:
+                    subprocess.run([ap, "-q", path],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        finally:
+            if path:
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+
+    def _synth(self, text: str, path: str) -> bool:
+        """Gera o WAV no `path`. Retorna True se deu certo."""
+        if self.backend == "piper":
+            return self._synth_piper(text, path)
+        if self.backend == "espeak":
+            return self._synth_espeak(text, path)
+        return False
+
+    def _synth_piper(self, text: str, path: str) -> bool:
+        cmd = [PIPER_BIN, "-m", PIPER_MODEL, "-f", path,
+               "--length_scale", str(PIPER_LENGTH)]
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with self._lock:
+            self._proc = proc
+        try:
+            proc.communicate(input=text.encode("utf-8"), timeout=30)
+        except Exception:
             try:
-                fd, path = tempfile.mkstemp(suffix=".wav", prefix="bmo_tts_")
-                os.close(fd)
-                proc = subprocess.Popen(
-                    cmd_common + ["-w", path, text],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                with self._lock:
-                    self._proc = proc
-                proc.wait()
-                with self._lock:
-                    self._proc = None
-                if os.path.getsize(path) > 44:   # > header WAV vazio
-                    snd = pygame.mixer.Sound(path)
-                    snd.set_volume(self._volume())
-                    ch = snd.play()
-                    if ch is not None:
-                        while ch.get_busy():
-                            pygame.time.wait(40)
-                    return
+                proc.kill()
             except Exception:
                 pass
-            finally:
-                if path:
-                    try:
-                        os.remove(path)
-                    except Exception:
-                        pass
-        # 2) fallback: o próprio eSpeak-NG toca direto (sai no ALSA padrão).
-        #    Sem mixer pra controlar volume, usamos a amplitude do eSpeak (-a,
-        #    0-200) a partir do tts_volume.
-        amp = str(int(self._volume() * 200))
-        proc = subprocess.Popen(
-            cmd_common + ["-a", amp, text],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return False
+        finally:
+            with self._lock:
+                self._proc = None
+        return proc.returncode == 0
+
+    def _synth_espeak(self, text: str, path: str) -> bool:
+        cmd = [ESPEAK_BIN, "-v", VOICE, "-s", str(SPEED),
+               "-p", str(PITCH), "-g", str(GAP), "-w", path, text]
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         with self._lock:
             self._proc = proc
         proc.wait()
         with self._lock:
             self._proc = None
+        return proc.returncode == 0
