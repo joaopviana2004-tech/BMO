@@ -49,7 +49,7 @@ CX = LOGICAL_SIZE[0] // 2
 class PomodoroScreen:
     show_mic_button = True
     # canto inf-CENTRO: RESET ocupa o inf-esq e FINALIZAR o inf-dir
-    mic_btn_rect = (191, 208, 18, 16)
+    mic_btn_rect = (186, 200, 28, 26)
 
     def __init__(self, *, on_back, todoist=None) -> None:
         self.on_back = on_back

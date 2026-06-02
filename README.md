@@ -26,8 +26,8 @@ escalada **2x** com nearest-neighbor pra preservar o look de pixel art.
 
 Mini-relógio HH:MM no topo das telas ambient (exceto clock que já tem o grandão).
 
-**Botão de mic virtual** (🎙️ pequeno, canto) nas telas de **descanso, foco,
-kanban e agenda**: toque pra gravar a fala e mandar pro BMO (mesmo caminho do
+**Botão de mic virtual** (🎙️ no canto) nas telas de **descanso, foco, kanban
+e agenda**: **segure** pra gravar e **solte** pra mandar pro BMO (igual ao
 push-to-talk físico), sem precisar do botão GPIO.
 
 **Home + ações** (carrossel P&B, auto-volta pro ambient após N segundos):

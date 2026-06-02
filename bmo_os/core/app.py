@@ -43,6 +43,7 @@ class App:
         # Botão de mic virtual (MicButton); aparece nas telas com
         # show_mic_button=True. main.py atribui aqui.
         self.mic_button = None
+        self._mic_pressed = False   # segurando o botão de mic agora? (grava enquanto True)
 
     def _mic_visible(self) -> bool:
         return (self.mic_button is not None
@@ -74,11 +75,17 @@ class App:
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     logical = self._to_logical(event.pos)
                     # se o toque caiu no botão de mic (telas que o exibem),
-                    # dispara a gravação e NÃO repassa o toque pra tela.
+                    # COMEÇA a gravar (grava enquanto segurar) e NÃO repassa o
+                    # toque pra tela. O soltar (MOUSEBUTTONUP) encerra a gravação.
                     if self._mic_hit(logical):
-                        self.mic_button.trigger()
+                        self._mic_pressed = True
+                        self.mic_button.press()
                     else:
                         bmo_input.dispatch_touch(logical)
+                elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                    if self._mic_pressed:
+                        self._mic_pressed = False
+                        self.mic_button.release()
                 elif event.type == pygame.KEYDOWN:
                     bmo_input.dispatch_keyboard(event)
                 self.manager.handle_event(event)

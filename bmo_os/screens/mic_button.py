@@ -6,9 +6,10 @@ Vive no App (não numa tela): o App desenha e trata o toque, gated pelo atributo
 direito; uma tela pode sobrescrever com `mic_btn_rect = (x, y, w, h)` quando
 esse canto estiver ocupado (ex.: relógio tem a data ali).
 
-Toque = grava a fala (até o silêncio) e manda pro LLM via `on_text` — o mesmo
-caminho do push-to-talk físico. O rodapé de voz (overlay no main) mostra
-GRAVANDO / PENSANDO / resposta.
+SEGURAR pra gravar: começa ao apertar (`press`) e transcreve ao soltar
+(`release`) — igual ao push-to-talk físico (GPIO). O App trata o soltar do
+toque. O resultado vai pro LLM via `on_text`; o rodapé de voz (overlay no main)
+mostra GRAVANDO / PENSANDO / resposta.
 """
 from __future__ import annotations
 
@@ -18,7 +19,8 @@ from ..core.theme import Colors, LOGICAL_SIZE
 from ..core.widgets import CRT_BLACK, CRT_DIM, CRT_WHITE, SAFE_INSET
 from ..services import audio
 
-MIC_W, MIC_H = 18, 16
+# Botão grandinho de propósito — zona de toque generosa pro dedo.
+MIC_W, MIC_H = 28, 26
 
 
 def default_rect() -> pygame.Rect:
@@ -37,14 +39,24 @@ class MicButton:
         r = getattr(screen, "mic_btn_rect", None)
         return pygame.Rect(r) if r else default_rect()
 
-    def trigger(self) -> None:
+    # ---- segurar pra gravar (o App chama press/release no toque) ----
+
+    def press(self) -> None:
+        """Apertou: começa a gravar (até soltar)."""
         v = self.voice
         if not getattr(v, "available", False) or getattr(v, "busy", False):
             audio.play("back")
             return
         audio.play("select")
-        # o voice suspende monitor/wake sozinho (acesso exclusivo ao mic)
-        v.record_and_transcribe(on_done=self.on_text)
+        # ptt_begin suspende monitor/wake sozinho (acesso exclusivo ao mic)
+        v.ptt_begin(on_done=self.on_text)
+
+    def release(self) -> None:
+        """Soltou: encerra a gravação — o worker transcreve e manda pro LLM."""
+        try:
+            self.voice.ptt_end()
+        except Exception:
+            pass
 
     def draw(self, surface: pygame.Surface, rect: pygame.Rect) -> None:
         busy = getattr(self.voice, "busy", False)
@@ -55,11 +67,11 @@ class MicButton:
         pygame.draw.rect(surface, col, rect, 1)
         cx, cy = rect.centerx, rect.centery
         # corpo do mic (cápsula) + haste + base
-        body = pygame.Rect(0, 0, 5, 8)
-        body.center = (cx, cy - 1)
-        pygame.draw.rect(surface, col, body, border_radius=2)
-        pygame.draw.line(surface, col, (cx, body.bottom), (cx, body.bottom + 2), 1)
-        pygame.draw.line(surface, col, (cx - 3, body.bottom + 2), (cx + 3, body.bottom + 2), 1)
+        body = pygame.Rect(0, 0, 7, 11)
+        body.center = (cx, cy - 2)
+        pygame.draw.rect(surface, col, body, border_radius=3)
+        pygame.draw.line(surface, col, (cx, body.bottom), (cx, body.bottom + 3), 1)
+        pygame.draw.line(surface, col, (cx - 4, body.bottom + 3), (cx + 4, body.bottom + 3), 1)
         # pontinho vermelho piscando enquanto grava
         if busy:
-            pygame.draw.circle(surface, Colors.RED, (rect.right - 3, rect.top + 3), 2)
+            pygame.draw.circle(surface, Colors.RED, (rect.right - 4, rect.top + 4), 2)
