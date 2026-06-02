@@ -306,7 +306,8 @@ O campo `task` (texto) cria uma tarefa no Todoist. Ex.: *"abre o pong"*,
 > visão) com a voz **Francisca (pt-BR)** via **Edge TTS** (Microsoft, grátis, sem
 > chave — precisa de internet). Incorporado do módulo de laboratório `bmo_voz.py`
 > em `services/tts.py` (backend `edge`, ajustes do lab: +13% velocidade, +18Hz
-> tom, +24% volume). Setup: `pip install edge-tts` + `sudo apt install mpg123`.
+> tom, +24% volume). Setup: `pip install edge-tts` (a voz toca pelo próprio mixer
+> do pygame, junto dos efeitos — sem player externo; `mpg123` fica só de fallback).
 > Volume em SETTINGS → IA ("Voz BMO"); `tts_volume=0` deixa mudo. Backend padrão
 > = `edge` (sem ele, voz fica indisponível em vez de cair numa voz masculina do
 > Piper); pra Piper/eSpeak use `BMO_TTS_BACKEND`.

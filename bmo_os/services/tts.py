@@ -481,24 +481,26 @@ class TTSService:
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def _play_mp3(self, path: str) -> None:
-        """Toca o MP3 do Edge IGUAL ao módulo do lab: player externo (mpg123 etc.),
-        bloqueante. No PC sem player externo, cai pro mixer.music (dev)."""
-        if self._play_external(path):
-            return
-        # fallback dev (Windows sem mpg123): mixer.music do pygame
+        """Toca o MP3 da voz pelo PRÓPRIO mixer do pygame (mixer.music) — mesmo
+        device dos efeitos sonoros. Isso evita a disputa de ALSA que dava com um
+        player externo (mpg123 abria um 2º handle: cortava o início da voz e
+        derrubava os efeitos). Player externo fica só de fallback se o SDL_mixer
+        não decodificar MP3. mixer.music reamostra sozinho (não precisa casar rate)."""
         if pygame.mixer.get_init():
             try:
                 pygame.mixer.music.load(path)
                 pygame.mixer.music.set_volume(self._volume())
                 pygame.mixer.music.play()
                 while pygame.mixer.music.get_busy():
-                    pygame.time.wait(40)
+                    pygame.time.wait(30)
                 try:
                     pygame.mixer.music.unload()
                 except Exception:
                     pass
+                return
             except Exception:
-                pass
+                pass   # build do SDL_mixer sem MP3 -> tenta player externo
+        self._play_external(path)
 
     def _play_external(self, path: str) -> bool:
         """Toca por um player externo (1º disponível), bloqueante. Aplica o
