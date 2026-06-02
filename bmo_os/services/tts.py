@@ -33,8 +33,10 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import wave
 from pathlib import Path
 
+import numpy as np
 import pygame
 
 from ..core import config
@@ -161,6 +163,37 @@ class TTSService:
             finally:
                 self._speaking = False
 
+    def _load_sound(self, path: str):
+        """Carrega o WAV e devolve um pygame.Sound já no rate/canais do mixer.
+        Reamostra à mão — o Piper/eSpeak geram 22050Hz e o mixer roda 44100Hz;
+        tocar sem reamostrar sai a 2x (curto, agudo, 'cortado')."""
+        init = pygame.mixer.get_init()
+        if not init:
+            return None
+        mix_rate, _mix_size, mix_chans = init
+        try:
+            with wave.open(path, "rb") as w:
+                rate = w.getframerate()
+                chans = w.getnchannels()
+                width = w.getsampwidth()
+                raw = w.readframes(w.getnframes())
+        except Exception:
+            # se não der pra ler o header, deixa o pygame tentar do jeito dele
+            return pygame.mixer.Sound(path)
+        if width != 2 or not raw:
+            return pygame.mixer.Sound(path)
+        data = np.frombuffer(raw, dtype=np.int16)
+        if chans > 1:                      # mixa pra mono
+            data = data.reshape(-1, chans).mean(axis=1).astype(np.int16)
+        if rate != mix_rate and data.size:  # reamostra (interp linear)
+            n_out = int(round(data.size * mix_rate / rate))
+            x_old = np.linspace(0.0, 1.0, data.size, endpoint=False)
+            x_new = np.linspace(0.0, 1.0, n_out, endpoint=False)
+            data = np.interp(x_new, x_old, data).astype(np.int16)
+        if mix_chans == 2:                 # casa com os canais do mixer
+            data = np.column_stack([data, data])
+        return pygame.sndarray.make_sound(np.ascontiguousarray(data))
+
     def _say(self, text: str) -> None:
         # sintetiza num arquivo WAV (seekable — header correto) e toca pelo
         # mixer do pygame com o volume da config.
@@ -171,12 +204,13 @@ class TTSService:
             if not self._synth(text, path) or os.path.getsize(path) <= 44:
                 return
             if pygame.mixer.get_init():
-                snd = pygame.mixer.Sound(path)
-                snd.set_volume(self._volume())
-                ch = snd.play()
-                if ch is not None:
-                    while ch.get_busy():
-                        pygame.time.wait(40)
+                snd = self._load_sound(path)
+                if snd is not None:
+                    snd.set_volume(self._volume())
+                    ch = snd.play()
+                    if ch is not None:
+                        while ch.get_busy():
+                            pygame.time.wait(40)
             else:
                 # sem mixer (raro): toca via aplay
                 ap = shutil.which("aplay")
