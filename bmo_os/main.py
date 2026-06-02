@@ -248,6 +248,7 @@ def build_initial(app: App):
             on_change=on_setting_change,
             mic_options=voice.list_input_devices,
             on_cleanup=cleanup_hardware,
+            tts=tts,
         )
 
     # ---- comandos de voz -> navegação (executados no main thread) ----
@@ -319,7 +320,8 @@ def build_initial(app: App):
         task = (getattr(chat, "last_task", "") or "").strip()
         if task:
             try:
-                todoist.create(task)
+                if todoist.create(task) and tts is not None:
+                    tts.speak("Tarefa criada com sucesso!")   # cacheado = instantâneo
             except Exception:
                 pass
         action = screen_actions.get((getattr(chat, "last_screen", "") or "").strip())

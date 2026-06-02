@@ -119,6 +119,7 @@ def _ia_items():
          "options": config.VOLUME_OPTIONS, "format": _fmt_pct},
         {"type": "cycle", "key": "camera_face_tracking", "label": "BMO te ve",
          "options": [False, True], "format": _fmt_onoff},
+        {"type": "action", "key": "gen_voice_cache", "label": "Gerar vozes"},
     ]
 
 
@@ -138,12 +139,13 @@ class SettingsScreen:
     voice_announce = "Aqui estão as configurações!"   # BMO anuncia ao abrir (cacheado)
 
     def __init__(self, *, on_back, on_open, on_change=None, mic_options=None,
-                 on_cleanup=None) -> None:
+                 on_cleanup=None, tts=None) -> None:
         self.on_back = on_back
         self.on_open = on_open          # push de uma sub-tela
         self.on_change = on_change
         self.mic_options = mic_options
         self.on_cleanup = on_cleanup    # libera hardware antes do restart/desligar
+        self.tts = tts                  # serviço de voz (pra ação "Gerar vozes")
         self._index = 0
         self._rows = [label for label, _ in CATEGORIES] + ["Voltar"]
 
@@ -181,7 +183,7 @@ class SettingsScreen:
         self.on_open(SettingsListScreen(
             title=label, items=items_fn(), on_back=self.on_back,
             on_change=self.on_change, mic_options=self.mic_options,
-            on_cleanup=self.on_cleanup,
+            on_cleanup=self.on_cleanup, tts=self.tts,
         ))
 
     def update(self, dt: float) -> None: ...
@@ -223,18 +225,20 @@ class SettingsScreen:
 
 class SettingsListScreen:
     def __init__(self, *, title, items, on_back, on_change=None, mic_options=None,
-                 on_cleanup=None) -> None:
+                 on_cleanup=None, tts=None) -> None:
         self.title = title
         self.items = items
         self.on_back = on_back
         self.on_change = on_change
         self.mic_options = mic_options or (lambda: [])
         self.on_cleanup = on_cleanup
+        self.tts = tts
         self._index = 0
         self._status = ""
         self._action = None
         self._delay_until = 0.0
         self._shutdown_confirm_until = 0.0
+        self._watch_voice = False   # mostrando o progresso de "Gerar vozes"?
         self._t = 0.0
         self._rows = items + [{"type": "action", "key": "back", "label": "Voltar"}]
 
@@ -348,6 +352,14 @@ class SettingsListScreen:
             else:
                 self._shutdown_confirm_until = self._t + SHUTDOWN_CONFIRM_S
                 self._status = "Toque DESLIGAR de novo p/ confirmar"
+        elif key == "gen_voice_cache":
+            audio.play("select")
+            if self.tts is None or getattr(self.tts, "backend", "") != "edge":
+                self._status = "Voz indisponivel (edge off)"
+            else:
+                self._watch_voice = True
+                self.tts.ensure_cache_async()   # gera as frases faltantes em background
+                self._status = "Vozes: verificando..."
 
     # ---------- update ----------
 
@@ -362,15 +374,24 @@ class SettingsListScreen:
         if (self._shutdown_confirm_until > 0 and self._t >= self._shutdown_confirm_until
                 and self._status.startswith("Toque DESLIGAR")):
             self._shutdown_confirm_until = 0.0; self._status = ""
+        # progresso ao vivo da geração de vozes
+        if self._watch_voice and self.tts is not None:
+            self._status = "Vozes: " + (getattr(self.tts, "cache_status", "") or "...")
+            if not getattr(self.tts, "cache_building", False) and "ok" in self._status:
+                self._watch_voice = False   # terminou; congela o "ok N/N"
 
     # ---------- layout ----------
 
     def _row_rects(self):
-        # passo menor quando a categoria tem muitos itens (IA), pra caber tudo
+        # passo/altura menores quando a categoria tem muitos itens (IA), pra caber tudo
         n = len(self._rows)
-        step = 20 if n > 7 else 22
-        top = 36 if n > 7 else 40
-        return [pygame.Rect(20, top + i * step, LOGICAL_SIZE[0] - 40, 18)
+        if n > 9:
+            step, top, hgt = 19, 32, 17
+        elif n > 7:
+            step, top, hgt = 20, 36, 18
+        else:
+            step, top, hgt = 22, 40, 18
+        return [pygame.Rect(20, top + i * step, LOGICAL_SIZE[0] - 40, hgt)
                 for i in range(n)]
 
     def _left_arrow(self, row): return pygame.Rect(row.right - 38, row.top, 16, row.height)

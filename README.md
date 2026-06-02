@@ -295,7 +295,10 @@ O campo `task` (texto) cria uma tarefa no Todoist. Ex.: *"abre o pong"*,
 > em `bmo_os/assets/voice_cache/`, gitignored) e tocam **direto do disco** — sem
 > rede. No boot o BMO dá um "bom dia/boa tarde/boa noite" e, ao abrir uma tela,
 > anuncia ("Bora jogar!", "Aqui estão as suas tarefas!"…). Só as respostas
-> dinâmicas do LLM passam pela rede (~1-3s).
+> dinâmicas do LLM passam pela rede (~1-3s). Ao criar uma tarefa, o BMO fala
+> "Tarefa criada com sucesso!". O cache se completa sozinho a cada boot (e logo
+> após "Atualizar"); SETTINGS → IA → **Gerar vozes** força a verificação/geração
+> das que faltarem, com progresso na tela.
 
 **Setup (`.env`):** ponha só a chave do(s) provedor(es) que for usar — o
 provedor e o modelo (chat **e** visão) saem do menu SETTINGS → IA.

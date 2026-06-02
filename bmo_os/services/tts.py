@@ -140,9 +140,11 @@ SCREEN_PHRASES = {
 GREETINGS = ["Olá!", "Oi!", "Bom dia!", "Boa tarde!", "Boa noite!", "E aí, beleza?"]
 FUN_LINES = ["Eu sou o BMO!", "Quem quer jogar videogame?", "Vamos nessa!",
              "Beleza!", "Toca aqui!", "Que demais!", "Tô pronto!"]
+# Confirmações de ação (faladas automaticamente quando o BMO faz algo).
+CONFIRMS = ["Tarefa criada com sucesso!", "Pronto!", "Feito!", "Anotado!"]
 
 # Tudo que será pré-gerado/cacheado. Quanto mais, mais respostas instantâneas.
-CACHE_PHRASES = GREETINGS + list(SCREEN_PHRASES.values()) + FUN_LINES
+CACHE_PHRASES = GREETINGS + list(SCREEN_PHRASES.values()) + FUN_LINES + CONFIRMS
 
 # ----- Piper -----
 PIPER_BIN = shutil.which(os.environ.get("BMO_TTS_PIPER_BIN", "piper"))
@@ -212,11 +214,16 @@ class TTSService:
         self._lock = threading.Lock()
         # frases conhecidas (já limpas) que ficam em cache no disco
         self._canon = {clean_for_tts(p, strip_accents=False) for p in CACHE_PHRASES}
+        # estado da geração do cache (pra tela SETTINGS mostrar)
+        self.cache_building = False
+        self.cache_status = ""
         if self.available:
             threading.Thread(target=self._loop, daemon=True).start()
             if self.backend == "edge":
-                # pré-gera (em background) as frases fixas que ainda não existem
-                threading.Thread(target=self._prebuild_cache, daemon=True).start()
+                # pré-gera (em background) as frases fixas que ainda não existem.
+                # Roda a cada boot — então "Atualizar" (restart) já regenera/completa
+                # o cache automaticamente (ex.: frases novas vindas no update).
+                threading.Thread(target=self._build_cache, daemon=True).start()
 
     def _why_unavailable(self) -> str:
         if BACKEND_PREF == "edge" and not HAS_EDGE:
@@ -350,19 +357,52 @@ class TTSService:
                     pass
         return False
 
-    def _prebuild_cache(self) -> None:
-        """Gera (uma vez, em background) as frases fixas que faltam no cache."""
-        for phrase in CACHE_PHRASES:
-            cleaned = clean_for_tts(phrase, strip_accents=False)
-            if not cleaned:
-                continue
-            path = self._cache_path(cleaned)
-            if path.exists() and path.stat().st_size > 64:
-                continue
-            try:
-                self._synth_into(cleaned, path)
-            except Exception:
-                pass
+    def _cleaned_phrases(self) -> list:
+        seen, out = set(), []
+        for p in CACHE_PHRASES:
+            c = clean_for_tts(p, strip_accents=False)
+            if c and c not in seen:
+                seen.add(c)
+                out.append(c)
+        return out
+
+    def cache_counts(self) -> tuple:
+        """(quantas frases fixas já estão no cache, total). Só faz sentido no edge."""
+        if self.backend != "edge":
+            return (0, 0)
+        phrases = self._cleaned_phrases()
+        have = sum(1 for c in phrases
+                   if self._cache_path(c).exists() and self._cache_path(c).stat().st_size > 64)
+        return (have, len(phrases))
+
+    def ensure_cache_async(self) -> None:
+        """Dispara a geração das frases faltantes em background (botão SETTINGS)."""
+        if self.backend != "edge" or self.cache_building:
+            return
+        threading.Thread(target=self._build_cache, daemon=True).start()
+
+    def _build_cache(self) -> None:
+        """Verifica e gera as frases fixas que faltam no cache (em background).
+        Atualiza cache_status ('gerando i/n' -> 'ok have/total') pra UI mostrar."""
+        if self.backend != "edge":
+            return
+        self.cache_building = True
+        try:
+            phrases = self._cleaned_phrases()
+            total = len(phrases)
+            for i, cleaned in enumerate(phrases, 1):
+                path = self._cache_path(cleaned)
+                if path.exists() and path.stat().st_size > 64:
+                    continue
+                self.cache_status = f"gerando {i}/{total}"
+                try:
+                    self._synth_into(cleaned, path)
+                except Exception:
+                    pass
+            have, tot = self.cache_counts()
+            self.cache_status = f"ok {have}/{tot}"
+        finally:
+            self.cache_building = False
 
     def _say(self, text: str) -> None:
         # `text` já vem limpo do speak(). Edge usa cache de frases fixas; o resto
