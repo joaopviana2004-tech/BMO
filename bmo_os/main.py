@@ -51,6 +51,7 @@ from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.notifications import EventAlerter
 from bmo_os.services.sysinfo import SysInfoService
 from bmo_os.services.todoist import TodoistService
+from bmo_os.services.tts import TTSService
 from bmo_os.services.voice import VoiceService
 
 
@@ -78,8 +79,10 @@ def build_initial(app: App):
     # BMO responde via LLM (OpenRouter ou NVIDIA NIM — escolhível em SETTINGS->IA).
     # Degrada sem a chave do provedor ativo (OPENROUTER_API_KEY / NVIDIA_API_KEY).
     chat = ChatService()
-    # Voz (TTS) desativada por enquanto — só texto no rodapé.
-    tts = None
+    # Voz do BMO (TTS): Edge TTS (Francisca pt-BR) por padrão — incorporado do
+    # módulo de laboratório bmo_voz.py. Degrada sem edge-tts/internet.
+    # Volume separado em SETTINGS->IA ("Voz BMO" = tts_volume); 0 = mudo.
+    tts = TTSService()
 
     # Botão físico de push-to-talk (GPIO): segura = grava, solta = transcreve
     # + BMO responde. No PC degrada (ok=False); use o botão da tela TESTE.
@@ -105,6 +108,10 @@ def build_initial(app: App):
             pass
         try:
             voice.stop_monitor()
+        except Exception:
+            pass
+        try:
+            tts.stop()   # corta fala/player externo pendente antes do execv
         except Exception:
             pass
         try:
@@ -361,6 +368,13 @@ def build_initial(app: App):
         if msg and msg != "..." and msg != ai_overlay["msg"]:
             ai_overlay["msg"] = msg
             ai_overlay["until"] = now + RESP_SHOW_S
+            # fala a resposta (conversa OU descrição de visão — ambas caem aqui).
+            # speak() é não-bloqueante (fila/thread) e respeita o tts_volume.
+            if tts is not None:
+                try:
+                    tts.speak(msg)
+                except Exception:
+                    pass
         showing_resp = now < ai_overlay["until"] and bool(ai_overlay["msg"])
         if not (busy or thinking or showing_resp):
             return

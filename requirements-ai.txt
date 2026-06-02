@@ -3,7 +3,8 @@
 #     pip install -r requirements-ai.txt
 #
 # Dependências de sistema (Raspberry Pi OS):
-#     sudo apt install libportaudio2 python3-opencv
+#     sudo apt install libportaudio2 python3-opencv mpg123
+#     (mpg123 = player de MP3 p/ a voz do BMO, fallback se o mixer não tocar MP3)
 #
 # Wake word "BIMO": crie a keyword no Picovoice Console, baixe o .ppn pra
 # bmo_os/assets/bimo.ppn e ponha PORCUPINE_ACCESS_KEY no .env.
@@ -12,5 +13,6 @@
 
 sounddevice>=0.4.6        # captura do microfone (audição) — sempre necessário
 pvporcupine>=3.0.0        # wake word "BIMO"
+edge-tts>=6.1.0           # voz do BMO (Francisca pt-BR, neural) — precisa de internet
 # pywhispercpp>=1.2.0     # Whisper.cpp LOCAL (esquenta o Pi) — só p/ STT_BACKEND=local
 # opencv-python>=4.5.0    # webcam USB no PC (no Pi prefira: apt install python3-opencv)

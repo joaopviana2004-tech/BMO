@@ -132,7 +132,7 @@ bmo_os/
     audio.py           # sons 8-bit gerados em runtime (numpy) + voz do BMO
     voice.py           # mic + STT (Whisper local / API Groq) + push-to-talk + wake
     chat.py            # LLM via OpenRouter -> JSON {msg, screen, task}
-    tts.py             # voz falada (Piper/eSpeak) — DESATIVADO por ora, dormente
+    tts.py             # voz falada do BMO: Edge TTS (Francisca pt-BR) > Piper > eSpeak
     gpio_button.py     # botão físico de push-to-talk (gpiozero)
   assets/
     fonts/             # PressStart2P.ttf (ver "Fontes pixel" abaixo)
@@ -281,9 +281,13 @@ transcrito (STT) → o texto vai pro LLM → o BMO responde e age.
 O campo `task` (texto) cria uma tarefa no Todoist. Ex.: *"abre o pong"*,
 *"cria uma tarefa: comprar pão"*, *"se atualiza"*, *"que horas são?"*.
 
-> A **voz falada** (TTS, `services/tts.py`) está **desativada por ora** — o BMO
-> só responde por texto no rodapé. O módulo segue no repo, dormente; pra religar
-> é só voltar a instanciar `TTSService()` no `main.py`.
+> **Voz falada (TTS) — ATIVA.** O BMO fala as respostas (conversa e descrição de
+> visão) com a voz **Francisca (pt-BR)** via **Edge TTS** (Microsoft, grátis, sem
+> chave — precisa de internet). Incorporado do módulo de laboratório `bmo_voz.py`
+> em `services/tts.py` (backend `edge`, ajustes do lab: +13% velocidade, +18Hz
+> tom, +24% volume). Setup: `pip install edge-tts` + `sudo apt install mpg123`.
+> Volume em SETTINGS → IA ("Voz BMO"); `tts_volume=0` deixa mudo. Sem internet,
+> cai pra Piper (local) ou eSpeak via `BMO_TTS_BACKEND`.
 
 **Setup (`.env`):** ponha só a chave do(s) provedor(es) que for usar — o
 provedor e o modelo (chat **e** visão) saem do menu SETTINGS → IA.
@@ -382,7 +386,8 @@ canto superior esquerdo pra sair.
   (OpenRouter) que abre telas e cria tarefas; tela TESTE IA; cleanup de hardware
   no restart
 - [ ] **V2.1** — input GPIO completo (D-pad + A/B/MENU) quando os botões chegarem
-- [ ] **V2.2** — TTS (voz falada do BMO) — código pronto em `tts.py`, só religar
+- [x] **V2.2** — TTS (voz falada do BMO): Edge TTS / voz Francisca pt-BR
+  (incorporado do lab `bmo_voz.py`), fala conversa + descrição de visão
 - [ ] **V2.3** — RetroArch launcher (subprocess) — Games vira lista de ROMs
 - [ ] **V2.4** — gestos de mão (MediaPipe Hands) pra controle sem toque
 - [ ] **V3** — IMX500 native inference (objeto/pose direto no chip da câmera)
