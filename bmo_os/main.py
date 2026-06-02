@@ -182,7 +182,7 @@ def build_initial(app: App):
             ),
             on_open_teste=lambda: app.manager.push(
                 AITestScreen(on_back=app.manager.pop, voice=voice, camera=camera,
-                             sysinfo=sysinfo, chat=chat)
+                             sysinfo=sysinfo, chat=chat, button=ptt_button)
             ),
             on_open_settings=lambda: app.manager.push(make_settings()),
         )

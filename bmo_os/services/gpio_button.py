@@ -25,6 +25,7 @@ class GPIOButton:
     def __init__(self, pin: int, on_press, on_release) -> None:
         self.ok = False
         self.error = ""
+        self.pressed = False   # estado atual (pra debug na tela TESTE)
         self._btn = None
         if not HAS_GPIO:
             self.error = "gpiozero indisponivel"
@@ -32,9 +33,30 @@ class GPIOButton:
         try:
             # pull_up: botão entre o pino e o GND. bounce_time evita repique.
             self._btn = Button(pin, pull_up=True, bounce_time=0.05)
-            self._btn.when_pressed = on_press
-            self._btn.when_released = on_release
+            # embrulha os callbacks pra rastrear o estado do botão (a tela TESTE
+            # lê self.pressed / is_pressed). gpiozero chama isto numa thread.
+            self._btn.when_pressed = self._wrap(on_press, True)
+            self._btn.when_released = self._wrap(on_release, False)
             self.ok = True
         except Exception as e:
             self.error = f"gpio: {str(e)[:50]}"
             self._btn = None
+
+    def _wrap(self, fn, pressed: bool):
+        def handler():
+            self.pressed = pressed
+            if fn:
+                fn()
+        return handler
+
+    @property
+    def is_pressed(self) -> bool:
+        """Estado do botão. Lê direto do pino (gpiozero) quando dá — assim
+        reflete a realidade mesmo se um callback se perdeu; senão usa o
+        último estado visto pelos callbacks."""
+        if self._btn is not None:
+            try:
+                return bool(self._btn.is_pressed)
+            except Exception:
+                pass
+        return self.pressed

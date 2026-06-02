@@ -32,12 +32,14 @@ def _level_color(lv: float):
 
 
 class AITestScreen:
-    def __init__(self, *, on_back, voice, camera, sysinfo=None, chat=None) -> None:
+    def __init__(self, *, on_back, voice, camera, sysinfo=None, chat=None,
+                 button=None) -> None:
         self.on_back = on_back
         self.voice = voice
         self.camera = camera
         self.sysinfo = sysinfo
         self.chat = chat
+        self.button = button   # GPIOButton (push-to-talk físico); None no PC
         self._t = 0.0
 
     def enter(self) -> None:
@@ -127,7 +129,25 @@ class AITestScreen:
         self._draw_temp(surface)
         self._draw_camera(surface)
         self._draw_mic(surface)
+        self._draw_button(surface)
         self._draw_ptt(surface)
+
+    def _draw_button(self, surface) -> None:
+        """Estado do botão físico de push-to-talk (GPIO): quadradinho + texto."""
+        x, y = 184, 120
+        surface.blit(render_text("BTN", 8, CRT_WHITE), (x, y))
+        ok = bool(getattr(self.button, "ok", False))
+        pressed = bool(getattr(self.button, "is_pressed", False)) if ok else False
+        if not ok:
+            color, label = CRT_DIM, "indisponivel"
+        elif pressed:
+            color, label = Colors.GREEN_BTN, "PRESSIONADO"
+        else:
+            color, label = CRT_DIM, "solto"
+        sq = pygame.Rect(x + 24, y, 9, 9)
+        pygame.draw.rect(surface, color, sq)
+        pygame.draw.rect(surface, CRT_WHITE, sq, 1)
+        surface.blit(render_text(label, 8, color, pixel=False), (sq.right + 4, y))
 
     def _draw_temp(self, surface) -> None:
         """Quadradinho de debug da temperatura da Pi (canto sup-direito)."""
