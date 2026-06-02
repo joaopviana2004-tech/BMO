@@ -372,23 +372,33 @@ class SettingsListScreen:
 
     # ---------- ações de sistema ----------
 
+    def _git(self, *args, timeout=60):
+        return subprocess.run(
+            ["git", "-C", str(REPO_ROOT), *args],
+            capture_output=True, text=True, timeout=timeout, check=False)
+
     def _do_pull(self) -> None:
+        """Atualiza forçando o espelhamento do origin/main (fetch + reset --hard).
+
+        Kiosk deve seguir o main exatamente; isso ignora mudanças locais e
+        evita o frágil 'git pull --ff-only' (que quebra com arquivo modificado
+        ou 'cannot fast-forward to multiple branches')."""
         try:
-            result = subprocess.run(
-                ["git", "-C", str(REPO_ROOT), "pull", "--ff-only"],
-                capture_output=True, text=True, timeout=60, check=False)
+            fetch = self._git("fetch", "--quiet", "origin", "main")
+            if fetch.returncode != 0:
+                first = (fetch.stderr or fetch.stdout).strip().split("\n", 1)[0]
+                self._status = ("Fetch falhou: " + first)[:36]; return
+            local = self._git("rev-parse", "HEAD").stdout.strip()
+            remote = self._git("rev-parse", "origin/main").stdout.strip()
+            reset = self._git("reset", "--hard", "origin/main")
+            if reset.returncode != 0:
+                first = (reset.stderr or reset.stdout).strip().split("\n", 1)[0]
+                self._status = ("Reset falhou: " + first)[:36]; return
         except FileNotFoundError:
             self._status = "git nao instalado"; return
         except Exception as e:
             self._status = ("Erro: " + str(e))[:36]; return
-        output = (result.stdout + " " + result.stderr).lower()
-        if result.returncode != 0:
-            first = (result.stderr or result.stdout).strip().split("\n", 1)[0]
-            self._status = ("Falhou: " + first)[:36]; return
-        if "already up to date" in output or "ja atualizado" in output:
-            self._status = "Ja atualizado, reiniciando..."
-        else:
-            self._status = "OK! Reiniciando..."
+        self._status = "Ja atualizado, reiniciando..." if local == remote else "OK! Reiniciando..."
         self._delay_until = self._t + 1.5
         self._action = "restart"
 
