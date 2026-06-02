@@ -57,9 +57,10 @@ def _to_logical(pos: tuple[int, int]) -> tuple[int, int]:
 
 
 class BMOFaceScreen:
-    def __init__(self, on_open_home, camera=None) -> None:
+    def __init__(self, on_open_home, camera=None, tts=None) -> None:
         self.on_open_home = on_open_home
         self.camera = camera
+        self.tts = tts              # voz do BMO — enquanto fala, anima a boca
         self._camera_held = False   # tem ref-count na camera service?
         self.state = "IDLE"
         self.reaction: str | None = None
@@ -150,23 +151,39 @@ class BMOFaceScreen:
         self.state = "REACTING"
         self._target_ox = 0.0
         self._target_oy = 0.0
-        # voz aleatória do BMO toda vez que ele reage
-        audio.play_bmo_voice()
+        # voz aleatória do BMO toda vez que ele reage (silencia se o TTS fala)
+        if not self._is_speaking():
+            audio.play_bmo_voice()
 
     def _start_idle_anim(self) -> None:
         self.idle_anim = random.choice(IDLE_ANIMS)
         self.idle_anim_until = self._t + IDLE_ANIM_DURATION
         self.state = "IDLE_ANIM"
-        # tagarela quando entra em SPEAK idle
-        if self.idle_anim == "SPEAK":
+        # tagarela quando entra em SPEAK idle (silencia se o TTS está falando)
+        if self.idle_anim == "SPEAK" and not self._is_speaking():
             audio.play_bmo_voice()
 
     # ---------- update ----------
+
+    def _is_speaking(self) -> bool:
+        return self.tts is not None and getattr(self.tts, "speaking", False)
 
     def update(self, dt: float) -> None:
         self._t += dt
         # Garante que a câmera está ligada/desligada conforme config atual
         self._sync_camera_hold()
+        # Enquanto o BMO fala (TTS), fica na animação de fala até terminar:
+        # não inicia idle/reação, olhos voltam ao centro.
+        if self._is_speaking():
+            self.state = "IDLE"
+            self.reaction = None
+            self.idle_anim = None
+            self._schedule_next_idle()
+            self._target_ox *= 0.85
+            self._target_oy *= 0.85
+            self._eye_ox += (self._target_ox - self._eye_ox) * 0.18
+            self._eye_oy += (self._target_oy - self._eye_oy) * 0.18
+            return
         if self.state == "REACTING" and self._t >= self.reaction_until:
             self.state = "IDLE"
             self.reaction = None
@@ -224,6 +241,8 @@ class BMOFaceScreen:
 
     def _current_expression(self) -> tuple[str, str, str | None]:
         """Retorna (eye_style, mouth_style, eyebrow) p/ o estado atual."""
+        if self._is_speaking():
+            return ("DOT", self._speak_frame(), None)
         if self.state == "REACTING":
             r = self.reaction
             if r == "HAPPY":      return ("V_HAPPY", "SMILE", None)

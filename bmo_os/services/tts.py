@@ -29,10 +29,12 @@ from __future__ import annotations
 
 import os
 import queue
+import re
 import shutil
 import subprocess
 import tempfile
 import threading
+import unicodedata
 import wave
 from pathlib import Path
 
@@ -40,6 +42,52 @@ import numpy as np
 import pygame
 
 from ..core import config
+
+# Remove emojis e pictogramas (o TTS soletraria ou engasgaria neles).
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F000-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U00002190-\U000021FF"
+    "\U00002B00-\U00002BFF"
+    "\U0001F1E6-\U0001F1FF"
+    "️‍"
+    "]+",
+    flags=re.UNICODE,
+)
+# "1" (padrão) = tira acentos antes de mandar pro TTS. Em alguns modelos Piper
+# pt-BR a fala soa melhor COM acento — nesse caso ponha BMO_TTS_STRIP_ACCENTS=0.
+STRIP_ACCENTS = os.environ.get("BMO_TTS_STRIP_ACCENTS", "1").strip().lower() not in (
+    "0", "false", "no", "nao", "off")
+
+_QUOTE_MAP = {
+    "“": '"', "”": '"', "‘": "'", "’": "'",
+    "–": "-", "—": "-", "…": "...",
+}
+
+
+def _strip_accents(s: str) -> str:
+    nfkd = unicodedata.normalize("NFKD", s)
+    return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def clean_for_tts(text: str) -> str:
+    """Deixa só texto limpo pro TTS: sem emoji, sem markdown/símbolos, aspas e
+    travessões normalizados, espaços colapsados (e sem acentos por padrão)."""
+    text = (text or "").strip()
+    if not text:
+        return ""
+    text = _EMOJI_RE.sub(" ", text)
+    for k, v in _QUOTE_MAP.items():
+        text = text.replace(k, v)
+    # tira marcação/símbolos que o TTS leria errado (asteriscos de ação, etc.)
+    text = re.sub(r"[*_`#~>|<\[\]{}\\/^=+@]", " ", text)
+    if STRIP_ACCENTS:
+        text = _strip_accents(text)
+    # mantém só letra/dígito/espaço e pontuação básica de fala
+    text = re.sub(r"[^\w\s.,!?;:'\"-]", " ", text, flags=re.UNICODE)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 # ----- Piper -----
 PIPER_BIN = shutil.which(os.environ.get("BMO_TTS_PIPER_BIN", "piper"))
@@ -125,8 +173,9 @@ class TTSService:
     # ---------- API ----------
 
     def speak(self, text: str) -> None:
-        """Enfileira uma fala (não bloqueia)."""
-        text = (text or "").strip()
+        """Enfileira uma fala (não bloqueia). Limpa o texto antes (sem emoji/
+        markdown/acentos) pra o áudio sair certinho."""
+        text = clean_for_tts(text)
         if not text or not self.available:
             return
         self.last_text = text

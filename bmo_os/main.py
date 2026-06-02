@@ -131,7 +131,7 @@ def build_initial(app: App):
 
     def _instantiate_ambient(mode):
         if mode == "face":
-            return BMOFaceScreen(on_open_home=open_home, camera=camera)
+            return BMOFaceScreen(on_open_home=open_home, camera=camera, tts=tts)
         if mode == "pong":
             return PongAmbientScreen(on_open_home=open_home)
         if mode == "invaders":
