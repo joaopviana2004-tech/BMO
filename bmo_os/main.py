@@ -74,7 +74,8 @@ def build_initial(app: App):
     pomodoro = PomodoroScreen(on_back=app.manager.pop, todoist=todoist)
     # Audição (wake word + Whisper). No PC degrada pra "indisponivel".
     voice = VoiceService()
-    # BMO responde via LLM (OpenRouter). Degrada sem OPENROUTER_API_KEY.
+    # BMO responde via LLM (OpenRouter ou NVIDIA NIM — escolhível em SETTINGS->IA).
+    # Degrada sem a chave do provedor ativo (OPENROUTER_API_KEY / NVIDIA_API_KEY).
     chat = ChatService()
     # Voz (TTS) desativada por enquanto — só texto no rodapé.
     tts = None

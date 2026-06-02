@@ -57,6 +57,20 @@ def _fmt_warn(v) -> str:
     return f"{int(v)}MIN"
 
 
+def _fmt_provider(v) -> str:
+    return config.LLM_PROVIDER_LABELS.get(v, str(v).upper())
+
+
+def _short_model(m: str) -> str:
+    """Encurta o ID do modelo pro display CRT: tira o prefixo 'autor/' e o
+    sufixo ':free', e trunca. Ex.: 'meta/llama-3.3-70b-instruct' -> 'LLAMA-3.3-70.'"""
+    m = (m or "").strip()
+    if not m:
+        return "--"
+    m = m.split("/")[-1].replace(":free", "")
+    return (m if len(m) <= 14 else m[:13] + ".").upper()
+
+
 # ---------- itens por categoria ----------
 
 def _som_items():
@@ -90,6 +104,9 @@ def _sistema_items():
 
 def _ia_items():
     return [
+        {"type": "cycle", "key": "llm_provider", "label": "IA provedor",
+         "options": config.LLM_PROVIDERS, "format": _fmt_provider},
+        {"type": "llm_model", "key": "llm_model", "label": "IA modelo"},
         {"type": "cycle", "key": "voice_enabled", "label": "BMO me ouve",
          "options": [False, True], "format": _fmt_onoff},
         {"type": "mic", "key": "mic_device", "label": "Microfone"},
@@ -253,9 +270,18 @@ class SettingsListScreen:
                     self._index = i
                 return
 
+    def _llm_provider(self):
+        p = config.get("llm_provider")
+        return p if p in config.LLM_MODELS else config.LLM_PROVIDERS[0]
+
+    def _llm_model_key(self):
+        return f"{self._llm_provider()}_model"
+
     def _options_for(self, item):
         if item["type"] == "mic":
             return ["(padrao)"] + list(self.mic_options())
+        if item["type"] == "llm_model":
+            return list(config.LLM_MODELS.get(self._llm_provider(), []))
         return item["options"]
 
     def _mic_current_display(self):
@@ -264,30 +290,38 @@ class SettingsListScreen:
 
     def _cycle_current(self, direction: int) -> None:
         item = self._rows[self._index]
-        if item["type"] not in ("cycle", "mic"):
+        if item["type"] not in ("cycle", "mic", "llm_model"):
             return
         options = self._options_for(item)
         if not options:
             return
         if item["type"] == "mic":
+            key = "mic_device"
             cur = self._mic_current_display()
             idx = options.index(cur) if cur in options else 0
             new_disp = options[(idx + direction) % len(options)]
             new_val = "" if new_disp == "(padrao)" else new_disp
-        else:
-            cur = config.get(item["key"])
+        elif item["type"] == "llm_model":
+            # a chave depende do provedor escolhido (openrouter_model / nvidia_model)
+            key = self._llm_model_key()
+            cur = config.get(key)
             idx = options.index(cur) if cur in options else 0
             new_val = options[(idx + direction) % len(options)]
-        config.set_value(item["key"], new_val)
-        if item["key"] == "volume":
+        else:
+            key = item["key"]
+            cur = config.get(key)
+            idx = options.index(cur) if cur in options else 0
+            new_val = options[(idx + direction) % len(options)]
+        config.set_value(key, new_val)
+        if key == "volume":
             audio.set_volume(new_val / 100)
         audio.play("tick")
         if self.on_change:
-            self.on_change(item["key"], new_val)
+            self.on_change(key, new_val)
 
     def _activate(self) -> None:
         item = self._rows[self._index]
-        if item["type"] in ("cycle", "mic"):
+        if item["type"] in ("cycle", "mic", "llm_model"):
             self._cycle_current(+1); return
         key = item["key"]
         if key == "back":
@@ -354,10 +388,12 @@ class SettingsListScreen:
             label = render_text(label_txt, 9, fg)
             surface.blit(label, label.get_rect(midleft=(label_x, rect.centery)))
 
-            if item["type"] in ("cycle", "mic"):
+            if item["type"] in ("cycle", "mic", "llm_model"):
                 if item["type"] == "mic":
                     cur = self._mic_current_display()
                     val = cur if len(cur) <= 12 else cur[:11] + "."
+                elif item["type"] == "llm_model":
+                    val = _short_model(config.get(self._llm_model_key()))
                 else:
                     val = item["format"](config.get(item["key"]))
                 val_img = render_text(val, 9, fg, pixel=False)

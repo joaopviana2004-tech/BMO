@@ -51,6 +51,13 @@ DEFAULTS: dict = {
     "voice_enabled": False,         # "BMO me Ouve" — wake word + comando de voz (Whisper)
     "mic_device": "",               # nome (ou trecho) do microfone de entrada; "" = padrão do sistema
     "tts_volume": 100,              # 0-100 — volume da voz do BMO (eSpeak-NG), separado do volume dos efeitos
+    # --- LLM do chat (BMO responde) — escolhível em SETTINGS -> IA ---
+    "llm_provider": "openrouter",   # "openrouter" | "nvidia" (ambos OpenAI-compatíveis)
+    # modelo por provedor (o cycler do SETTINGS grava aqui). Env *_MODEL semeia o default.
+    "openrouter_model": os.environ.get("OPENROUTER_MODEL", "").strip()
+        or "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "nvidia_model": os.environ.get("NVIDIA_MODEL", "").strip()
+        or "meta/llama-3.3-70b-instruct",
 }
 
 IDLE_TIMEOUT_OPTIONS = [5, 10, 15, 30, 60, 120]
@@ -65,6 +72,27 @@ AMBIENT_MODE_LABELS = {
 BRIGHTNESS_OPTIONS = [20, 40, 60, 80, 100]
 VOLUME_OPTIONS = [0, 25, 50, 75, 100]
 EVENT_WARNING_OPTIONS = [1, 5, 10, 15, 30, 60]   # minutos de antecedência
+
+# --- LLM: provedores e modelos de troca rápida (SETTINGS -> IA) ---
+# Edite à vontade. Os IDs são os esperados por cada API (OpenAI-compatível).
+LLM_PROVIDERS = ["openrouter", "nvidia"]
+LLM_PROVIDER_LABELS = {"openrouter": "OPENROUTER", "nvidia": "NVIDIA"}
+LLM_MODELS = {
+    # OpenRouter (openrouter.ai/models) — modelos free; troque por pagos se quiser
+    "openrouter": [
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "google/gemini-2.0-flash-exp:free",
+        "deepseek/deepseek-chat-v3-0324:free",
+    ],
+    # NVIDIA NIM cloud (build.nvidia.com) — integrate.api.nvidia.com
+    "nvidia": [
+        "meta/llama-3.3-70b-instruct",
+        "nvidia/llama-3.1-nemotron-70b-instruct",
+        "meta/llama-3.1-8b-instruct",
+        "qwen/qwen2.5-7b-instruct",
+    ],
+}
 
 _lock = Lock()
 _data: dict | None = None

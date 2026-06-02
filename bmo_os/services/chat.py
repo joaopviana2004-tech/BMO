@@ -1,12 +1,15 @@
-"""BMO conversa via LLM (OpenRouter — compatível com OpenAI).
+"""BMO conversa via LLM (OpenRouter ou NVIDIA NIM — ambos OpenAI-compatíveis).
 
 Recebe o texto transcrito (do Whisper) e devolve a resposta do BMO. Pede ao
 modelo um JSON {"msg": "..."} e extrai o campo `msg`. urllib puro, degrada
 sem chave (available=False).
 
-Env:
-    OPENROUTER_API_KEY   chave (openrouter.ai/keys)
-    OPENROUTER_MODEL     default nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+O provedor e o modelo são escolhidos em SETTINGS -> IA (gravados no config), e
+lidos a cada `ask()` — trocar nas Settings vale na hora, sem reiniciar.
+
+Env (chaves; o resto é via Settings):
+    OPENROUTER_API_KEY   chave do OpenRouter (openrouter.ai/keys)
+    NVIDIA_API_KEY       chave NIM da NVIDIA (build.nvidia.com), formato nvapi-...
 """
 from __future__ import annotations
 
@@ -16,13 +19,42 @@ import re
 import urllib.error
 import urllib.request
 
-from ..core import config  # noqa: F401 — importar dispara o _load_dotenv (.env)
+from ..core import config  # importar dispara o _load_dotenv (.env)
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_MODEL = os.environ.get(
-    "OPENROUTER_MODEL", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
-).strip()
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
+# Cada provedor é uma API compatível com OpenAI: muda URL, chave e o nome da
+# config que guarda o modelo. `json_mode` liga o response_format={json_object}
+# (OpenRouter aceita; vários modelos NIM da NVIDIA rejeitam, então fica off lá —
+# o _parse já extrai o JSON do texto puro).
+PROVIDERS = {
+    "openrouter": {
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "key_env": "OPENROUTER_API_KEY",
+        "model_key": "openrouter_model",
+        "json_mode": True,
+        "extra_headers": {"HTTP-Referer": "https://bmo.local", "X-Title": "BMO OS"},
+    },
+    "nvidia": {
+        "url": "https://integrate.api.nvidia.com/v1/chat/completions",
+        "key_env": "NVIDIA_API_KEY",
+        "model_key": "nvidia_model",
+        "json_mode": False,
+        "extra_headers": {},
+    },
+}
+
+
+def _provider() -> str:
+    p = (config.get("llm_provider") or "openrouter").strip()
+    return p if p in PROVIDERS else "openrouter"
+
+
+def _resolve() -> tuple[str, dict, str, str]:
+    """(provider, spec, api_key, model) conforme a config atual."""
+    name = _provider()
+    spec = PROVIDERS[name]
+    key = os.environ.get(spec["key_env"], "").strip()
+    model = (config.get(spec["model_key"]) or "").strip()
+    return name, spec, key, model
 
 # Telas que o BMO pode abrir. A chave é o que o LLM deve devolver em "screen";
 # o main.py mapeia cada chave pra navegação. Mantenha as duas listas em sincronia.
@@ -66,7 +98,8 @@ class ChatService:
 
     @property
     def available(self) -> bool:
-        return bool(OPENROUTER_API_KEY)
+        _, _, key, _ = _resolve()
+        return bool(key)
 
     def ask(self, text: str) -> str:
         """Manda o texto pro LLM e retorna a msg do BMO (ou "" + last_error).
@@ -74,30 +107,36 @@ class ChatService:
         self.last_error = ""
         self.last_screen = ""
         self.last_task = ""
-        if not OPENROUTER_API_KEY:
-            self.last_error = "falta OPENROUTER_API_KEY"
+        provider, spec, api_key, model = _resolve()
+        if not api_key:
+            self.last_error = f"falta {spec['key_env']}"
+            return ""
+        if not model:
+            self.last_error = f"sem modelo p/ {provider}"
             return ""
         if not (text or "").strip():
             return ""
         self.last_msg = "..."
-        body = json.dumps({
-            "model": OPENROUTER_MODEL,
+        payload = {
+            "model": model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": text},
             ],
-            "response_format": {"type": "json_object"},
             "temperature": 0.6,
             # modelos de reasoning gastam MUITOS tokens "pensando" antes do
             # texto final; com pouco teto o content volta vazio. Folga grande.
             "max_tokens": 4096,
-        }).encode("utf-8")
-        req = urllib.request.Request(OPENROUTER_URL, data=body, method="POST")
-        req.add_header("Authorization", f"Bearer {OPENROUTER_API_KEY}")
+        }
+        if spec["json_mode"]:
+            payload["response_format"] = {"type": "json_object"}
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(spec["url"], data=body, method="POST")
+        req.add_header("Authorization", f"Bearer {api_key}")
         req.add_header("Content-Type", "application/json")
         req.add_header("User-Agent", "BMO-OS/1.0")
-        req.add_header("HTTP-Referer", "https://bmo.local")
-        req.add_header("X-Title", "BMO OS")
+        for hk, hv in spec["extra_headers"].items():
+            req.add_header(hk, hv)
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
@@ -111,7 +150,7 @@ class ChatService:
                 self.last_error = (
                     "resposta vazia"
                     + (f" ({finish})" if finish else "")
-                    + " - troque OPENROUTER_MODEL p/ um nao-reasoning"
+                    + " - troque o modelo (IA) p/ um nao-reasoning"
                 )
             return self.last_msg
         except urllib.error.HTTPError as e:
