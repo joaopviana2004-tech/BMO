@@ -81,11 +81,15 @@ class AITestScreen:
             audio.play("back"); self.on_back()
         elif a == bmo_input.Action.A:
             self._ptt()
+        elif a == bmo_input.Action.MENU:
+            self._test_voice()
         elif a == bmo_input.Action.TAP and pos is not None:
             if self._back_btn().collidepoint(pos):
                 audio.play("back"); self.on_back()
             elif self._ptt_btn().collidepoint(pos):
                 self._ptt()
+            elif self._voice_btn().collidepoint(pos):
+                self._test_voice()
 
     def _ptt(self) -> None:
         if not getattr(self.voice, "available", False) or self.voice.busy:
@@ -103,6 +107,16 @@ class AITestScreen:
             if msg and self.tts is not None:
                 self.tts.speak(msg)
 
+    def _test_voice(self) -> None:
+        """Testa o TTS sem depender do LLM: fala a última resposta do BMO, ou
+        uma frase padrão. Isola se o problema é a voz ou o chat."""
+        if self.tts is None or not getattr(self.tts, "available", False):
+            audio.play("back"); return
+        audio.play("select")
+        msg = getattr(self.chat, "last_msg", "") if self.chat else ""
+        phrase = msg if (msg and msg not in ("...", "—")) else "Oi! Eu sou o BMO."
+        self.tts.speak(phrase)
+
     # ---------- hitboxes ----------
 
     def _back_btn(self) -> pygame.Rect:
@@ -111,6 +125,9 @@ class AITestScreen:
     def _ptt_btn(self) -> pygame.Rect:
         return pygame.Rect(LOGICAL_SIZE[0] // 2 - 80, 142, 160, 22)
 
+    def _voice_btn(self) -> pygame.Rect:
+        return pygame.Rect(236, SAFE_INSET, 78, 14)
+
     # ---------- draw ----------
 
     def draw(self, surface: pygame.Surface) -> None:
@@ -118,6 +135,7 @@ class AITestScreen:
         draw_scanlines(surface)
         draw_crt_corners(surface, margin=SAFE_INSET)
         self._draw_back_btn(surface)
+        self._draw_voice_btn(surface)
         title = render_text("TESTE IA", 10, CRT_DIM)
         surface.blit(title, title.get_rect(midtop=(LOGICAL_SIZE[0] // 2, SAFE_INSET + 1)))
 
@@ -284,6 +302,23 @@ class AITestScreen:
         if cur:
             lines.append(cur)
         return lines or [""]
+
+    def _draw_voice_btn(self, surface) -> None:
+        rect = self._voice_btn()
+        avail = self.tts is not None and getattr(self.tts, "available", False)
+        speaking = avail and getattr(self.tts, "speaking", False)
+        if not avail:
+            pygame.draw.rect(surface, CRT_BLACK, rect)
+            pygame.draw.rect(surface, CRT_DIM, rect, 1)
+            fg, txt = CRT_DIM, "VOZ OFF"
+        elif speaking:
+            pygame.draw.rect(surface, Colors.CYAN, rect)
+            fg, txt = CRT_BLACK, "FALANDO"
+        else:
+            pygame.draw.rect(surface, CRT_WHITE, rect)
+            fg, txt = CRT_BLACK, "TESTAR VOZ"
+        img = render_text(txt, 8, fg, pixel=False)
+        surface.blit(img, img.get_rect(center=rect.center))
 
     def _draw_back_btn(self, surface) -> None:
         rect = self._back_btn()

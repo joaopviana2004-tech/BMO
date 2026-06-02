@@ -59,7 +59,9 @@ class ChatService:
             ],
             "response_format": {"type": "json_object"},
             "temperature": 0.6,
-            "max_tokens": 1024,   # modelo de reasoning gasta tokens "pensando"
+            # modelos de reasoning gastam MUITOS tokens "pensando" antes do
+            # texto final; com pouco teto o content volta vazio. Folga grande.
+            "max_tokens": 4096,
         }).encode("utf-8")
         req = urllib.request.Request(OPENROUTER_URL, data=body, method="POST")
         req.add_header("Authorization", f"Bearer {OPENROUTER_API_KEY}")
@@ -68,10 +70,20 @@ class ChatService:
         req.add_header("HTTP-Referer", "https://bmo.local")
         req.add_header("X-Title", "BMO OS")
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-            content = data["choices"][0]["message"]["content"]
+            msg_obj = data["choices"][0]["message"]
+            content = msg_obj.get("content")
             self.last_msg = self._extract_msg(content)
+            if not self.last_msg:
+                # content veio vazio: típico de modelo reasoning que estourou o
+                # max_tokens só pensando. Sinaliza pra UI em vez de mostrar "—".
+                finish = data["choices"][0].get("finish_reason", "")
+                self.last_error = (
+                    "resposta vazia"
+                    + (f" ({finish})" if finish else "")
+                    + " - troque OPENROUTER_MODEL p/ um nao-reasoning"
+                )
             return self.last_msg
         except urllib.error.HTTPError as e:
             raw = ""

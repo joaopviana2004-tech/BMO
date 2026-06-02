@@ -50,6 +50,7 @@ DEFAULTS: dict = {
     "event_warning_min": 10,        # antecedência (min) do aviso de evento próximo (tela AGENDA)
     "voice_enabled": False,         # "BMO me Ouve" — wake word + comando de voz (Whisper)
     "mic_device": "",               # nome (ou trecho) do microfone de entrada; "" = padrão do sistema
+    "tts_volume": 100,              # 0-100 — volume da voz do BMO (eSpeak-NG), separado do volume dos efeitos
 }
 
 IDLE_TIMEOUT_OPTIONS = [5, 10, 15, 30, 60, 120]

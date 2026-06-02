@@ -93,6 +93,8 @@ def _ia_items():
         {"type": "cycle", "key": "voice_enabled", "label": "BMO me ouve",
          "options": [False, True], "format": _fmt_onoff},
         {"type": "mic", "key": "mic_device", "label": "Microfone"},
+        {"type": "cycle", "key": "tts_volume", "label": "Voz BMO",
+         "options": config.VOLUME_OPTIONS, "format": _fmt_pct},
         {"type": "cycle", "key": "camera_face_tracking", "label": "BMO te ve",
          "options": [False, True], "format": _fmt_onoff},
     ]

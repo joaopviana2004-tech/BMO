@@ -60,7 +60,10 @@ class TTSService:
 
     def _volume(self) -> float:
         try:
-            return max(0.0, min(1.0, (config.get("volume") or 100) / 100))
+            v = config.get("tts_volume")
+            if v is None:
+                v = 100
+            return max(0.0, min(1.0, v / 100))
         except Exception:
             return 1.0
 
@@ -130,9 +133,12 @@ class TTSService:
                     return
             except Exception:
                 pass
-        # 2) fallback: o próprio eSpeak-NG toca direto (sai no ALSA padrão)
+        # 2) fallback: o próprio eSpeak-NG toca direto (sai no ALSA padrão).
+        #    Sem mixer pra controlar volume, usamos a amplitude do eSpeak (-a,
+        #    0-200) a partir do tts_volume.
+        amp = str(int(self._volume() * 200))
         proc = subprocess.Popen(
-            cmd_common + [text],
+            cmd_common + ["-a", amp, text],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         with self._lock:
             self._proc = proc
