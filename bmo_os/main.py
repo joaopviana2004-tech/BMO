@@ -10,6 +10,7 @@ import argparse
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pygame
@@ -48,7 +49,6 @@ from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.notifications import EventAlerter
 from bmo_os.services.sysinfo import SysInfoService
 from bmo_os.services.todoist import TodoistService
-from bmo_os.services.tts import TTSService
 from bmo_os.services.voice import VoiceService
 
 
@@ -75,16 +75,15 @@ def build_initial(app: App):
     voice = VoiceService()
     # BMO responde via LLM (OpenRouter). Degrada sem OPENROUTER_API_KEY.
     chat = ChatService()
-    # Voz do BMO (eSpeak-NG). Degrada sem espeak-ng instalado.
-    tts = TTSService()
+    # Voz (TTS) desativada por enquanto — só texto no rodapé.
+    tts = None
 
     # Botão físico de push-to-talk (GPIO): segura = grava, solta = transcreve
     # + BMO responde. No PC degrada (ok=False); use o botão da tela TESTE.
     def _ptt_done(text):
-        if text and chat.available:
-            msg = chat.ask(text)   # atualiza chat.last_msg (a UI lê)
-            if msg:
-                tts.speak(msg)     # BMO fala a resposta
+        # delega pro handler (definido abaixo) que pergunta ao LLM e, se ele
+        # pedir, abre a tela correspondente. Late binding resolve o nome.
+        handle_ai_response(text)
 
     ptt_pin = int(os.environ.get("PTT_GPIO", "17"))
     ptt_button = GPIOButton(
@@ -218,7 +217,8 @@ def build_initial(app: App):
             ),
             on_open_teste=lambda: app.manager.push(
                 AITestScreen(on_back=app.manager.pop, voice=voice, camera=camera,
-                             sysinfo=sysinfo, chat=chat, button=ptt_button, tts=tts)
+                             sysinfo=sysinfo, chat=chat, button=ptt_button,
+                             on_respond=handle_ai_response)
             ),
             on_open_settings=lambda: app.manager.push(make_settings()),
         )
@@ -261,6 +261,33 @@ def build_initial(app: App):
     voice.register_command(["menu", "inicio", "casa", "home"], _cmd(open_home))
     voice.register_command(["relogio", "horas", "tela inicial", "descanso"], _cmd(go_ambient))
 
+    # ---- LLM pode abrir telas: chave (do JSON do chat) -> navegação ----
+    # As chaves espelham SCREENS_DOC em services/chat.py.
+    screen_actions = {
+        "agenda": lambda: app.manager.push(AgendaScreen(on_back=app.manager.pop, calendar=calendar)),
+        "tarefas": lambda: app.manager.push(TasksScreen(on_back=app.manager.pop, todoist=todoist)),
+        "foco": lambda: app.manager.push(pomodoro),
+        "sistema": lambda: app.manager.push(SysInfoScreen(on_back=app.manager.pop, sysinfo=sysinfo)),
+        "foto": lambda: app.manager.push(
+            PhotoScreen(on_back=app.manager.pop, camera=camera,
+                        on_open_gallery=lambda: app.manager.push(
+                            GalleryScreen(on_back=app.manager.pop, photos_dir=PHOTOS_DIR)))),
+        "jogos": lambda: app.manager.push(make_games_screen()),
+        "configuracoes": lambda: app.manager.push(make_settings()),
+        "relogio": go_ambient,
+        "home": open_home,
+    }
+
+    def handle_ai_response(text: str) -> None:
+        """Roda na thread de voz: manda o texto pro LLM e, se ele pedir uma
+        tela, enfileira a navegação pra rodar na main thread (frame_hook)."""
+        if not (text and chat.available):
+            return
+        chat.ask(text)   # atualiza chat.last_msg / last_error / last_screen
+        action = screen_actions.get((getattr(chat, "last_screen", "") or "").strip())
+        if action is not None:
+            voice_enqueue(action)
+
     def frame_hook(_dt: float) -> None:
         # Roda todo frame (main thread).
         # 1) drena comandos de voz pendentes (a thread de voz só enfileira)
@@ -287,20 +314,32 @@ def build_initial(app: App):
 
     app.frame_hook = frame_hook
 
+    # estado do rodapé de voz: guarda a última resposta + até quando exibi-la
+    ai_overlay = {"msg": "", "until": 0.0}
+    RESP_SHOW_S = 7.0
+
     def draw_voice_overlay(canvas) -> None:
-        """Desenha o status do push-to-talk POR CIMA de qualquer tela, pra dar
-        feedback quando o botão físico é usado fora da tela TESTE."""
+        """Rodapé POR CIMA de qualquer tela: GRAVANDO / PENSANDO durante o
+        push-to-talk e a resposta do BMO por alguns segundos depois."""
         busy = getattr(voice, "busy", False)
-        speaking = getattr(tts, "speaking", False)
-        if not (busy or speaking):
-            return
         status = (getattr(voice, "status", "") or "").lower()
-        if speaking:
-            label, color = "BMO FALANDO", Colors.CYAN
-        elif "grav" in status or "ouv" in status:
-            label, color = "GRAVANDO...", Colors.RED
+        now = time.time()
+        # detecta nova resposta do BMO pra exibir por RESP_SHOW_S segundos
+        msg = (getattr(chat, "last_msg", "") or "").strip()
+        if msg and msg != "..." and msg != ai_overlay["msg"]:
+            ai_overlay["msg"] = msg
+            ai_overlay["until"] = now + RESP_SHOW_S
+        showing_resp = now < ai_overlay["until"] and bool(ai_overlay["msg"])
+        if not (busy or showing_resp):
+            return
+
+        if busy and ("grav" in status or "ouv" in status):
+            label, color, body = "GRAVANDO", Colors.RED, ""
+        elif busy:
+            label, color, body = "PENSANDO", Colors.YELLOW, ""
         else:
-            label, color = "PENSANDO...", Colors.YELLOW
+            label, color, body = "BMO", Colors.CYAN, ai_overlay["msg"]
+
         w, h = LOGICAL_SIZE
         bar_h = 16
         strip = pygame.Surface((w, bar_h))
@@ -311,13 +350,12 @@ def build_initial(app: App):
         pygame.draw.circle(canvas, color, (8, cy), 3)
         lbl = render_text(label, 9, color, pixel=False)
         canvas.blit(lbl, lbl.get_rect(midleft=(16, cy)))
-        # enquanto fala, mostra a resposta do BMO (truncada) à direita
-        if speaking:
-            msg = (getattr(chat, "last_msg", "") or "").strip()
-            if msg:
-                msg = msg if len(msg) <= 50 else msg[:49] + "."
-                img = render_text(msg, 8, Colors.WHITE, pixel=False)
-                canvas.blit(img, img.get_rect(midright=(w - 6, cy)))
+        if body:
+            avail = w - (16 + lbl.get_width() + 8) - 6
+            maxn = max(8, avail // 4)   # ~4px por char no font 8
+            body = body if len(body) <= maxn else body[: maxn - 1] + "."
+            img = render_text(body, 8, Colors.WHITE, pixel=False)
+            canvas.blit(img, img.get_rect(midleft=(16 + lbl.get_width() + 8, cy)))
 
     app.overlay_hook = draw_voice_overlay
     return make_ambient()

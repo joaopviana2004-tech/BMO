@@ -24,11 +24,31 @@ OPENROUTER_MODEL = os.environ.get(
 ).strip()
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
 
+# Telas que o BMO pode abrir. A chave é o que o LLM deve devolver em "screen";
+# o main.py mapeia cada chave pra navegação. Mantenha as duas listas em sincronia.
+SCREENS_DOC = (
+    "TELAS que voce pode abrir (campo \"screen\"):\n"
+    "- none: nao abre nada, so conversa.\n"
+    "- agenda: proximos compromissos/eventos do calendario.\n"
+    "- tarefas: quadro de tarefas (a fazer / fazendo / feito) do Todoist.\n"
+    "- foco: timer pomodoro pra focar numa tarefa.\n"
+    "- sistema: hardware da Raspberry Pi (CPU, temperatura, memoria).\n"
+    "- foto: abre a camera pra tirar foto.\n"
+    "- jogos: menu de jogos (Pong, Space Invaders).\n"
+    "- configuracoes: ajustes (volume, brilho, tema, etc.).\n"
+    "- relogio: tela de descanso com o relogio (modo ambiente).\n"
+    "- home: o menu principal do BMO.\n"
+)
+
 SYSTEM_PROMPT = (
     "Voce e o BMO, o consolinho fofo e prestativo de Hora de Aventura. "
-    "Responda em portugues do Brasil, curto (1-2 frases), simpatico e direto. "
-    'Responda SEMPRE apenas com um JSON valido no formato {"msg": "sua resposta"} '
-    "e absolutamente nada alem do JSON."
+    "Responda em portugues do Brasil, curto (1-2 frases), simpatico e direto.\n"
+    + SCREENS_DOC +
+    'Responda SEMPRE apenas com um JSON valido no formato '
+    '{"msg": "sua resposta", "screen": "uma das chaves acima"}. '
+    'Use "screen" diferente de "none" SO quando o usuario pedir ou fizer claro '
+    'sentido abrir aquela tela; em conversa normal use "none". '
+    "Nada alem do JSON."
 )
 
 
@@ -36,6 +56,7 @@ class ChatService:
     def __init__(self) -> None:
         self.last_error = ""
         self.last_msg = ""       # última resposta do BMO (pra UI ler)
+        self.last_screen = ""    # tela que o BMO pediu pra abrir ("" = nenhuma)
 
     @property
     def available(self) -> bool:
@@ -45,6 +66,7 @@ class ChatService:
         """Manda o texto pro LLM e retorna a msg do BMO (ou "" + last_error).
         Atualiza self.last_msg ("..." enquanto pensa) pra UI exibir."""
         self.last_error = ""
+        self.last_screen = ""
         if not OPENROUTER_API_KEY:
             self.last_error = "falta OPENROUTER_API_KEY"
             return ""
@@ -74,7 +96,7 @@ class ChatService:
                 data = json.loads(resp.read().decode("utf-8"))
             msg_obj = data["choices"][0]["message"]
             content = msg_obj.get("content")
-            self.last_msg = self._extract_msg(content)
+            self.last_msg, self.last_screen = self._parse(content)
             if not self.last_msg:
                 # content veio vazio: típico de modelo reasoning que estourou o
                 # max_tokens só pensando. Sinaliza pra UI em vez de mostrar "—".
@@ -108,21 +130,30 @@ class ChatService:
             self.last_msg = ""
             return ""
 
-    @staticmethod
-    def _extract_msg(content: str) -> str:
-        """Extrai o campo 'msg' do JSON. Tolerante: tenta o JSON inteiro, depois
-        um objeto no meio do texto, e por fim usa o texto cru."""
+    # chaves de tela aceitas (espelha SCREENS_DOC e o registro do main.py)
+    _SCREENS = {"agenda", "tarefas", "foco", "sistema", "foto",
+                "jogos", "configuracoes", "relogio", "home"}
+
+    def _parse(self, content: str) -> tuple[str, str]:
+        """Extrai (msg, screen) do JSON. Tolerante: tenta o JSON inteiro, depois
+        um objeto no meio do texto. screen vira "" se ausente/'none'/invalido."""
         content = (content or "").strip()
         # remove blocos de raciocínio <think>...</think> de modelos reasoning
         content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+        obj = None
         try:
-            return str(json.loads(content).get("msg", "")).strip() or content
+            obj = json.loads(content)
         except Exception:
-            pass
-        m = re.search(r"\{.*\}", content, re.DOTALL)
-        if m:
-            try:
-                return str(json.loads(m.group(0)).get("msg", "")).strip() or content
-            except Exception:
-                pass
-        return content
+            m = re.search(r"\{.*\}", content, re.DOTALL)
+            if m:
+                try:
+                    obj = json.loads(m.group(0))
+                except Exception:
+                    obj = None
+        if isinstance(obj, dict):
+            msg = str(obj.get("msg", "")).strip()
+            screen = str(obj.get("screen", "") or "").strip().lower()
+            if screen not in self._SCREENS:
+                screen = ""
+            return (msg or content), screen
+        return content, ""

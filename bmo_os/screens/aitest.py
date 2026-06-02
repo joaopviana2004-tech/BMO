@@ -33,14 +33,14 @@ def _level_color(lv: float):
 
 class AITestScreen:
     def __init__(self, *, on_back, voice, camera, sysinfo=None, chat=None,
-                 button=None, tts=None) -> None:
+                 button=None, on_respond=None) -> None:
         self.on_back = on_back
         self.voice = voice
         self.camera = camera
         self.sysinfo = sysinfo
         self.chat = chat
-        self.button = button   # GPIOButton (push-to-talk físico); None no PC
-        self.tts = tts         # voz do BMO (eSpeak-NG); None se indisponível
+        self.button = button         # GPIOButton (push-to-talk físico); None no PC
+        self.on_respond = on_respond  # callback que manda o texto pro LLM + navega
         self._t = 0.0
 
     def enter(self) -> None:
@@ -81,15 +81,11 @@ class AITestScreen:
             audio.play("back"); self.on_back()
         elif a == bmo_input.Action.A:
             self._ptt()
-        elif a == bmo_input.Action.MENU:
-            self._test_voice()
         elif a == bmo_input.Action.TAP and pos is not None:
             if self._back_btn().collidepoint(pos):
                 audio.play("back"); self.on_back()
             elif self._ptt_btn().collidepoint(pos):
                 self._ptt()
-            elif self._voice_btn().collidepoint(pos):
-                self._test_voice()
 
     def _ptt(self) -> None:
         if not getattr(self.voice, "available", False) or self.voice.busy:
@@ -99,23 +95,15 @@ class AITestScreen:
         self.voice.record_and_transcribe(on_done=self._on_transcribed)
 
     def _on_transcribed(self, text: str) -> None:
-        # roda na thread de voz (após transcrição). Manda o texto pro BMO
-        # responder (chat.ask atualiza chat.last_msg, que a UI lê) e fala.
+        # roda na thread de voz (após transcrição). Manda o texto pro handler do
+        # LLM (atualiza chat.last_msg, que a UI lê, e abre tela se o BMO pedir).
         text = (text or "").strip()
-        if text and self.chat is not None and self.chat.available:
-            msg = self.chat.ask(text)
-            if msg and self.tts is not None:
-                self.tts.speak(msg)
-
-    def _test_voice(self) -> None:
-        """Testa o TTS sem depender do LLM: fala a última resposta do BMO, ou
-        uma frase padrão. Isola se o problema é a voz ou o chat."""
-        if self.tts is None or not getattr(self.tts, "available", False):
-            audio.play("back"); return
-        audio.play("select")
-        msg = getattr(self.chat, "last_msg", "") if self.chat else ""
-        phrase = msg if (msg and msg not in ("...", "—")) else "Oi! Eu sou o BMO."
-        self.tts.speak(phrase)
+        if not text:
+            return
+        if self.on_respond is not None:
+            self.on_respond(text)
+        elif self.chat is not None and self.chat.available:
+            self.chat.ask(text)
 
     # ---------- hitboxes ----------
 
@@ -125,9 +113,6 @@ class AITestScreen:
     def _ptt_btn(self) -> pygame.Rect:
         return pygame.Rect(LOGICAL_SIZE[0] // 2 - 80, 142, 160, 22)
 
-    def _voice_btn(self) -> pygame.Rect:
-        return pygame.Rect(236, SAFE_INSET, 78, 14)
-
     # ---------- draw ----------
 
     def draw(self, surface: pygame.Surface) -> None:
@@ -135,7 +120,6 @@ class AITestScreen:
         draw_scanlines(surface)
         draw_crt_corners(surface, margin=SAFE_INSET)
         self._draw_back_btn(surface)
-        self._draw_voice_btn(surface)
         title = render_text("TESTE IA", 10, CRT_DIM)
         surface.blit(title, title.get_rect(midtop=(LOGICAL_SIZE[0] // 2, SAFE_INSET + 1)))
 
@@ -302,27 +286,6 @@ class AITestScreen:
         if cur:
             lines.append(cur)
         return lines or [""]
-
-    def _draw_voice_btn(self, surface) -> None:
-        rect = self._voice_btn()
-        avail = self.tts is not None and getattr(self.tts, "available", False)
-        speaking = avail and getattr(self.tts, "speaking", False)
-        if not avail:
-            pygame.draw.rect(surface, CRT_BLACK, rect)
-            pygame.draw.rect(surface, CRT_DIM, rect, 1)
-            fg, txt = CRT_DIM, "VOZ OFF"
-        elif speaking:
-            pygame.draw.rect(surface, Colors.CYAN, rect)
-            fg, txt = CRT_BLACK, "FALANDO"
-        else:
-            pygame.draw.rect(surface, CRT_WHITE, rect)
-            fg, txt = CRT_BLACK, "TESTAR VOZ"
-        img = render_text(txt, 8, fg, pixel=False)
-        surface.blit(img, img.get_rect(center=rect.center))
-        # backend ativo (piper / espeak / none) logo abaixo
-        bk = getattr(self.tts, "backend", "none") if self.tts else "none"
-        lbl = render_text(bk, 7, CRT_DIM, pixel=False)
-        surface.blit(lbl, lbl.get_rect(midtop=(rect.centerx, rect.bottom + 1)))
 
     def _draw_back_btn(self, surface) -> None:
         rect = self._back_btn()
