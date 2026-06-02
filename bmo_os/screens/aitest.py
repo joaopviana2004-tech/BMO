@@ -10,6 +10,8 @@ Tudo degrada: sem mic/whisper/câmera mostra "indisponivel".
 """
 from __future__ import annotations
 
+import threading
+
 import pygame
 
 from ..core import input as bmo_input
@@ -42,6 +44,8 @@ class AITestScreen:
         self.button = button         # GPIOButton (push-to-talk físico); None no PC
         self.on_respond = on_respond  # callback que manda o texto pro LLM + navega
         self._t = 0.0
+        self._vision_busy = False
+        self._vision_text = ""       # última descrição da câmera (teste de visão)
 
     def enter(self) -> None:
         try:
@@ -86,6 +90,8 @@ class AITestScreen:
                 audio.play("back"); self.on_back()
             elif self._ptt_btn().collidepoint(pos):
                 self._ptt()
+            elif self._vision_btn().collidepoint(pos):
+                self._run_vision()
 
     def _ptt(self) -> None:
         if not getattr(self.voice, "available", False) or self.voice.busy:
@@ -105,6 +111,38 @@ class AITestScreen:
         elif self.chat is not None and self.chat.available:
             self.chat.ask(text)
 
+    def _run_vision(self) -> None:
+        """Captura um frame e manda pro modelo de VISÃO (config próprio) descrever.
+        Roda em thread (a chamada HTTP bloqueia). Resultado em self._vision_text."""
+        if self._vision_busy:
+            return
+        if self.chat is None or not getattr(self.chat, "vision_available", False):
+            audio.play("back")
+            self._vision_text = "visao indisponivel (chave/modelo)"
+            return
+        if not getattr(self.camera, "is_available", False):
+            audio.play("back")
+            self._vision_text = "camera offline"
+            return
+        audio.play("select")
+        self._vision_busy = True
+        self._vision_text = ""
+
+        def work():
+            try:
+                jpeg = self.camera.capture_jpeg()
+                txt = self.chat.ask_vision(jpeg) if jpeg else ""
+                if not txt:
+                    txt = (getattr(self.chat, "last_vision_error", "")
+                           or ("sem imagem" if not jpeg else "sem resposta"))
+                self._vision_text = txt
+            except Exception as e:
+                self._vision_text = f"erro: {str(e)[:50]}"
+            finally:
+                self._vision_busy = False
+
+        threading.Thread(target=work, daemon=True).start()
+
     # ---------- hitboxes ----------
 
     def _back_btn(self) -> pygame.Rect:
@@ -112,6 +150,10 @@ class AITestScreen:
 
     def _ptt_btn(self) -> pygame.Rect:
         return pygame.Rect(LOGICAL_SIZE[0] // 2 - 80, 142, 160, 22)
+
+    def _vision_btn(self) -> pygame.Rect:
+        # abaixo do preview da câmera (esquerda), sem colidir com o PTT (centro)
+        return pygame.Rect(20, 150, 92, 14)
 
     # ---------- draw ----------
 
@@ -127,6 +169,7 @@ class AITestScreen:
         self._draw_camera(surface)
         self._draw_mic(surface)
         self._draw_button(surface)
+        self._draw_vision(surface)
         self._draw_ptt(surface)
 
     def _draw_button(self, surface) -> None:
@@ -145,6 +188,37 @@ class AITestScreen:
         pygame.draw.rect(surface, color, sq)
         pygame.draw.rect(surface, CRT_WHITE, sq, 1)
         surface.blit(render_text(label, 8, color, pixel=False), (sq.right + 4, y))
+
+    def _draw_vision(self, surface) -> None:
+        """Botão 'VER (VISAO)' + legenda da descrição sobre o rodapé do preview."""
+        rect = self._vision_btn()
+        enabled = (self.chat is not None
+                   and getattr(self.chat, "vision_available", False)
+                   and getattr(self.camera, "is_available", False))
+        if self._vision_busy:
+            pygame.draw.rect(surface, Colors.YELLOW, rect)
+            fg, txt = CRT_BLACK, "VENDO..."
+        elif enabled:
+            pygame.draw.rect(surface, CRT_WHITE, rect)
+            fg, txt = CRT_BLACK, "VER (VISAO)"
+        else:
+            pygame.draw.rect(surface, CRT_BLACK, rect)
+            pygame.draw.rect(surface, CRT_DIM, rect, 1)
+            fg, txt = CRT_DIM, "VISAO N/D"
+        img = render_text(txt, 8, fg, pixel=False)
+        surface.blit(img, img.get_rect(center=rect.center))
+        # legenda sobre o rodapé do preview da câmera (box de _draw_camera)
+        if self._vision_text:
+            box = pygame.Rect(20, 38, 150, 86)
+            lines = self._wrap(self._vision_text, 30)[:3]
+            strip_h = 6 + 9 * len(lines)
+            strip = pygame.Surface((box.w, strip_h))
+            strip.set_alpha(205)
+            strip.fill((0, 0, 0))
+            surface.blit(strip, (box.x, box.bottom - strip_h))
+            for i, ln in enumerate(lines):
+                m = render_text(ln, 7, CRT_WHITE, pixel=False)
+                surface.blit(m, (box.x + 3, box.bottom - strip_h + 3 + i * 9))
 
     def _draw_temp(self, surface) -> None:
         """Quadradinho de debug da temperatura da Pi (canto sup-direito)."""

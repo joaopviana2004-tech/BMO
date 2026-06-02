@@ -37,6 +37,10 @@ def _ascii_upper(text: str) -> str:
 
 
 class ClockScreen:
+    show_mic_button = True
+    # canto inf-ESQ: a data fica no inf-dir, então o mic vai pra esquerda
+    mic_btn_rect = (14, 210, 18, 16)
+
     def __init__(self, on_open_home, git_updates=None) -> None:
         self.on_open_home = on_open_home
         self.weather = WeatherService()

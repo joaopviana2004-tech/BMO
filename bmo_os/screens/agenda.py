@@ -39,6 +39,10 @@ def _local_now() -> dt.datetime:
 
 
 class AgendaScreen:
+    show_mic_button = True
+    # topo, logo à direita do botão HOME (a lista ocupa o resto da tela)
+    mic_btn_rect = (70, 14, 18, 16)
+
     def __init__(self, *, on_back, calendar: CalendarService) -> None:
         self.on_back = on_back
         self.calendar = calendar

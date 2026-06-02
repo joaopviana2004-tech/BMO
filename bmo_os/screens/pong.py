@@ -292,6 +292,8 @@ class PongScreen:
 # ---------- ambient (bot vs bot) ----------
 
 class PongAmbientScreen:
+    show_mic_button = True   # mic virtual (overlay global do App), canto inf-dir
+
     def __init__(self, on_open_home) -> None:
         self.on_open_home = on_open_home
         self.core = _PongCore()

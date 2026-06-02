@@ -456,6 +456,8 @@ class SpaceInvadersScreen:
 class SpaceInvadersAmbientScreen:
     """Modo idle: a nave fica vagando e caça inimigos isolados que aparecem."""
 
+    show_mic_button = True   # mic virtual (overlay global do App), canto inf-dir
+
     def __init__(self, on_open_home) -> None:
         self.on_open_home = on_open_home
         self._t = 0.0

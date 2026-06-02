@@ -54,6 +54,8 @@ def _to_logical(pos: tuple[int, int]) -> tuple[int, int]:
 
 
 class TasksScreen:
+    show_mic_button = True   # mic virtual (overlay global do App), canto inf-dir
+
     def __init__(self, *, on_back, todoist: TodoistService) -> None:
         self.on_back = on_back
         self.todoist = todoist

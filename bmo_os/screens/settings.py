@@ -106,7 +106,12 @@ def _ia_items():
     return [
         {"type": "cycle", "key": "llm_provider", "label": "IA provedor",
          "options": config.LLM_PROVIDERS, "format": _fmt_provider},
-        {"type": "llm_model", "key": "llm_model", "label": "IA modelo"},
+        {"type": "llm_model", "key": "llm_model", "label": "IA modelo",
+         "provider_key": "llm_provider", "models": "chat"},
+        {"type": "cycle", "key": "vision_provider", "label": "Visao prov",
+         "options": config.LLM_PROVIDERS, "format": _fmt_provider},
+        {"type": "llm_model", "key": "vision_model", "label": "Visao modelo",
+         "provider_key": "vision_provider", "models": "vision"},
         {"type": "cycle", "key": "voice_enabled", "label": "BMO me ouve",
          "options": [False, True], "format": _fmt_onoff},
         {"type": "mic", "key": "mic_device", "label": "Microfone"},
@@ -270,18 +275,24 @@ class SettingsListScreen:
                     self._index = i
                 return
 
-    def _llm_provider(self):
-        p = config.get("llm_provider")
-        return p if p in config.LLM_MODELS else config.LLM_PROVIDERS[0]
+    @staticmethod
+    def _llm_table(item):
+        return config.LLM_VISION_MODELS if item.get("models") == "vision" else config.LLM_MODELS
 
-    def _llm_model_key(self):
-        return f"{self._llm_provider()}_model"
+    def _llm_provider(self, item):
+        table = self._llm_table(item)
+        p = config.get(item["provider_key"])
+        return p if p in table else config.LLM_PROVIDERS[0]
+
+    def _llm_model_key(self, item):
+        suffix = "_vision_model" if item.get("models") == "vision" else "_model"
+        return f"{self._llm_provider(item)}{suffix}"
 
     def _options_for(self, item):
         if item["type"] == "mic":
             return ["(padrao)"] + list(self.mic_options())
         if item["type"] == "llm_model":
-            return list(config.LLM_MODELS.get(self._llm_provider(), []))
+            return list(self._llm_table(item).get(self._llm_provider(item), []))
         return item["options"]
 
     def _mic_current_display(self):
@@ -302,8 +313,8 @@ class SettingsListScreen:
             new_disp = options[(idx + direction) % len(options)]
             new_val = "" if new_disp == "(padrao)" else new_disp
         elif item["type"] == "llm_model":
-            # a chave depende do provedor escolhido (openrouter_model / nvidia_model)
-            key = self._llm_model_key()
+            # a chave depende do provedor escolhido (ex: openrouter_model / nvidia_vision_model)
+            key = self._llm_model_key(item)
             cur = config.get(key)
             idx = options.index(cur) if cur in options else 0
             new_val = options[(idx + direction) % len(options)]
@@ -353,9 +364,12 @@ class SettingsListScreen:
     # ---------- layout ----------
 
     def _row_rects(self):
-        top, step = 40, 22
+        # passo menor quando a categoria tem muitos itens (IA), pra caber tudo
+        n = len(self._rows)
+        step = 20 if n > 7 else 22
+        top = 36 if n > 7 else 40
         return [pygame.Rect(20, top + i * step, LOGICAL_SIZE[0] - 40, 18)
-                for i in range(len(self._rows))]
+                for i in range(n)]
 
     def _left_arrow(self, row): return pygame.Rect(row.right - 38, row.top, 16, row.height)
     def _right_arrow(self, row): return pygame.Rect(row.right - 16, row.top, 16, row.height)
@@ -393,7 +407,7 @@ class SettingsListScreen:
                     cur = self._mic_current_display()
                     val = cur if len(cur) <= 12 else cur[:11] + "."
                 elif item["type"] == "llm_model":
-                    val = _short_model(config.get(self._llm_model_key()))
+                    val = _short_model(config.get(self._llm_model_key(item)))
                 else:
                     val = item["format"](config.get(item["key"]))
                 val_img = render_text(val, 9, fg, pixel=False)

@@ -83,6 +83,7 @@ class CameraService:
         self._usb_cap = None
         self._lock = threading.Lock()
         self._latest_frame: Optional[pygame.Surface] = None
+        self._latest_array = None   # último frame cru (BGR ndarray) p/ capture_jpeg
         self._latest_faces: list[tuple[int, int, int, int]] = []
         self._last_face_request = 0.0
         self._frame_count = 0
@@ -221,6 +222,7 @@ class CameraService:
                     pass
             with self._lock:
                 self._latest_frame = None
+                self._latest_array = None
                 self._latest_faces = []
                 self.fps = 0.0
 
@@ -250,6 +252,7 @@ class CameraService:
                 surf = pygame.surfarray.make_surface(arr[:, :, ::-1].transpose([1, 0, 2]))
                 with self._lock:
                     self._latest_frame = surf
+                    self._latest_array = arr   # cru (BGR) p/ capture_jpeg
                 # FPS rolling 1s
                 self._frame_count += 1
                 now = time.time()
@@ -302,6 +305,22 @@ class CameraService:
         with self._lock:
             self._last_face_request = now
             return list(self._latest_faces)
+
+    def capture_jpeg(self, quality: int = 80) -> Optional[bytes]:
+        """Codifica o último frame (BGR) em JPEG na memória, pro teste de visão.
+        Usa o frame que a thread já capturou (sem reler o device em paralelo).
+        Retorna None se câmera offline / sem frame / sem cv2."""
+        if not self.is_available or not HAS_CV2_MODULE:
+            return None
+        with self._lock:
+            arr = self._latest_array
+        if arr is None:
+            return None
+        try:
+            ok, buf = cv2.imencode(".jpg", arr, [cv2.IMWRITE_JPEG_QUALITY, int(quality)])
+            return buf.tobytes() if ok else None
+        except Exception:
+            return None
 
     def capture_photo(self, target_dir: Path) -> Optional[Path]:
         """Captura uma foto. Retorna o Path ou None."""

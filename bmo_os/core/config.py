@@ -52,12 +52,24 @@ DEFAULTS: dict = {
     "mic_device": "",               # nome (ou trecho) do microfone de entrada; "" = padrão do sistema
     "tts_volume": 100,              # 0-100 — volume da voz do BMO (eSpeak-NG), separado do volume dos efeitos
     # --- LLM do chat (BMO responde) — escolhível em SETTINGS -> IA ---
-    "llm_provider": "openrouter",   # "openrouter" | "nvidia" (ambos OpenAI-compatíveis)
+    # provedor: "openrouter" | "nvidia" | "grok" (todos OpenAI-compatíveis)
+    "llm_provider": "openrouter",
     # modelo por provedor (o cycler do SETTINGS grava aqui). Env *_MODEL semeia o default.
     "openrouter_model": os.environ.get("OPENROUTER_MODEL", "").strip()
         or "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
     "nvidia_model": os.environ.get("NVIDIA_MODEL", "").strip()
-        or "meta/llama-3.3-70b-instruct",
+        or "moonshotai/kimi-k2.6",
+    "grok_model": os.environ.get("GROK_MODEL", "").strip()
+        or "grok-3",
+    # --- Visão (teste de câmera -> LLM descreve a imagem) — escolha PRÓPRIA ---
+    # (separada do chat porque só modelos multimodais enxergam imagem)
+    "vision_provider": "openrouter",
+    "openrouter_vision_model": os.environ.get("OPENROUTER_VISION_MODEL", "").strip()
+        or "google/gemini-2.0-flash-exp:free",
+    "nvidia_vision_model": os.environ.get("NVIDIA_VISION_MODEL", "").strip()
+        or "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    "grok_vision_model": os.environ.get("GROK_VISION_MODEL", "").strip()
+        or "grok-2-vision-1212",
 }
 
 IDLE_TIMEOUT_OPTIONS = [5, 10, 15, 30, 60, 120]
@@ -75,8 +87,8 @@ EVENT_WARNING_OPTIONS = [1, 5, 10, 15, 30, 60]   # minutos de antecedência
 
 # --- LLM: provedores e modelos de troca rápida (SETTINGS -> IA) ---
 # Edite à vontade. Os IDs são os esperados por cada API (OpenAI-compatível).
-LLM_PROVIDERS = ["openrouter", "nvidia"]
-LLM_PROVIDER_LABELS = {"openrouter": "OPENROUTER", "nvidia": "NVIDIA"}
+LLM_PROVIDERS = ["openrouter", "nvidia", "grok"]
+LLM_PROVIDER_LABELS = {"openrouter": "OPENROUTER", "nvidia": "NVIDIA", "grok": "GROK"}
 LLM_MODELS = {
     # OpenRouter (openrouter.ai/models) — modelos free; troque por pagos se quiser
     "openrouter": [
@@ -87,10 +99,35 @@ LLM_MODELS = {
     ],
     # NVIDIA NIM cloud (build.nvidia.com) — integrate.api.nvidia.com
     "nvidia": [
-        "meta/llama-3.3-70b-instruct",
-        "nvidia/llama-3.1-nemotron-70b-instruct",
-        "meta/llama-3.1-8b-instruct",
-        "qwen/qwen2.5-7b-instruct",
+        "moonshotai/kimi-k2.6",
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+        "google/gemma-3n-e4b-it",
+    ],
+    # xAI Grok (api.x.ai) — chave XAI_API_KEY
+    "grok": [
+        "grok-4",
+        "grok-3",
+        "grok-3-mini",
+        "grok-2-vision-1212",
+    ],
+}
+
+# Modelos de VISÃO (multimodais) por provedor — usados no teste de visão.
+# Só entram aqui IDs que aceitam imagem; edite conforme disponibilidade.
+LLM_VISION_MODELS = {
+    "openrouter": [
+        "google/gemini-2.0-flash-exp:free",
+        "meta-llama/llama-3.2-11b-vision-instruct:free",
+        "qwen/qwen2.5-vl-72b-instruct:free",
+    ],
+    "nvidia": [
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+        "google/gemma-3n-e4b-it",
+        "meta/llama-3.2-90b-vision-instruct",
+    ],
+    "grok": [
+        "grok-2-vision-1212",
+        "grok-4",
     ],
 }
 

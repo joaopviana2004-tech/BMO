@@ -26,6 +26,10 @@ escalada **2x** com nearest-neighbor pra preservar o look de pixel art.
 
 Mini-relógio HH:MM no topo das telas ambient (exceto clock que já tem o grandão).
 
+**Botão de mic virtual** (🎙️ pequeno, canto) nas telas de **descanso, foco,
+kanban e agenda**: toque pra gravar a fala e mandar pro BMO (mesmo caminho do
+push-to-talk físico), sem precisar do botão GPIO.
+
 **Home + ações** (carrossel P&B, auto-volta pro ambient após N segundos):
 - **SLEEP** — escolhe ambient mode com previews ao vivo dos 5 tiles
 - **GAMES** — grid estilo home de celular com:
@@ -46,7 +50,8 @@ Mini-relógio HH:MM no topo das telas ambient (exceto clock que já tem o grand�
 - **GALERIA** — grid 3×2 de thumbs + viewer fullscreen (tap esq/dir = nav)
 - **TESTE (IA)** — diagnóstico de IA: medidor de nível do mic, status do
   Whisper/STT e do wake word, estado do botão físico de fala, preview da câmera,
-  e push-to-talk pra testar transcrição + conversa com o BMO (LLM)
+  push-to-talk pra testar transcrição + conversa com o BMO (LLM), e botão
+  **VER (VISÃO)** que manda a imagem da câmera pro modelo multimodal descrever
 - **SETTINGS** — lista vertical com cyclers e ações:
   - **Standby** (5/10/15/30/60/120s) — timer de auto-volta da home
   - **Ambient** — qual lock screen usar
@@ -263,8 +268,12 @@ transcrito (STT) → o texto vai pro LLM → o BMO responde e age.
 - **STT (fala → texto):** Whisper local (`pywhispercpp`) **ou** uma API
   compatível com OpenAI (Groq por padrão — sem inferência na Pi, sem calor).
   Com `STT_API_KEY` setada, usa a API; senão tenta o Whisper local.
-- **LLM (resposta):** [OpenRouter](https://openrouter.ai). O BMO responde sempre
-  com um JSON `{"msg", "screen", "task"}`.
+- **LLM (resposta):** OpenRouter, NVIDIA NIM ou Grok (xAI) — todos compatíveis
+  com OpenAI. O provedor e o modelo são escolhidos em **SETTINGS → IA** (troca
+  rápida por cycler). O BMO responde sempre com um JSON `{"msg", "screen", "task"}`.
+- **Visão:** a tela TESTE tem um botão **VER (VISÃO)** que manda a imagem da
+  câmera pro modelo descrever. O provedor/modelo de visão são **próprios**
+  (separados do chat, em SETTINGS → IA), porque só modelos multimodais enxergam.
 
 **Telas/ações que o BMO pode disparar** (campo `screen`):
 `agenda`, `tarefas`, `foco`, `sistema`, `foto`, `jogos`, `pong`, `invaders`,
@@ -276,18 +285,20 @@ O campo `task` (texto) cria uma tarefa no Todoist. Ex.: *"abre o pong"*,
 > só responde por texto no rodapé. O módulo segue no repo, dormente; pra religar
 > é só voltar a instanciar `TTSService()` no `main.py`.
 
-**Setup (`.env`):**
+**Setup (`.env`):** ponha só a chave do(s) provedor(es) que for usar — o
+provedor e o modelo (chat **e** visão) saem do menu SETTINGS → IA.
 ```
-OPENROUTER_API_KEY=sk-or-xxxx           # obrigatório p/ o chat (openrouter.ai/keys)
-# OPENROUTER_MODEL=...                   # default é um modelo free; troque por um
-                                         # NÃO-reasoning se a resposta vier vazia
+OPENROUTER_API_KEY=sk-or-xxxx           # OpenRouter (openrouter.ai/keys)
+NVIDIA_API_KEY=nvapi-xxxx               # NVIDIA NIM (build.nvidia.com)
+XAI_API_KEY=xai-xxxx                    # Grok / xAI (console.x.ai)
+# *_MODEL / *_VISION_MODEL               # (opcional) semeia o default; depois o menu manda
 # STT_API_KEY=gsk_xxxx                   # API de transcrição (Groq); sem ela usa Whisper local
 # STT_API_MODEL=whisper-large-v3-turbo
 # PTT_GPIO=17                            # pino do botão de push-to-talk
 ```
 
-Sem `OPENROUTER_API_KEY` o chat fica indisponível (a tela TESTE mostra o erro).
-Sem mic/STT, o push-to-talk degrada e a tela TESTE mostra "indisponivel".
+Sem a chave do provedor ativo o chat/visão fica indisponível (a tela TESTE
+mostra o erro). Sem mic/STT, o push-to-talk degrada e mostra "indisponivel".
 
 ## Câmera (AI Camera / IMX500)
 

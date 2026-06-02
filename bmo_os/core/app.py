@@ -40,6 +40,18 @@ class App:
         # do screen, antes do dimming). Usado pelo overlay de voz (push-to-talk
         # funciona em qualquer tela e mostra gravando/pensando/falando).
         self.overlay_hook = None
+        # Botão de mic virtual (MicButton); aparece nas telas com
+        # show_mic_button=True. main.py atribui aqui.
+        self.mic_button = None
+
+    def _mic_visible(self) -> bool:
+        return (self.mic_button is not None
+                and getattr(self.manager.current, "show_mic_button", False))
+
+    def _mic_hit(self, logical_pos) -> bool:
+        if not self._mic_visible():
+            return False
+        return self.mic_button.rect_for(self.manager.current).collidepoint(logical_pos)
 
     def _to_logical(self, pos: tuple[int, int]) -> tuple[int, int]:
         win_w, win_h = self.window.get_size()
@@ -60,7 +72,13 @@ class App:
                 elif event.type == pygame.KEYDOWN and event.key in (pygame.K_F4, pygame.K_f):
                     self.running = False
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    bmo_input.dispatch_touch(self._to_logical(event.pos))
+                    logical = self._to_logical(event.pos)
+                    # se o toque caiu no botão de mic (telas que o exibem),
+                    # dispara a gravação e NÃO repassa o toque pra tela.
+                    if self._mic_hit(logical):
+                        self.mic_button.trigger()
+                    else:
+                        bmo_input.dispatch_touch(logical)
                 elif event.type == pygame.KEYDOWN:
                     bmo_input.dispatch_keyboard(event)
                 self.manager.handle_event(event)
@@ -72,6 +90,9 @@ class App:
             self.manager.draw(self.canvas)
             if self.overlay_hook is not None:
                 self.overlay_hook(self.canvas)
+            if self._mic_visible():
+                cur = self.manager.current
+                self.mic_button.draw(self.canvas, self.mic_button.rect_for(cur))
             # dimming software (overlay preto translúcido por cima do canvas)
             brightness = int(config.get("brightness") or 100)
             if brightness < 100:

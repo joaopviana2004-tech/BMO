@@ -57,6 +57,8 @@ def _to_logical(pos: tuple[int, int]) -> tuple[int, int]:
 
 
 class BMOFaceScreen:
+    show_mic_button = True   # mic virtual (overlay global do App), canto inf-dir
+
     def __init__(self, on_open_home, camera=None, tts=None) -> None:
         self.on_open_home = on_open_home
         self.camera = camera

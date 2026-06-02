@@ -19,6 +19,8 @@ SWITCH_MAX_S = 30.0
 
 
 class ShufflingAmbientScreen:
+    show_mic_button = True   # mic virtual (overlay global do App), canto inf-dir
+
     def __init__(self, screens: list) -> None:
         assert len(screens) > 0, "shuffler precisa de pelo menos 1 screen"
         self._screens = screens

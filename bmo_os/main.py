@@ -31,6 +31,7 @@ from bmo_os.screens.clock import ClockScreen
 from bmo_os.screens.games import GamesScreen, draw_pong_icon, draw_space_invaders_icon
 from bmo_os.screens.home import HomeScreen
 from bmo_os.screens.gallery import GalleryScreen
+from bmo_os.screens.mic_button import MicButton
 from bmo_os.screens.photo import PHOTOS_DIR, PhotoScreen
 from bmo_os.screens.pomodoro import PomodoroScreen
 from bmo_os.screens.pong import PongAmbientScreen, PongScreen
@@ -389,6 +390,11 @@ def build_initial(app: App):
             canvas.blit(img, img.get_rect(midleft=(16 + lbl.get_width() + 8, cy)))
 
     app.overlay_hook = draw_voice_overlay
+
+    # Botão de mic virtual: aparece nas telas com show_mic_button=True
+    # (descanso, foco, kanban, agenda). Toque grava a fala e manda pro LLM —
+    # mesmo caminho do push-to-talk físico.
+    app.mic_button = MicButton(voice=voice, on_text=handle_ai_response)
     return make_ambient()
 
 
