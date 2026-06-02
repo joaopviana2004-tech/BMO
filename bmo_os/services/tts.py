@@ -150,7 +150,11 @@ SPEED = os.environ.get("BMO_TTS_SPEED", "150")
 PITCH = os.environ.get("BMO_TTS_PITCH", "30")
 GAP = os.environ.get("BMO_TTS_GAP", "6")
 
-BACKEND_PREF = os.environ.get("BMO_TTS_BACKEND", "auto").strip().lower()
+# Default = "edge" (voz Francisca, o que o usuário quer). NÃO é "auto" de
+# propósito: assim, sem edge-tts instalado, a voz fica indisponível (erro claro
+# na tela TESTE) em vez de cair calado no Piper/eSpeak (que soaria masculino).
+# Pra usar Piper/eSpeak, defina BMO_TTS_BACKEND=piper|espeak|auto no .env.
+BACKEND_PREF = os.environ.get("BMO_TTS_BACKEND", "edge").strip().lower()
 
 
 def _resolve_backend() -> str:
@@ -324,8 +328,11 @@ class TTSService:
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def _play_mp3(self, path: str) -> None:
-        """Toca o MP3 do Edge. Tenta o mixer.music do pygame (respeita o volume);
-        se a build do SDL_mixer não decodificar MP3, cai pra um player externo."""
+        """Toca o MP3 do Edge IGUAL ao módulo do lab: player externo (mpg123 etc.),
+        bloqueante. No PC sem player externo, cai pro mixer.music (dev)."""
+        if self._play_external(path):
+            return
+        # fallback dev (Windows sem mpg123): mixer.music do pygame
         if pygame.mixer.get_init():
             try:
                 pygame.mixer.music.load(path)
@@ -337,20 +344,22 @@ class TTSService:
                     pygame.mixer.music.unload()
                 except Exception:
                     pass
-                return
             except Exception:
-                pass   # mixer não tocou MP3 — tenta player externo
-        self._play_external(path)
+                pass
 
-    def _play_external(self, path: str) -> None:
+    def _play_external(self, path: str) -> bool:
+        """Toca por um player externo (1º disponível), bloqueante. Aplica o
+        tts_volume onde o player suporta (mpg123/ffplay). Retorna True se tocou."""
+        vol = self._volume()   # 0.0-1.0
         for p in _MP3_PLAYERS:
             exe = shutil.which(p)
             if not exe:
                 continue
-            if p == "mpg123":
-                cmd = [exe, "-q", path]
+            if p == "mpg123":   # -f: escala linear de volume (32768 = 100%)
+                cmd = [exe, "-q", "-f", str(int(max(0.0, min(1.0, vol)) * 32768)), path]
             elif p == "ffplay":
-                cmd = [exe, "-nodisp", "-autoexit", "-loglevel", "quiet", path]
+                cmd = [exe, "-nodisp", "-autoexit", "-loglevel", "quiet",
+                       "-volume", str(int(vol * 100)), path]
             elif p == "cvlc":
                 cmd = [exe, "--play-and-exit", "--intf", "dummy", path]
             else:  # mpv
@@ -361,8 +370,8 @@ class TTSService:
             proc.wait()
             with self._lock:
                 self._proc = None
-            return
-        self.error = "sem player de mp3 (apt install mpg123)"
+            return True
+        return False
 
     def _synth(self, text: str, path: str) -> bool:
         """Gera o áudio no `path` (MP3 p/ edge, WAV p/ piper/espeak)."""
