@@ -36,6 +36,10 @@ class App:
         # Hook opcional chamado todo frame (depois do update, antes do draw).
         # Usado pra avisos de evento (main.py empilha a AlertScreen aqui).
         self.frame_hook = None
+        # Hook opcional pra desenhar POR CIMA de qualquer tela (depois do draw
+        # do screen, antes do dimming). Usado pelo overlay de voz (push-to-talk
+        # funciona em qualquer tela e mostra gravando/pensando/falando).
+        self.overlay_hook = None
 
     def _to_logical(self, pos: tuple[int, int]) -> tuple[int, int]:
         win_w, win_h = self.window.get_size()
@@ -66,6 +70,8 @@ class App:
                 self.frame_hook(dt)
             self.canvas.fill(Colors.BG_DARK)
             self.manager.draw(self.canvas)
+            if self.overlay_hook is not None:
+                self.overlay_hook(self.canvas)
             # dimming software (overlay preto translúcido por cima do canvas)
             brightness = int(config.get("brightness") or 100)
             if brightness < 100:

@@ -12,12 +12,15 @@ import sys
 import threading
 from pathlib import Path
 
+import pygame
+
 # permite rodar tanto como módulo quanto como script direto
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bmo_os.core import config
 from bmo_os.core.app import App
+from bmo_os.core.theme import Colors, LOGICAL_SIZE, render_text
 from bmo_os.screens.agenda import AgendaScreen
 from bmo_os.screens.aitest import AITestScreen
 from bmo_os.screens.alert import AlertScreen
@@ -283,6 +286,40 @@ def build_initial(app: App):
             app.manager.push(AlertScreen(event=ev, on_dismiss=app.manager.pop))
 
     app.frame_hook = frame_hook
+
+    def draw_voice_overlay(canvas) -> None:
+        """Desenha o status do push-to-talk POR CIMA de qualquer tela, pra dar
+        feedback quando o botão físico é usado fora da tela TESTE."""
+        busy = getattr(voice, "busy", False)
+        speaking = getattr(tts, "speaking", False)
+        if not (busy or speaking):
+            return
+        status = (getattr(voice, "status", "") or "").lower()
+        if speaking:
+            label, color = "BMO FALANDO", Colors.CYAN
+        elif "grav" in status or "ouv" in status:
+            label, color = "GRAVANDO...", Colors.RED
+        else:
+            label, color = "PENSANDO...", Colors.YELLOW
+        w, h = LOGICAL_SIZE
+        bar_h = 16
+        strip = pygame.Surface((w, bar_h))
+        strip.set_alpha(205)
+        strip.fill((0, 0, 0))
+        canvas.blit(strip, (0, h - bar_h))
+        cy = h - bar_h // 2
+        pygame.draw.circle(canvas, color, (8, cy), 3)
+        lbl = render_text(label, 9, color, pixel=False)
+        canvas.blit(lbl, lbl.get_rect(midleft=(16, cy)))
+        # enquanto fala, mostra a resposta do BMO (truncada) à direita
+        if speaking:
+            msg = (getattr(chat, "last_msg", "") or "").strip()
+            if msg:
+                msg = msg if len(msg) <= 50 else msg[:49] + "."
+                img = render_text(msg, 8, Colors.WHITE, pixel=False)
+                canvas.blit(img, img.get_rect(midright=(w - 6, cy)))
+
+    app.overlay_hook = draw_voice_overlay
     return make_ambient()
 
 

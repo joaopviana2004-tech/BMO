@@ -52,6 +52,11 @@ def _find_piper_model() -> str:
     if _ASSETS_PIPER.exists():
         models = sorted(_ASSETS_PIPER.glob("*.onnx"))
         if models:
+            # preferência: faber-medium (escolha do usuário); senão o 1º
+            for m in models:
+                low = m.name.lower()
+                if "faber" in low and "medium" in low:
+                    return str(m)
             return str(models[0])
     return ""
 
