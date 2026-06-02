@@ -33,13 +33,14 @@ def _level_color(lv: float):
 
 class AITestScreen:
     def __init__(self, *, on_back, voice, camera, sysinfo=None, chat=None,
-                 button=None) -> None:
+                 button=None, tts=None) -> None:
         self.on_back = on_back
         self.voice = voice
         self.camera = camera
         self.sysinfo = sysinfo
         self.chat = chat
         self.button = button   # GPIOButton (push-to-talk físico); None no PC
+        self.tts = tts         # voz do BMO (eSpeak-NG); None se indisponível
         self._t = 0.0
 
     def enter(self) -> None:
@@ -90,23 +91,17 @@ class AITestScreen:
         if not getattr(self.voice, "available", False) or self.voice.busy:
             audio.play("back"); return
         audio.play("select")
-        # pausa o monitor passivo (mesmo device) e grava
-        self.voice.stop_monitor()
+        # o voice suspende o monitor/wake sozinho (acesso exclusivo ao mic)
         self.voice.record_and_transcribe(on_done=self._on_transcribed)
 
     def _on_transcribed(self, text: str) -> None:
-        # roda na thread de voz (após transcrição). Religa o monitor e manda o
-        # texto pro BMO responder (chat.ask atualiza chat.last_msg, que a UI lê).
-        self._restart_monitor()
+        # roda na thread de voz (após transcrição). Manda o texto pro BMO
+        # responder (chat.ask atualiza chat.last_msg, que a UI lê) e fala.
         text = (text or "").strip()
         if text and self.chat is not None and self.chat.available:
-            self.chat.ask(text)
-
-    def _restart_monitor(self) -> None:
-        try:
-            self.voice.start_monitor()
-        except Exception:
-            pass
+            msg = self.chat.ask(text)
+            if msg and self.tts is not None:
+                self.tts.speak(msg)
 
     # ---------- hitboxes ----------
 

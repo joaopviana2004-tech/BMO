@@ -49,6 +49,17 @@ class GPIOButton:
                 fn()
         return handler
 
+    def close(self) -> None:
+        """Libera o pino GPIO. Necessário antes do execv do restart: o lgpio
+        deixa o fd aberto e o processo novo não consegue reivindicar o pino."""
+        if self._btn is not None:
+            try:
+                self._btn.close()
+            except Exception:
+                pass
+            self._btn = None
+        self.ok = False
+
     @property
     def is_pressed(self) -> bool:
         """Estado do botão. Lê direto do pino (gpiozero) quando dá — assim

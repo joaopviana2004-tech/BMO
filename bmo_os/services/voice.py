@@ -196,8 +196,46 @@ class VoiceService:
         with self._lock:
             return self._level
 
+    def _open_input_stream(self, **kw):
+        """Abre um sd.InputStream com algumas tentativas. No Pi o ALSA costuma
+        responder 'device unavailable' por uma fração de segundo logo depois de
+        outro stream fechar — repetir resolve. Guarda o erro em last_error."""
+        last = None
+        for _ in range(6):
+            try:
+                return sd.InputStream(**kw)
+            except Exception as e:
+                last = e
+                time.sleep(0.15)
+        self.last_error = f"mic: {str(last)[:60]}"
+        raise last
+
+    # ---------- arbitragem do microfone (so um stream de captura por vez) ----------
+
+    def _suspend_listeners(self) -> tuple:
+        """Libera o mic pra uma gravacao exclusiva: para o monitor passivo e o
+        wake loop. Devolve o estado pra _resume_listeners restaurar depois."""
+        was_wake = self.listening
+        if was_wake:
+            self._stop_wake()
+        had_monitor = self._monitor_stream is not None
+        if had_monitor:
+            self.stop_monitor()
+        return (was_wake, had_monitor)
+
+    def _resume_listeners(self, state: tuple) -> None:
+        was_wake, had_monitor = state
+        # wake primeiro: ele e o monitor são mutuamente exclusivos (start_monitor
+        # não abre se o wake estiver escutando), então a ordem evita disputa.
+        if was_wake:
+            self._start_wake()
+        if had_monitor:
+            self.start_monitor()
+
     def start_monitor(self) -> None:
-        if not HAS_AUDIO or self._monitor_stream is not None:
+        # não abre se o wake word já segura o mic (só um stream de captura por
+        # vez no ALSA — abrir um 2º dá 'device unavailable'/AlsaOpen failed).
+        if not HAS_AUDIO or self._monitor_stream is not None or self.listening:
             return
 
         def cb(indata, frames, t, status):
@@ -206,7 +244,7 @@ class VoiceService:
                 self._level = min(1.0, rms * 4.0)
 
         try:
-            self._monitor_stream = sd.InputStream(
+            self._monitor_stream = self._open_input_stream(
                 samplerate=SAMPLE_RATE, channels=1, dtype="float32",
                 device=self._device_index(), callback=cb, blocksize=1024,
             )
@@ -379,8 +417,8 @@ class VoiceService:
         t_prev = time.time()
         silence_t = 0.0
         try:
-            with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-                                device=self._device_index(), blocksize=1024) as stream:
+            with self._open_input_stream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+                                         device=self._device_index(), blocksize=1024) as stream:
                 while True:
                     block, _ = stream.read(1024)
                     mono = block[:, 0]
@@ -405,27 +443,33 @@ class VoiceService:
     # ---------- push-to-talk (tela de teste) ----------
 
     def record_and_transcribe(self, on_done=None) -> None:
-        """Grava uma fala e transcreve em thread. Resultado em self.last_text."""
+        """Grava uma fala e transcreve em thread. Resultado em self.last_text.
+        Suspende o monitor/wake (acesso exclusivo ao mic) e restaura no fim."""
         if self._busy or not self.available:
             return
         self._busy = True
+        state = self._suspend_listeners()
         self.status = "ouvindo..."
 
         def work():
-            audio = self._record_utterance()
-            self.status = "processando..."
-            text = self._transcribe(audio) if audio is not None else ""
-            with self._lock:
-                self.last_text = text
-            self._log(text, "fala")
-            # status reflete o resultado (não sobrescreve o erro com "pronto")
-            if text:
-                self.status = "pronto"
-            elif self.last_error:
-                self.status = self.last_error[:40]
-            else:
-                self.status = "vazio (sem fala?)"
-            self._busy = False
+            text = ""
+            try:
+                audio = self._record_utterance()
+                self.status = "processando..."
+                text = self._transcribe(audio) if audio is not None else ""
+                with self._lock:
+                    self.last_text = text
+                self._log(text, "fala")
+                # status reflete o resultado (não sobrescreve o erro com "pronto")
+                if text:
+                    self.status = "pronto"
+                elif self.last_error:
+                    self.status = self.last_error[:40]
+                else:
+                    self.status = "vazio (sem fala?)"
+            finally:
+                self._resume_listeners(state)
+                self._busy = False
             if on_done:
                 try:
                     on_done(text)
@@ -438,23 +482,26 @@ class VoiceService:
     # ---------- push-to-talk físico (botão GPIO: grava enquanto segura) ----------
 
     def ptt_begin(self, on_done=None) -> None:
-        """Começa a gravar (chamado ao PRESSIONAR o botão). Grava até ptt_end()."""
+        """Começa a gravar (chamado ao PRESSIONAR o botão). Grava até ptt_end().
+        Suspende monitor/wake pra ter o mic exclusivo (restaura no fim)."""
         if self._busy or not self.available or not HAS_AUDIO:
             return
         self._busy = True
         self._hold = True
+        state = self._suspend_listeners()
         self.status = "gravando..."
-        threading.Thread(target=self._hold_worker, args=(on_done,), daemon=True).start()
+        threading.Thread(target=self._hold_worker, args=(on_done, state), daemon=True).start()
 
     def ptt_end(self) -> None:
         """Para de gravar (chamado ao SOLTAR o botão) — o worker transcreve."""
         self._hold = False
 
-    def _hold_worker(self, on_done) -> None:
+    def _hold_worker(self, on_done, state) -> None:
         chunks: list = []
+        text = ""
         try:
-            with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-                                device=self._device_index(), blocksize=1024) as stream:
+            with self._open_input_stream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+                                         device=self._device_index(), blocksize=1024) as stream:
                 while self._hold:
                     block, _ = stream.read(1024)
                     mono = block[:, 0]
@@ -466,19 +513,22 @@ class VoiceService:
             self.last_error = f"mic: {str(e)[:50]}"
         with self._lock:
             self._level = 0.0
-        audio = np.concatenate(chunks) if chunks else None
-        self.status = "processando..."
-        text = self._transcribe(audio) if audio is not None else ""
-        with self._lock:
-            self.last_text = text
-        self._log(text, "ptt")
-        if text:
-            self.status = "pronto"
-        elif self.last_error:
-            self.status = self.last_error[:40]
-        else:
-            self.status = "vazio (sem fala?)"
-        self._busy = False
+        try:
+            audio = np.concatenate(chunks) if chunks else None
+            self.status = "processando..."
+            text = self._transcribe(audio) if audio is not None else ""
+            with self._lock:
+                self.last_text = text
+            self._log(text, "ptt")
+            if text:
+                self.status = "pronto"
+            elif self.last_error:
+                self.status = self.last_error[:40]
+            else:
+                self.status = "vazio (sem fala?)"
+        finally:
+            self._resume_listeners(state)
+            self._busy = False
         if on_done:
             try:
                 on_done(text)
@@ -564,28 +614,42 @@ class VoiceService:
             self._wake_thread = None
             return
         self.status = f"ouvindo '{WAKE_NAME}'"
+
+        def open_wake():
+            s = self._open_input_stream(
+                samplerate=handle.sample_rate, channels=1, dtype="int16",
+                device=self._device_index(), blocksize=handle.frame_length)
+            s.start()
+            return s
+
+        stream = None
         try:
-            with sd.InputStream(samplerate=handle.sample_rate, channels=1,
-                                dtype="int16", device=self._device_index(),
-                                blocksize=handle.frame_length) as stream:
-                while not self._wake_stop.is_set():
-                    block, _ = stream.read(handle.frame_length)
-                    if handle.process(block[:, 0]) >= 0:
-                        # detectou a wake word -> grava e transcreve
-                        self.wake_count += 1
-                        self._last_wake = time.time()
-                        self.status = "ouvindo..."
-                        audio = self._record_utterance()
-                        self.status = "processando..."
-                        text = self._transcribe(audio) if audio is not None else ""
-                        with self._lock:
-                            self.last_text = text
-                        self._log(text, "wake")
-                        self._dispatch(text)
-                        self.status = f"ouvindo '{WAKE_NAME}'"
+            stream = open_wake()
+            while not self._wake_stop.is_set():
+                block, _ = stream.read(handle.frame_length)
+                if handle.process(block[:, 0]) >= 0:
+                    # detectou a wake word -> libera o mic, grava e transcreve
+                    self.wake_count += 1
+                    self._last_wake = time.time()
+                    self.status = "ouvindo..."
+                    stream.stop(); stream.close(); stream = None
+                    audio = self._record_utterance()
+                    self.status = "processando..."
+                    text = self._transcribe(audio) if audio is not None else ""
+                    with self._lock:
+                        self.last_text = text
+                    self._log(text, "wake")
+                    self._dispatch(text)
+                    stream = open_wake()   # volta a ouvir o wake word
+                    self.status = f"ouvindo '{WAKE_NAME}'"
         except Exception:
             self.status = "wake word erro"
         finally:
+            if stream is not None:
+                try:
+                    stream.stop(); stream.close()
+                except Exception:
+                    pass
             try:
                 handle.delete()
             except Exception:

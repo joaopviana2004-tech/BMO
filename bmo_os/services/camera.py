@@ -328,6 +328,13 @@ class CameraService:
                 self._picam.stop()
             except Exception:
                 pass
+            # close() libera o device (fd do libcamera) — só stop() não basta.
+            # Necessário antes do execv do restart, senão o processo novo acha
+            # a câmera ocupada.
+            try:
+                self._picam.close()
+            except Exception:
+                pass
         if self._usb_cap is not None:
             try:
                 self._usb_cap.release()

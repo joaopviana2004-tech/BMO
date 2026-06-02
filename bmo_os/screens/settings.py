@@ -111,11 +111,13 @@ CATEGORIES = [
 # ============================================================
 
 class SettingsScreen:
-    def __init__(self, *, on_back, on_open, on_change=None, mic_options=None) -> None:
+    def __init__(self, *, on_back, on_open, on_change=None, mic_options=None,
+                 on_cleanup=None) -> None:
         self.on_back = on_back
         self.on_open = on_open          # push de uma sub-tela
         self.on_change = on_change
         self.mic_options = mic_options
+        self.on_cleanup = on_cleanup    # libera hardware antes do restart/desligar
         self._index = 0
         self._rows = [label for label, _ in CATEGORIES] + ["Voltar"]
 
@@ -153,6 +155,7 @@ class SettingsScreen:
         self.on_open(SettingsListScreen(
             title=label, items=items_fn(), on_back=self.on_back,
             on_change=self.on_change, mic_options=self.mic_options,
+            on_cleanup=self.on_cleanup,
         ))
 
     def update(self, dt: float) -> None: ...
@@ -193,12 +196,14 @@ class SettingsScreen:
 # ============================================================
 
 class SettingsListScreen:
-    def __init__(self, *, title, items, on_back, on_change=None, mic_options=None) -> None:
+    def __init__(self, *, title, items, on_back, on_change=None, mic_options=None,
+                 on_cleanup=None) -> None:
         self.title = title
         self.items = items
         self.on_back = on_back
         self.on_change = on_change
         self.mic_options = mic_options or (lambda: [])
+        self.on_cleanup = on_cleanup
         self._index = 0
         self._status = ""
         self._action = None
@@ -403,10 +408,22 @@ class SettingsListScreen:
         self._action = "restart"
 
     def _restart(self) -> None:
+        # libera mic/câmera/GPIO antes do execv (libs em C deixam fds abertos
+        # que sobrevivem ao execv e travam o processo novo)
+        if self.on_cleanup:
+            try:
+                self.on_cleanup()
+            except Exception:
+                pass
         pygame.quit()
         os.execv(sys.executable, [sys.executable, *sys.argv])
 
     def _do_shutdown(self) -> None:
+        if self.on_cleanup:
+            try:
+                self.on_cleanup()
+            except Exception:
+                pass
         pygame.quit()
         if sys.platform == "win32":
             os.system("shutdown /s /t 0")

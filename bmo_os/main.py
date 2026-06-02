@@ -45,6 +45,7 @@ from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.notifications import EventAlerter
 from bmo_os.services.sysinfo import SysInfoService
 from bmo_os.services.todoist import TodoistService
+from bmo_os.services.tts import TTSService
 from bmo_os.services.voice import VoiceService
 
 
@@ -71,12 +72,16 @@ def build_initial(app: App):
     voice = VoiceService()
     # BMO responde via LLM (OpenRouter). Degrada sem OPENROUTER_API_KEY.
     chat = ChatService()
+    # Voz do BMO (eSpeak-NG). Degrada sem espeak-ng instalado.
+    tts = TTSService()
 
     # Botão físico de push-to-talk (GPIO): segura = grava, solta = transcreve
     # + BMO responde. No PC degrada (ok=False); use o botão da tela TESTE.
     def _ptt_done(text):
         if text and chat.available:
-            chat.ask(text)   # atualiza chat.last_msg (a UI lê)
+            msg = chat.ask(text)   # atualiza chat.last_msg (a UI lê)
+            if msg:
+                tts.speak(msg)     # BMO fala a resposta
 
     ptt_pin = int(os.environ.get("PTT_GPIO", "17"))
     ptt_button = GPIOButton(
@@ -84,6 +89,34 @@ def build_initial(app: App):
         on_press=lambda: voice.ptt_begin(on_done=_ptt_done),
         on_release=voice.ptt_end,
     )
+
+    def cleanup_hardware() -> None:
+        """Libera hardware (mic, câmera, GPIO) ANTES do restart por execv.
+        Sem isso, libs em C (libcamera, lgpio) deixam fds abertos que
+        sobrevivem ao execv e o processo novo não reivindica câmera/botão."""
+        try:
+            voice.set_enabled(False)
+        except Exception:
+            pass
+        try:
+            voice.stop_monitor()
+        except Exception:
+            pass
+        try:
+            camera.stop()
+        except Exception:
+            pass
+        try:
+            ptt_button.close()
+        except Exception:
+            pass
+        # fecha o pin factory do gpiozero (libera todos os pinos)
+        try:
+            from gpiozero import Device
+            if getattr(Device, "pin_factory", None) is not None:
+                Device.pin_factory.close()
+        except Exception:
+            pass
     # Fila de ações dos comandos de voz: o wake-loop roda em thread, então
     # empilhamos a navegação aqui e executamos no main thread (frame_hook).
     voice_queue: list = []
@@ -182,7 +215,7 @@ def build_initial(app: App):
             ),
             on_open_teste=lambda: app.manager.push(
                 AITestScreen(on_back=app.manager.pop, voice=voice, camera=camera,
-                             sysinfo=sysinfo, chat=chat, button=ptt_button)
+                             sysinfo=sysinfo, chat=chat, button=ptt_button, tts=tts)
             ),
             on_open_settings=lambda: app.manager.push(make_settings()),
         )
@@ -201,6 +234,7 @@ def build_initial(app: App):
             on_open=app.manager.push,
             on_change=on_setting_change,
             mic_options=voice.list_input_devices,
+            on_cleanup=cleanup_hardware,
         )
 
     # ---- comandos de voz -> navegação (executados no main thread) ----
