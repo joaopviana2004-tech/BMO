@@ -44,6 +44,10 @@ class App:
         # show_mic_button=True. main.py atribui aqui.
         self.mic_button = None
         self._mic_pressed = False   # segurando o botão de mic agora? (grava enquanto True)
+        # Hook opcional chamado quando a tela do topo MUDA (push/pop/replace).
+        # main.py usa pra o BMO anunciar a tela ("aqui está ..."). Recebe a tela nova.
+        self.on_screen_change = None
+        self._last_screen_seen = None
 
     def _mic_visible(self) -> bool:
         return (self.mic_button is not None
@@ -93,6 +97,15 @@ class App:
             self.manager.update(dt)
             if self.frame_hook is not None:
                 self.frame_hook(dt)
+            # detecta troca de tela (após updates/pushes deste frame)
+            cur = self.manager.current
+            if cur is not self._last_screen_seen:
+                self._last_screen_seen = cur
+                if self.on_screen_change is not None:
+                    try:
+                        self.on_screen_change(cur)
+                    except Exception:
+                        pass
             self.canvas.fill(Colors.BG_DARK)
             self.manager.draw(self.canvas)
             if self.overlay_hook is not None:

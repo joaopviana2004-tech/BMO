@@ -286,8 +286,16 @@ O campo `task` (texto) cria uma tarefa no Todoist. Ex.: *"abre o pong"*,
 > chave — precisa de internet). Incorporado do módulo de laboratório `bmo_voz.py`
 > em `services/tts.py` (backend `edge`, ajustes do lab: +13% velocidade, +18Hz
 > tom, +24% volume). Setup: `pip install edge-tts` + `sudo apt install mpg123`.
-> Volume em SETTINGS → IA ("Voz BMO"); `tts_volume=0` deixa mudo. Sem internet,
-> cai pra Piper (local) ou eSpeak via `BMO_TTS_BACKEND`.
+> Volume em SETTINGS → IA ("Voz BMO"); `tts_volume=0` deixa mudo. Backend padrão
+> = `edge` (sem ele, voz fica indisponível em vez de cair numa voz masculina do
+> Piper); pra Piper/eSpeak use `BMO_TTS_BACKEND`.
+>
+> **Cache de frases (latência ~zero):** saudações, "aqui está [tela]" de cada
+> tela e falinhas do BMO são **pré-geradas em MP3** (em background no 1º boot,
+> em `bmo_os/assets/voice_cache/`, gitignored) e tocam **direto do disco** — sem
+> rede. No boot o BMO dá um "bom dia/boa tarde/boa noite" e, ao abrir uma tela,
+> anuncia ("Bora jogar!", "Aqui estão as suas tarefas!"…). Só as respostas
+> dinâmicas do LLM passam pela rede (~1-3s).
 
 **Setup (`.env`):** ponha só a chave do(s) provedor(es) que for usar — o
 provedor e o modelo (chat **e** visão) saem do menu SETTINGS → IA.

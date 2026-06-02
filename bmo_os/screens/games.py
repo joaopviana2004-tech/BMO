@@ -25,6 +25,8 @@ GRID_TOP = SAFE_INSET + 32
 
 
 class GamesScreen:
+    voice_announce = "Bora jogar!"   # BMO anuncia ao abrir (cacheado)
+
     def __init__(self, *, on_back, games: list[dict]) -> None:
         self.on_back = on_back
         self.games = games

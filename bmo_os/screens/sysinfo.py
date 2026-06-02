@@ -53,6 +53,8 @@ def _temp_color(t):
 
 
 class SysInfoScreen:
+    voice_announce = "Aqui está o sistema!"   # BMO anuncia ao abrir (cacheado)
+
     def __init__(self, *, on_back, sysinfo: SysInfoService) -> None:
         self.on_back = on_back
         self.sysinfo = sysinfo

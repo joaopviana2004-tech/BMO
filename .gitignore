@@ -171,6 +171,9 @@ screenshots/
 # fotos tiradas pela tela PHOTO (AI Camera) — ficam em <repo>/photos/
 photos/
 
+# cache de voz do BMO (MP3 das frases fixas, gerados pelo Edge TTS em runtime)
+bmo_os/assets/voice_cache/
+
 # ROMs de emulador (V2) — provavelmente proprietárias, nunca commitar
 roms/
 *.nes

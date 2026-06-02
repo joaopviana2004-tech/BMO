@@ -39,6 +39,7 @@ Env:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import queue
 import re
@@ -119,6 +120,30 @@ EDGE_VOLUME = os.environ.get("BMO_TTS_EDGE_VOLUME", "+24%")  # volume (no áudio
 # Players de MP3 externos (fallback se o mixer do pygame não decodificar MP3).
 _MP3_PLAYERS = ["mpg123", "ffplay", "cvlc", "mpv"]
 
+# ----- Cache de frases fixas (tocam direto do disco, sem rede = instantâneo) -----
+# Só vale pro Edge (MP3). Pré-geradas em background no 1º boot e persistidas.
+_CACHE_DIR = Path(__file__).resolve().parent.parent / "assets" / "voice_cache"
+
+# Frase falada ao ABRIR cada tela (as telas referenciam pelo mesmo texto no
+# atributo `voice_announce`). Com acento — o Edge é neural e pronuncia melhor.
+SCREEN_PHRASES = {
+    "agenda": "Aqui está a sua agenda!",
+    "tarefas": "Aqui estão as suas tarefas!",
+    "foco": "Hora de focar!",
+    "sistema": "Aqui está o sistema!",
+    "foto": "Modo câmera ativado!",
+    "jogos": "Bora jogar!",
+    "configuracoes": "Aqui estão as configurações!",
+}
+
+# Saudações (a do boot é escolhida por horário) e falinhas divertidas do BMO.
+GREETINGS = ["Olá!", "Oi!", "Bom dia!", "Boa tarde!", "Boa noite!", "E aí, beleza?"]
+FUN_LINES = ["Eu sou o BMO!", "Quem quer jogar videogame?", "Vamos nessa!",
+             "Beleza!", "Toca aqui!", "Que demais!", "Tô pronto!"]
+
+# Tudo que será pré-gerado/cacheado. Quanto mais, mais respostas instantâneas.
+CACHE_PHRASES = GREETINGS + list(SCREEN_PHRASES.values()) + FUN_LINES
+
 # ----- Piper -----
 PIPER_BIN = shutil.which(os.environ.get("BMO_TTS_PIPER_BIN", "piper"))
 PIPER_LENGTH = os.environ.get("BMO_TTS_PIPER_LENGTH", "1.0")
@@ -185,8 +210,13 @@ class TTSService:
         self._q: "queue.Queue[str]" = queue.Queue()
         self._proc = None
         self._lock = threading.Lock()
+        # frases conhecidas (já limpas) que ficam em cache no disco
+        self._canon = {clean_for_tts(p, strip_accents=False) for p in CACHE_PHRASES}
         if self.available:
             threading.Thread(target=self._loop, daemon=True).start()
+            if self.backend == "edge":
+                # pré-gera (em background) as frases fixas que ainda não existem
+                threading.Thread(target=self._prebuild_cache, daemon=True).start()
 
     def _why_unavailable(self) -> str:
         if BACKEND_PREF == "edge" and not HAS_EDGE:
@@ -290,20 +320,92 @@ class TTSService:
             data = np.column_stack([data, data])
         return pygame.sndarray.make_sound(np.ascontiguousarray(data))
 
+    # ---------- cache de frases fixas (edge) ----------
+
+    def _cache_path(self, cleaned_text: str) -> Path:
+        """Caminho do MP3 cacheado p/ um texto JÁ LIMPO. Chave inclui voz+ajustes,
+        então mudar a voz/efeitos gera arquivos novos (não toca os antigos)."""
+        key = f"{EDGE_VOICE}|{EDGE_RATE}|{EDGE_PITCH}|{EDGE_VOLUME}|{cleaned_text}"
+        h = hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
+        return _CACHE_DIR / f"{h}.mp3"
+
+    def _synth_into(self, cleaned_text: str, dest: Path) -> bool:
+        """Sintetiza (Edge) num temp e só então RENOMEIA pro destino — escrita
+        atômica, pro cache nunca conter MP3 truncado (ex.: se o processo morrer)."""
+        try:
+            _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            return False
+        fd, tmp = tempfile.mkstemp(suffix=".mp3", prefix="bmo_tts_", dir=str(dest.parent))
+        os.close(fd)
+        try:
+            if self._synth_edge(cleaned_text, tmp) and os.path.getsize(tmp) > 64:
+                os.replace(tmp, dest)
+                return True
+        finally:
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except Exception:
+                    pass
+        return False
+
+    def _prebuild_cache(self) -> None:
+        """Gera (uma vez, em background) as frases fixas que faltam no cache."""
+        for phrase in CACHE_PHRASES:
+            cleaned = clean_for_tts(phrase, strip_accents=False)
+            if not cleaned:
+                continue
+            path = self._cache_path(cleaned)
+            if path.exists() and path.stat().st_size > 64:
+                continue
+            try:
+                self._synth_into(cleaned, path)
+            except Exception:
+                pass
+
     def _say(self, text: str) -> None:
-        # Edge gera MP3; piper/espeak geram WAV. Toca pelo mixer do pygame com
-        # o volume da config (sem disputar o device). Apaga o temp no fim.
-        is_mp3 = (self.backend == "edge")
+        # `text` já vem limpo do speak(). Edge usa cache de frases fixas; o resto
+        # (e textos dinâmicos) sintetiza num temporário e apaga depois.
+        if self.backend == "edge":
+            self._say_edge(text)
+        else:
+            self._say_file(text)
+
+    def _say_edge(self, text: str) -> None:
+        path = self._cache_path(text)
+        # 1) já cacheado: toca direto (instantâneo, sem rede) e NÃO apaga
+        if path.exists() and path.stat().st_size > 64:
+            self._play_mp3(str(path))
+            return
+        # 2) frase fixa ainda não cacheada: sintetiza DENTRO do cache (persiste)
+        if text in self._canon:
+            if self._synth_into(text, path):
+                self._play_mp3(str(path))
+            return
+        # 3) texto dinâmico (resposta do LLM): temporário, toca e apaga
+        tmp = None
+        try:
+            fd, tmp = tempfile.mkstemp(suffix=".mp3", prefix="bmo_tts_")
+            os.close(fd)
+            if self._synth_edge(text, tmp) and os.path.getsize(tmp) > 64:
+                self._play_mp3(tmp)
+        finally:
+            if tmp:
+                try:
+                    os.remove(tmp)
+                except Exception:
+                    pass
+
+    def _say_file(self, text: str) -> None:
+        # piper/espeak -> WAV temporário tocado pelo mixer do pygame
         path = None
         try:
-            fd, path = tempfile.mkstemp(suffix=".mp3" if is_mp3 else ".wav", prefix="bmo_tts_")
+            fd, path = tempfile.mkstemp(suffix=".wav", prefix="bmo_tts_")
             os.close(fd)
             if not self._synth(text, path) or os.path.getsize(path) <= 64:
                 return
-            if is_mp3:
-                self._play_mp3(path)
-            else:
-                self._play_wav(path)
+            self._play_wav(path)
         finally:
             if path:
                 try:

@@ -352,8 +352,9 @@ def build_initial(app: App):
 
     app.frame_hook = frame_hook
 
-    # estado do rodapé de voz: guarda a última resposta + até quando exibi-la
-    ai_overlay = {"msg": "", "until": 0.0}
+    # estado do rodapé de voz: guarda a última resposta + até quando exibi-la.
+    # spoke_at = quando o BMO falou por último (pra não duplicar com o anúncio de tela)
+    ai_overlay = {"msg": "", "until": 0.0, "spoke_at": 0.0}
     RESP_SHOW_S = 7.0
 
     def draw_voice_overlay(canvas) -> None:
@@ -373,6 +374,7 @@ def build_initial(app: App):
             if tts is not None:
                 try:
                     tts.speak(msg)
+                    ai_overlay["spoke_at"] = now
                 except Exception:
                     pass
         showing_resp = now < ai_overlay["until"] and bool(ai_overlay["msg"])
@@ -409,6 +411,32 @@ def build_initial(app: App):
     # (descanso, foco, kanban, agenda). Toque grava a fala e manda pro LLM —
     # mesmo caminho do push-to-talk físico.
     app.mic_button = MicButton(voice=voice, on_text=handle_ai_response)
+
+    # Anúncio de tela: ao abrir uma tela com `voice_announce`, o BMO fala a frase
+    # (cacheada = instantânea). Pula se o LLM acabou de falar (evita fala dupla).
+    def on_screen_change(screen) -> None:
+        phrase = getattr(screen, "voice_announce", "")
+        if not phrase or tts is None:
+            return
+        if time.time() - ai_overlay.get("spoke_at", 0.0) < 4.0:
+            return
+        try:
+            tts.speak(phrase)
+        except Exception:
+            pass
+
+    app.on_screen_change = on_screen_change
+
+    # Saudação no boot (por horário) + uma falinha do BMO — ambas cacheadas.
+    if tts is not None:
+        try:
+            h = time.localtime().tm_hour
+            greet = "Bom dia!" if 5 <= h < 12 else "Boa tarde!" if 12 <= h < 18 else "Boa noite!"
+            tts.speak(greet)
+            tts.speak("Eu sou o BMO!")
+        except Exception:
+            pass
+
     return make_ambient()
 
 
