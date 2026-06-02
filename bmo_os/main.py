@@ -51,7 +51,7 @@ from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.notifications import EventAlerter
 from bmo_os.services.sysinfo import SysInfoService
 from bmo_os.services.todoist import TodoistService
-from bmo_os.services.tts import TTSService
+from bmo_os.services.tts import SCREEN_PHRASES, TTSService
 from bmo_os.services.voice import VoiceService
 
 
@@ -317,6 +317,13 @@ def build_initial(app: App):
         if not (text and chat.available):
             return
         chat.ask(text)   # atualiza last_msg / last_error / last_screen / last_task
+        screen_key = (getattr(chat, "last_screen", "") or "").strip()
+        # Pediu pra IA ABRIR uma tela? Corta a resposta verbosa da LLM e usa a
+        # frase de cache daquela tela (instantânea). A msg da LLM é ignorada.
+        # (Isso NÃO fala ao abrir manualmente — só quando o pedido vem pela IA.)
+        phrase = SCREEN_PHRASES.get(screen_key)
+        if phrase:
+            chat.last_msg = phrase
         task = (getattr(chat, "last_task", "") or "").strip()
         if task:
             try:
@@ -324,7 +331,7 @@ def build_initial(app: App):
                     tts.speak("Tarefa criada com sucesso!")   # cacheado = instantâneo
             except Exception:
                 pass
-        action = screen_actions.get((getattr(chat, "last_screen", "") or "").strip())
+        action = screen_actions.get(screen_key)
         if action is not None:
             voice_enqueue(action)
 
@@ -414,20 +421,9 @@ def build_initial(app: App):
     # mesmo caminho do push-to-talk físico.
     app.mic_button = MicButton(voice=voice, on_text=handle_ai_response)
 
-    # Anúncio de tela: ao abrir uma tela com `voice_announce`, o BMO fala a frase
-    # (cacheada = instantânea). Pula se o LLM acabou de falar (evita fala dupla).
-    def on_screen_change(screen) -> None:
-        phrase = getattr(screen, "voice_announce", "")
-        if not phrase or tts is None:
-            return
-        if time.time() - ai_overlay.get("spoke_at", 0.0) < 4.0:
-            return
-        try:
-            tts.speak(phrase)
-        except Exception:
-            pass
-
-    app.on_screen_change = on_screen_change
+    # OBS: o anúncio de tela NÃO é feito a cada abertura — só quando o usuário
+    # PEDE pra IA abrir (ver handle_ai_response, que troca a msg da LLM pela
+    # frase de cache da tela). Abrir manualmente pelo carrossel é silencioso.
 
     # Saudação no boot (por horário) + uma falinha do BMO — ambas cacheadas.
     if tts is not None:
@@ -435,7 +431,7 @@ def build_initial(app: App):
             h = time.localtime().tm_hour
             greet = "Bom dia!" if 5 <= h < 12 else "Boa tarde!" if 12 <= h < 18 else "Boa noite!"
             tts.speak(greet)
-            tts.speak("Eu sou o BMO!")
+            tts.speak("Eu sou o bimu!")
         except Exception:
             pass
 

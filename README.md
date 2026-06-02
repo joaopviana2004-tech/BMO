@@ -41,6 +41,11 @@ push-to-talk físico), sem precisar do botão GPIO.
   - Botão SYNC força refresh
   - Scroll por coluna se tiver muita tarefa
   - Fonte Consolas 11pt (não-pixel) pra caber mais texto
+- **AGENDA** — próximos compromissos do Google Calendar (iCal/OAuth read-only).
+  Aviso automático (AlertScreen) quando um evento está chegando.
+- **FOCO** — timer pomodoro por tarefa (puxa as tarefas "Doing" do Todoist);
+  acumula o tempo focado por tarefa. Estado preservado ao sair/voltar.
+- **SISTEMA** — telemetria da Pi (CPU, temperatura, memória); no PC mostra "--".
 - **PHOTO** — câmera fullscreen:
   - Preview HD 800x480 com hflip (modo selfie)
   - Botão SHOOT vermelho (estilo app de câmera)
@@ -52,18 +57,18 @@ push-to-talk físico), sem precisar do botão GPIO.
   Whisper/STT e do wake word, estado do botão físico de fala, preview da câmera,
   push-to-talk pra testar transcrição + conversa com o BMO (LLM), e botão
   **VER (VISÃO)** que manda a imagem da câmera pro modelo multimodal descrever
-- **SETTINGS** — lista vertical com cyclers e ações:
-  - **Standby** (5/10/15/30/60/120s) — timer de auto-volta da home
-  - **Ambient** — qual lock screen usar
-  - **Tema** — auto/escuro/claro. *Auto* alterna por hora (6h-18h = claro)
-  - **Brilho** — 20/40/60/80/100% via overlay de dimming
-  - **BMO te vê** — liga/desliga face tracking pela câmera
-  - **BMO me ouve** — liga/desliga wake word + comando de voz
-  - **Microfone** — escolhe o dispositivo de entrada
-  - **Voz BMO** — volume da fala (TTS), separado do volume dos efeitos
-  - **Atualizar** — `git reset --hard origin/main` + restart in-place
-  - **Desligar** — shutdown com confirmação dupla em 3s
-  - **Voltar**
+- **SETTINGS** — menu por categorias (SOM / TELA / SISTEMA / IA), cada uma com
+  cyclers (gira com ←/→ ou tap) e ações:
+  - **SOM:** Volume (efeitos)
+  - **TELA:** Brilho (20-100% via dimming); Tema (auto/escuro/claro — *auto* =
+    claro 6h-18h)
+  - **SISTEMA:** Standby (5-120s); Ambient (qual lock screen); Aviso evento
+    (antecedência do alerta da AGENDA); Atualizar (`git reset --hard origin/main`
+    + restart); Desligar (confirmação dupla em 3s)
+  - **IA:** Provedor + Modelo de **chat** (OpenRouter/NVIDIA/Grok); Provedor +
+    Modelo de **visão**; BMO me ouve (wake word); Microfone; Voz BMO (volume do
+    TTS); BMO te vê (face tracking); **Gerar vozes** (gera o cache de fala
+    faltante)
 
 **Status bar** (canto superior direito de todas as telas CRT): sol/lua (auto
 pelo horário), nível de sinal (mock 4/4), bateria (mock 100%). Ícone de
@@ -91,9 +96,16 @@ BMO — todas as telas CRT respeitam isso, content e corners empurrados pra dent
   compatível OpenAI (Groq por padrão). **Acesso exclusivo ao mic** (ALSA só
   permite 1 captura por vez): monitor, wake e gravação se revezam, com retry ao
   abrir o stream.
-- **Chat** — o BMO responde via LLM ([OpenRouter](https://openrouter.ai)). Pede
-  ao modelo um JSON `{"msg", "screen", "task"}` e, além de responder, pode **abrir
-  uma tela** ou **criar uma tarefa** no Todoist (ver seção "IA" abaixo).
+- **Chat (LLM)** — o BMO responde via **OpenRouter, NVIDIA NIM ou Grok** (escolha
+  em SETTINGS → IA). Pede um JSON `{"msg", "screen", "task"}` e, além de responder,
+  pode **abrir uma tela** ou **criar uma tarefa** no Todoist (ver seção "IA").
+- **Visão** — `chat.ask_vision`: manda a imagem da câmera (base64) pro modelo
+  multimodal escolhido descrever. Botão **VER (VISÃO)** na tela TESTE.
+- **TTS (voz do BMO)** — Edge TTS (voz Francisca pt-BR) fala as respostas, com
+  **cache de frases fixas** pra latência ~zero (ver seção "IA").
+- **Google Calendar** — `gcalendar.py`: lê eventos via iCal secreta (agenda
+  privada) ou OAuth (Workspace). `notifications.py` dispara o alerta de evento.
+- **SysInfo** — telemetria de hardware (CPU/temp/memória) pra tela SISTEMA.
 
 ## Estrutura
 
@@ -114,28 +126,37 @@ bmo_os/
     pong.py            # PongScreen (jogo) + PongAmbientScreen (bot vs bot)
     space_invaders.py  # SpaceInvadersScreen (jogo) + SpaceInvadersAmbientScreen
     shuffler.py        # ShufflingAmbientScreen (cicla as 4 ambient)
-    home.py            # carrossel SLEEP/GAMES/TASKS/PHOTO/SETTINGS
+    home.py            # carrossel SLEEP/GAMES/TASKS/AGENDA/FOCO/PHOTO/SISTEMA/TESTE/SETTINGS
     sleep.py           # tiles dos 5 ambient modes
     games.py           # grid estilo celular (Space Invaders + Pong)
     tasks.py           # kanban Todoist 3 colunas (touch drag)
+    agenda.py          # próximos eventos do Google Calendar
+    pomodoro.py        # timer de foco por tarefa (FOCO)
     photo.py           # camera fullscreen + debug overlay + galeria btn
     gallery.py         # grid 3x2 de thumbs + viewer
-    aitest.py          # TESTE IA: mic/STT/câmera/botão + push-to-talk + chat
-    settings.py        # cyclers + atualizar (git reset --hard + os.execv) + desligar
+    sysinfo.py         # tela SISTEMA: CPU/temperatura/memória da Pi
+    alert.py           # AlertScreen: aviso de evento próximo (por cima de tudo)
+    aitest.py          # TESTE IA: mic/STT/câmera/botão + push-to-talk + chat + VISÃO
+    mic_button.py      # MicButton: botão de mic virtual (overlay global, segura p/ gravar)
+    settings.py        # menu por categorias (SOM/TELA/SISTEMA/IA) + atualizar/desligar
     suspended.py       # tela SUSPENSO: display off + FPS baixo, toque acorda
     placeholder.py     # stub genérico (legado)
   services/
     weather.py         # Open-Meteo, thread + lock + último bom em cache
     todoist.py         # API v1, thread + trigger_refresh + create
+    gcalendar.py       # Google Calendar (iCal secreta ou OAuth), read-only
+    notifications.py   # dispara o alerta de evento próximo (AlertScreen)
+    sysinfo.py         # telemetria de hardware (CPU/temp/memória)
     git_updates.py     # fetch + drift detection
-    camera.py          # picamera2 + cv2, refcount lazy (acquire/release)
-    audio.py           # sons 8-bit gerados em runtime (numpy) + voz do BMO
+    camera.py          # picamera2 + cv2, refcount lazy (acquire/release) + capture_jpeg
+    audio.py           # sons 8-bit gerados em runtime (numpy)
     voice.py           # mic + STT (Whisper local / API Groq) + push-to-talk + wake
-    chat.py            # LLM via OpenRouter -> JSON {msg, screen, task}
-    tts.py             # voz falada do BMO: Edge TTS (Francisca pt-BR) > Piper > eSpeak
+    chat.py            # LLM (OpenRouter/NVIDIA/Grok) -> JSON {msg,screen,task} + visão
+    tts.py             # voz do BMO: Edge TTS (Francisca pt-BR) > Piper > eSpeak + cache
     gpio_button.py     # botão físico de push-to-talk (gpiozero)
   assets/
     fonts/             # PressStart2P.ttf (ver "Fontes pixel" abaixo)
+    voice_cache/       # MP3 das frases fixas do TTS (gerados em runtime, gitignored)
   references/          # .webp/.png das fotos do BMO físico e refs de face
 scripts/               # deploy no Pi (ver "Áudio Bluetooth" abaixo)
   bmo-bt-setup.sh        # instalador 1-comando do alto-falante Bluetooth
@@ -231,12 +252,12 @@ TODOIST_TOKEN=xxxxxxxx                  # token da REST API v1 do Todoist
 Veja `.env.example` (commitado) pra docs completas. Env vars já no shell têm
 precedência sobre o `.env`.
 
-**`bmo_config.json`** (preferências persistidas pelo cycler do SETTINGS):
-- `idle_timeout_s` — segundos pra home voltar pro ambient
-- `ambient_mode` — `clock` | `face` | `pong` | `invaders` | `shuffle`
-- `theme` — `auto` | `dark` | `light`
-- `brightness` — 20/40/60/80/100
-- `camera_face_tracking` — bool (BMO te vê)
+**`bmo_config.json`** (preferências persistidas pelo cycler do SETTINGS, criado/
+escrito sozinho — você não precisa editar à mão):
+- `idle_timeout_s`, `ambient_mode`, `theme`, `brightness`, `volume`
+- `event_warning_min` — antecedência do alerta da AGENDA
+- IA: `llm_provider` + `{openrouter,nvidia,grok}_model`; `vision_provider` +
+  `*_vision_model`; `voice_enabled`, `mic_device`, `tts_volume`, `camera_face_tracking`
 - `todoist_token`, `todoist_project` — fallback se não tiver no env
 
 ## Todoist (kanban)
@@ -293,12 +314,17 @@ O campo `task` (texto) cria uma tarefa no Todoist. Ex.: *"abre o pong"*,
 > **Cache de frases (latência ~zero):** saudações, "aqui está [tela]" de cada
 > tela e falinhas do BMO são **pré-geradas em MP3** (em background no 1º boot,
 > em `bmo_os/assets/voice_cache/`, gitignored) e tocam **direto do disco** — sem
-> rede. No boot o BMO dá um "bom dia/boa tarde/boa noite" e, ao abrir uma tela,
-> anuncia ("Bora jogar!", "Aqui estão as suas tarefas!"…). Só as respostas
-> dinâmicas do LLM passam pela rede (~1-3s). Ao criar uma tarefa, o BMO fala
-> "Tarefa criada com sucesso!". O cache se completa sozinho a cada boot (e logo
-> após "Atualizar"); SETTINGS → IA → **Gerar vozes** força a verificação/geração
-> das que faltarem, com progresso na tela.
+> rede. No boot o BMO dá um "bom dia/boa tarde/boa noite". Quando você **pede pra
+> IA abrir uma tela** ("abre o relógio"), ele **corta a resposta verbosa do LLM**
+> e fala a frase de cache da tela ("Aqui está o relógio!") — isso só acontece no
+> pedido via IA, não ao abrir manualmente. Ao criar uma tarefa, fala "Tarefa
+> criada com sucesso!". Só as respostas livres do LLM passam pela rede (~1-3s).
+> O cache se completa sozinho a cada boot (e logo após "Atualizar"); SETTINGS →
+> IA → **Gerar vozes** força a verificação/geração das que faltarem, com
+> progresso na tela.
+>
+> *Pronúncia:* na fala, "BMO" vira "bimu" (a voz neural soletra/buga "BMO") — só
+> no áudio; o texto na tela continua "BMO".
 
 **Setup (`.env`):** ponha só a chave do(s) provedor(es) que for usar — o
 provedor e o modelo (chat **e** visão) saem do menu SETTINGS → IA.

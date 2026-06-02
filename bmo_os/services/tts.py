@@ -100,6 +100,9 @@ def clean_for_tts(text: str, strip_accents: bool = STRIP_ACCENTS) -> str:
     text = (text or "").strip()
     if not text:
         return ""
+    # pronúncia: "BMO" some na voz da Francisca (soletra/buga). Falamos "bimu".
+    # Só afeta a FALA (o texto exibido na tela continua "BMO").
+    text = re.sub(r"\bbmo\b", "bimu", text, flags=re.IGNORECASE)
     text = _EMOJI_RE.sub(" ", text)
     for k, v in _QUOTE_MAP.items():
         text = text.replace(k, v)
@@ -126,6 +129,9 @@ _CACHE_DIR = Path(__file__).resolve().parent.parent / "assets" / "voice_cache"
 
 # Frase falada ao ABRIR cada tela (as telas referenciam pelo mesmo texto no
 # atributo `voice_announce`). Com acento — o Edge é neural e pronuncia melhor.
+# Chaves = as mesmas que a LLM devolve em "screen" (chat.SCREENS_DOC). Quando o
+# usuário PEDE pra IA abrir a tela, o BMO fala esta frase (cacheada) no lugar da
+# resposta verbosa da LLM.
 SCREEN_PHRASES = {
     "agenda": "Aqui está a sua agenda!",
     "tarefas": "Aqui estão as suas tarefas!",
@@ -133,12 +139,17 @@ SCREEN_PHRASES = {
     "sistema": "Aqui está o sistema!",
     "foto": "Modo câmera ativado!",
     "jogos": "Bora jogar!",
+    "pong": "Bora de Pong!",
+    "invaders": "Bora pro espaço!",
     "configuracoes": "Aqui estão as configurações!",
+    "relogio": "Aqui está o relógio!",
+    "home": "Voltando pro início!",
+    "atualizar": "Já volto, tô me atualizando!",
 }
 
 # Saudações (a do boot é escolhida por horário) e falinhas divertidas do BMO.
 GREETINGS = ["Olá!", "Oi!", "Bom dia!", "Boa tarde!", "Boa noite!", "E aí, beleza?"]
-FUN_LINES = ["Eu sou o BMO!", "Quem quer jogar videogame?", "Vamos nessa!",
+FUN_LINES = ["Eu sou o bimu!", "Quem quer jogar videogame?", "Vamos nessa!",
              "Beleza!", "Toca aqui!", "Que demais!", "Tô pronto!"]
 # Confirmações de ação (faladas automaticamente quando o BMO faz algo).
 CONFIRMS = ["Tarefa criada com sucesso!", "Pronto!", "Feito!", "Anotado!"]
