@@ -175,3 +175,27 @@ def draw_pong_icon(surface: pygame.Surface, rect: pygame.Rect) -> None:
         pygame.draw.rect(surface, (90, 100, 120), (cx - 1, cy + dy, 2, 3))
     # bola no centro
     pygame.draw.rect(surface, (255, 255, 255), (cx - 3, cy - 3, 6, 6))
+
+
+def draw_flappy_icon(surface: pygame.Surface, rect: pygame.Rect) -> None:
+    """Passarinho amarelo entre dois canos verdes."""
+    cx, cy = rect.center
+    pipe = (90, 200, 120)
+    # cano esquerdo (de baixo) e direito (de cima)
+    pygame.draw.rect(surface, pipe, (cx - 20, cy + 2, 8, 16))
+    pygame.draw.rect(surface, pipe, (cx + 12, cy - 18, 8, 16))
+    # passarinho
+    pygame.draw.rect(surface, (250, 210, 70), (cx - 5, cy - 5, 10, 10))
+    pygame.draw.rect(surface, (20, 20, 30), (cx + 1, cy - 3, 2, 2))      # olho
+    pygame.draw.rect(surface, (230, 120, 40), (cx + 5, cy, 3, 2))        # bico
+
+
+def draw_snake_icon(surface: pygame.Surface, rect: pygame.Rect) -> None:
+    """Cobrinha verde em L + maçãzinha vermelha."""
+    cx, cy = rect.center
+    g = (120, 220, 130)
+    for i in range(4):                       # corpo horizontal
+        pygame.draw.rect(surface, g, (cx - 18 + i * 7, cy + 4, 6, 6))
+    for i in range(2):                       # sobe (cabeça)
+        pygame.draw.rect(surface, (180, 250, 180), (cx + 3, cy - 3 - i * 7, 6, 6))
+    pygame.draw.rect(surface, (240, 110, 110), (cx - 14, cy - 12, 6, 6))  # comida

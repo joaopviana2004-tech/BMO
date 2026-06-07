@@ -28,7 +28,12 @@ from bmo_os.screens.aitest import AITestScreen
 from bmo_os.screens.alert import AlertScreen
 from bmo_os.screens.bmo_face import BMOFaceScreen
 from bmo_os.screens.clock import ClockScreen
-from bmo_os.screens.games import GamesScreen, draw_pong_icon, draw_space_invaders_icon
+from bmo_os.screens.flappy import FlappyScreen
+from bmo_os.screens.games import (
+    GamesScreen, draw_flappy_icon, draw_pong_icon, draw_snake_icon,
+    draw_space_invaders_icon,
+)
+from bmo_os.screens.snake import SnakeScreen
 from bmo_os.screens.home import HomeScreen
 from bmo_os.screens.gallery import GalleryScreen
 from bmo_os.screens.mic_button import MicButton
@@ -205,6 +210,20 @@ def build_initial(app: App):
                         PongScreen(on_back=app.manager.pop)
                     ),
                 },
+                {
+                    "label": "Flappy",
+                    "draw_icon": draw_flappy_icon,
+                    "launch": lambda: app.manager.push(
+                        FlappyScreen(on_back=app.manager.pop)
+                    ),
+                },
+                {
+                    "label": "Snake",
+                    "draw_icon": draw_snake_icon,
+                    "launch": lambda: app.manager.push(
+                        SnakeScreen(on_back=app.manager.pop)
+                    ),
+                },
             ],
         )
 
@@ -282,6 +301,10 @@ def build_initial(app: App):
                                PhotoScreen(on_back=app.manager.pop, camera=camera,
                                            on_open_gallery=lambda: app.manager.push(
                                                GalleryScreen(on_back=app.manager.pop, photos_dir=PHOTOS_DIR))))))
+    voice.register_command(["flappy", "passarinho", "voar"],
+                           _cmd(lambda: app.manager.push(FlappyScreen(on_back=app.manager.pop))))
+    voice.register_command(["snake", "cobra", "cobrinha"],
+                           _cmd(lambda: app.manager.push(SnakeScreen(on_back=app.manager.pop))))
     voice.register_command(["configura", "ajuste", "settings"], _cmd(lambda: app.manager.push(make_settings())))
     voice.register_command(["menu", "inicio", "casa", "home"], _cmd(open_home))
     voice.register_command(["relogio", "horas", "tela inicial", "descanso"], _cmd(go_ambient))
@@ -318,6 +341,8 @@ def build_initial(app: App):
         "jogos": lambda: app.manager.push(make_games_screen()),
         "pong": lambda: app.manager.push(PongScreen(on_back=app.manager.pop)),
         "invaders": lambda: app.manager.push(SpaceInvadersScreen(on_back=app.manager.pop)),
+        "flappy": lambda: app.manager.push(FlappyScreen(on_back=app.manager.pop)),
+        "snake": lambda: app.manager.push(SnakeScreen(on_back=app.manager.pop)),
         "configuracoes": lambda: app.manager.push(make_settings()),
         # relógio explícito (NÃO o ambient configurado, que pode ser face/pong)
         "relogio": lambda: app.manager.replace(_instantiate_ambient("clock")),

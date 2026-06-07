@@ -152,6 +152,8 @@ SCREEN_PHRASES = {
     "jogos": "Bora jogar!",
     "pong": "Bora de Pong!",
     "invaders": "Bora pro espaço!",
+    "flappy": "Bora voar!",
+    "snake": "Bora de cobrinha!",
     "configuracoes": "Aqui estão as configurações!",
     "relogio": "Aqui está o relógio!",
     "home": "Voltando pro início!",

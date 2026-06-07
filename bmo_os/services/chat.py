@@ -111,6 +111,8 @@ SCREENS_DOC = (
     "- jogos: menu de jogos.\n"
     "- pong: abre direto o jogo Pong.\n"
     "- invaders: abre direto o jogo Space Invaders.\n"
+    "- flappy: abre direto o jogo Flappy (passarinho).\n"
+    "- snake: abre direto o jogo Snake (cobrinha).\n"
     "- configuracoes: ajustes (volume, brilho, tema, etc.).\n"
     "- relogio: tela de descanso com o relogio (modo ambiente).\n"
     "- home: o menu principal do BMO.\n"
@@ -328,7 +330,8 @@ class ChatService:
 
     # chaves de tela aceitas (espelha SCREENS_DOC e o registro do main.py)
     _SCREENS = {"agenda", "tarefas", "foco", "sistema", "foto", "jogos",
-                "pong", "invaders", "configuracoes", "relogio", "home", "atualizar"}
+                "pong", "invaders", "flappy", "snake", "configuracoes",
+                "relogio", "home", "atualizar"}
 
     def _remember_turn(self, user_text: str, bmo_msg: str) -> None:
         """Guarda a troca no histórico curto (limita a HISTORY_TURNS trocas)."""
