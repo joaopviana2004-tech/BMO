@@ -120,6 +120,17 @@ EDGE_VOICE = os.environ.get("BMO_TTS_EDGE_VOICE", "pt-BR-FranciscaNeural")
 EDGE_RATE = os.environ.get("BMO_TTS_EDGE_RATE", "+13%")    # velocidade
 EDGE_PITCH = os.environ.get("BMO_TTS_EDGE_PITCH", "+18Hz")  # tom
 EDGE_VOLUME = os.environ.get("BMO_TTS_EDGE_VOLUME", "+24%")  # volume (no áudio gerado)
+
+# Prosódia (rate, pitch) por HUMOR do pet — aplicada SÓ na fala dinâmica (não
+# cacheada), pra a voz combinar com o estado de espírito. None = usa o padrão.
+MOOD_VOICE = {
+    "excited": ("+30%", "+34Hz"),   # eletrico, agudo
+    "loving":  ("+8%",  "+24Hz"),   # fofo
+    "happy":   ("+15%", "+20Hz"),
+    "lonely":  ("+4%",  "+12Hz"),
+    "bored":   ("+0%",  "+8Hz"),
+    "sleepy":  ("-10%", "+2Hz"),    # devagar, grave
+}
 # Players de MP3 externos (fallback se o mixer do pygame não decodificar MP3).
 _MP3_PLAYERS = ["mpg123", "ffplay", "cvlc", "mpv"]
 
@@ -220,7 +231,8 @@ class TTSService:
         self.error = "" if self.available else self._why_unavailable()
         self.last_text = ""
         self._speaking = False
-        self._q: "queue.Queue[str]" = queue.Queue()
+        # fila guarda (texto_limpo, humor) — humor "" = voz padrão
+        self._q: "queue.Queue[tuple[str, str]]" = queue.Queue()
         self._proc = None
         self._lock = threading.Lock()
         # frases conhecidas (já limpas) que ficam em cache no disco
@@ -260,9 +272,11 @@ class TTSService:
 
     # ---------- API ----------
 
-    def speak(self, text: str) -> None:
+    def speak(self, text: str, mood: str = "") -> None:
         """Enfileira uma fala (não bloqueia). Limpa o texto antes (sem emoji/
-        markdown) pra o áudio sair certinho. No Edge mantém os acentos."""
+        markdown) pra o áudio sair certinho. No Edge mantém os acentos.
+        `mood` (opcional) ajusta tom/velocidade — só vale pra fala dinâmica;
+        frases fixas cacheadas ignoram (mantêm o cache estável)."""
         text = clean_for_tts(text, strip_accents=(self.backend != "edge"))
         if not text or not self.available:
             return
@@ -270,7 +284,7 @@ class TTSService:
         if self._volume() <= 0.0:
             return
         self.last_text = text
-        self._q.put(text)
+        self._q.put((text, (mood or "").strip().lower()))
 
     def stop(self) -> None:
         """Esvazia a fila e corta a fala atual."""
@@ -298,10 +312,11 @@ class TTSService:
 
     def _loop(self) -> None:
         while True:
-            text = self._q.get()
+            item = self._q.get()
+            text, mood = item if isinstance(item, tuple) else (item, "")
             self._speaking = True
             try:
-                self._say(text)
+                self._say(text, mood)
             except Exception as e:
                 self.error = str(e)[:60]
             finally:
@@ -415,17 +430,18 @@ class TTSService:
         finally:
             self.cache_building = False
 
-    def _say(self, text: str) -> None:
+    def _say(self, text: str, mood: str = "") -> None:
         # `text` já vem limpo do speak(). Edge usa cache de frases fixas; o resto
         # (e textos dinâmicos) sintetiza num temporário e apaga depois.
         if self.backend == "edge":
-            self._say_edge(text)
+            self._say_edge(text, mood)
         else:
             self._say_file(text)
 
-    def _say_edge(self, text: str) -> None:
+    def _say_edge(self, text: str, mood: str = "") -> None:
         path = self._cache_path(text)
-        # 1) já cacheado: toca direto (instantâneo, sem rede) e NÃO apaga
+        # 1) já cacheado: toca direto (instantâneo, sem rede) e NÃO apaga.
+        # (Cache usa a prosódia PADRÃO — humor não muda frases fixas.)
         if path.exists() and path.stat().st_size > 64:
             self._play_mp3(str(path))
             return
@@ -434,12 +450,14 @@ class TTSService:
             if self._synth_into(text, path):
                 self._play_mp3(str(path))
             return
-        # 3) texto dinâmico (resposta do LLM): temporário, toca e apaga
+        # 3) texto dinâmico (resposta do LLM): temporário, toca e apaga.
+        # Só aqui o humor colore a voz (rate/pitch).
+        rate, pitch = MOOD_VOICE.get(mood, (None, None))
         tmp = None
         try:
             fd, tmp = tempfile.mkstemp(suffix=".mp3", prefix="bmo_tts_")
             os.close(fd)
-            if self._synth_edge(text, tmp) and os.path.getsize(tmp) > 64:
+            if self._synth_edge(text, tmp, rate=rate, pitch=pitch) and os.path.getsize(tmp) > 64:
                 self._play_mp3(tmp)
         finally:
             if tmp:
@@ -538,15 +556,19 @@ class TTSService:
             return self._synth_espeak(text, path)
         return False
 
-    def _synth_edge(self, text: str, path: str) -> bool:
+    def _synth_edge(self, text: str, path: str, rate: str | None = None,
+                    pitch: str | None = None) -> bool:
         """Edge TTS (voz Francisca) -> MP3. Roda o asyncio na thread do worker
-        (que não tem event loop próprio, então asyncio.run é seguro)."""
+        (que não tem event loop próprio, então asyncio.run é seguro).
+        rate/pitch (opcionais) sobrescrevem o padrão — usados pela voz emocional."""
         if not HAS_EDGE:
             return False
+        use_rate = rate or EDGE_RATE
+        use_pitch = pitch or EDGE_PITCH
         try:
             async def _gen():
                 comm = edge_tts.Communicate(
-                    text, EDGE_VOICE, rate=EDGE_RATE, pitch=EDGE_PITCH, volume=EDGE_VOLUME)
+                    text, EDGE_VOICE, rate=use_rate, pitch=use_pitch, volume=EDGE_VOLUME)
                 await comm.save(path)
             asyncio.run(_gen())
             return os.path.getsize(path) > 64

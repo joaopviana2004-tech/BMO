@@ -52,6 +52,7 @@ DEFAULTS: dict = {
     "mic_button_enabled": True,     # botão de mic virtual nas telas (descanso/foco/kanban/agenda)
     "mic_device": "",               # nome (ou trecho) do microfone de entrada; "" = padrão do sistema
     "tts_volume": 100,              # 0-100 — volume da voz do BMO (eSpeak-NG), separado do volume dos efeitos
+    "pet_proactive": True,          # BMO puxa conversa sozinho (falas espontâneas por humor/contexto)
     # --- LLM do chat (BMO responde) — escolhível em SETTINGS -> IA ---
     # provedor: "openrouter" | "nvidia" | "grok" (todos OpenAI-compatíveis)
     "llm_provider": "openrouter",

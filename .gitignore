@@ -192,6 +192,10 @@ weather_cache.json
 # Config local do BMO OS — guarda preferências e token do Todoist, nunca commitar
 bmo_config.json
 
+# Estado emocional e memória do pet (afeto, streak, fatos do usuário) — local
+bmo_pet.json
+bmo_memory.json
+
 # Tokens OAuth do Google Calendar (refresh tokens) — NUNCA commitar
 gcal_tokens.json
 

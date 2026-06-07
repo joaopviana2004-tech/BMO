@@ -47,6 +47,16 @@ IDLE_NEXT_MAX       = 8.0
 EYE_MAX_OFFSET = 10
 TRACK_FACTOR   = 0.06
 
+# --- carinho / interação física ---
+TAP_BURST_WINDOW = 1.4      # janela (s) p/ contar toques seguidos = cafuné
+TAP_BURST_COUNT  = 3        # nº de toques rápidos que viram cafuné
+TICKLE_THRESHOLD = 240.0    # px acumulados de arrasto rápido = cócegas
+TICKLE_DECAY     = 220.0    # quão rápido a "energia de cócegas" esvai (px/s)
+LONG_PRESS_S     = 0.6      # segurar parado por isso = reação "ãh?"
+MOOD_REFRESH_S   = 0.4      # de quanto em quanto relê o humor do pet_state
+LOVE_DURATION    = 1.8
+LAUGH_DURATION   = 1.6
+
 
 def _to_logical(pos: tuple[int, int]) -> tuple[int, int]:
     """Converte coords da janela física pro canvas lógico 400x240."""
@@ -59,10 +69,11 @@ def _to_logical(pos: tuple[int, int]) -> tuple[int, int]:
 class BMOFaceScreen:
     show_mic_button = True   # mic virtual (overlay global do App), canto inf-dir
 
-    def __init__(self, on_open_home, camera=None, tts=None) -> None:
+    def __init__(self, on_open_home, camera=None, tts=None, pet_state=None) -> None:
         self.on_open_home = on_open_home
         self.camera = camera
         self.tts = tts              # voz do BMO — enquanto fala, anima a boca
+        self.pet = pet_state        # estado emocional (humor/afeto) — opcional
         self._camera_held = False   # tem ref-count na camera service?
         self.state = "IDLE"
         self.reaction: str | None = None
@@ -76,6 +87,18 @@ class BMOFaceScreen:
         self._eye_oy = 0.0
         self._touch_pos: tuple[int, int] | None = None
         self._t = 0.0
+        # --- carinho / interação física ---
+        self._tap_times: list[float] = []   # timestamps de toques (cafuné)
+        self._tickle = 0.0                  # energia acumulada de arrasto rápido
+        self._last_drag_pos: tuple[int, int] | None = None
+        self._press_t: float | None = None  # quando o dedo encostou (long-press)
+        self._press_pos: tuple[int, int] | None = None
+        self._press_moved = False
+        self._hearts: list[dict] = []       # partículas de coraçãozinho (LOVE)
+        # --- humor (lido do pet_state, em cache pra não pegar lock todo frame) ---
+        self._mood = "happy"
+        self._energy = 0.7
+        self._mood_at = 0.0
 
     def enter(self) -> None:
         self._schedule_next_idle()
@@ -102,7 +125,12 @@ class BMOFaceScreen:
             self._camera_held = False
 
     def _schedule_next_idle(self) -> None:
-        self.next_idle_at = self._t + random.uniform(IDLE_NEXT_MIN, IDLE_NEXT_MAX)
+        lo, hi = IDLE_NEXT_MIN, IDLE_NEXT_MAX
+        if self._mood in ("lonely", "bored", "excited"):
+            lo, hi = 2.0, 4.5            # mais inquieto/expressivo
+        elif self._mood == "sleepy":
+            lo, hi = 6.0, 12.0           # quietão
+        self.next_idle_at = self._t + random.uniform(lo, hi)
 
     # ---------- input ----------
 
@@ -110,14 +138,42 @@ class BMOFaceScreen:
         if event.type == bmo_input.ACTION_EVENT:
             self._handle_action(event)
             return
-        # raw events pra detectar drag e release do dedo
-        if event.type == pygame.MOUSEMOTION:
+        # raw events pra detectar pressão, drag e release do dedo
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            # marca início da pressão (pra detectar long-press parado)
+            self._press_t = self._t
+            self._press_pos = _to_logical(event.pos)
+            self._press_moved = False
+            self._last_drag_pos = self._press_pos
+        elif event.type == pygame.MOUSEMOTION:
             if pygame.mouse.get_pressed()[0] and self.state == "TRACKING":
-                self._touch_pos = _to_logical(event.pos)
+                pos = _to_logical(event.pos)
+                self._touch_pos = pos
                 self._update_target_from_touch()
+                self._accumulate_tickle(pos)
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self._press_t = None
+            self._press_pos = None
+            self._last_drag_pos = None
             if self.state == "TRACKING":
                 self._start_reaction()
+
+    def _accumulate_tickle(self, pos: tuple[int, int]) -> None:
+        """Arrasto rápido vira cócegas: acumula distância; ao passar do limiar,
+        BMO ri (uma vez, com cooldown via reação)."""
+        last = self._last_drag_pos
+        self._last_drag_pos = pos
+        if last is None:
+            return
+        dx, dy = pos[0] - last[0], pos[1] - last[1]
+        dist = (dx * dx + dy * dy) ** 0.5
+        if dist > 2:
+            self._press_moved = True
+        self._tickle += dist
+        if self._tickle >= TICKLE_THRESHOLD and self.reaction != "LAUGH":
+            self._tickle = 0.0
+            self._start_reaction(forced="LAUGH")
+            self._note_touch("tickle")
 
     def _handle_action(self, event) -> None:
         action = event.action
@@ -131,11 +187,47 @@ class BMOFaceScreen:
             if self._menu_hint_rect().collidepoint(event.pos):
                 self.on_open_home()
                 return
+            # registra o toque pra detectar cafuné (vários toques seguidos)
+            self._tap_times = [t for t in self._tap_times
+                               if self._t - t < TAP_BURST_WINDOW]
+            self._tap_times.append(self._t)
+            region = self._region_of(event.pos)
+            if len(self._tap_times) >= TAP_BURST_COUNT:
+                # cafuné! BMO se derrete
+                self._tap_times.clear()
+                self._start_reaction(forced="LOVE")
+                self._note_touch("pet")
+                return
+            if region == "eye":
+                # cutucou o olho — pisca/se esquiva, leve incômodo
+                self._start_reaction(forced="GRUMPY")
+                self._note_touch("poke")
+                return
+            # toque simples: começa a seguir o dedo
             self._touch_pos = event.pos
             self.state = "TRACKING"
             self.reaction = None
             self.idle_anim = None
+            self._note_touch("tap")
             self._update_target_from_touch()
+
+    def _region_of(self, pos: tuple[int, int]) -> str:
+        """Classifica o toque em 'eye' / 'mouth' / 'body' pela proximidade."""
+        x, y = pos
+        for ex, ey in (LEFT_EYE, RIGHT_EYE):
+            if (x - ex) ** 2 + (y - ey) ** 2 <= (EYE_R + 10) ** 2:
+                return "eye"
+        if abs(x - MOUTH[0]) <= 44 and abs(y - MOUTH[1]) <= 28:
+            return "mouth"
+        return "body"
+
+    def _note_touch(self, kind: str) -> None:
+        """Repassa a interação pro estado emocional (se houver)."""
+        if self.pet is not None:
+            try:
+                self.pet.touch(kind)
+            except Exception:
+                pass
 
     def _update_target_from_touch(self) -> None:
         if self._touch_pos is None:
@@ -149,7 +241,13 @@ class BMOFaceScreen:
 
     def _start_reaction(self, *, forced: str | None = None) -> None:
         self.reaction = forced or random.choice(REACTIONS)
-        self.reaction_until = self._t + REACTION_DURATION
+        dur = REACTION_DURATION
+        if self.reaction == "LOVE":
+            dur = LOVE_DURATION
+            self._spawn_hearts()
+        elif self.reaction == "LAUGH":
+            dur = LAUGH_DURATION
+        self.reaction_until = self._t + dur
         self.state = "REACTING"
         self._target_ox = 0.0
         self._target_oy = 0.0
@@ -157,8 +255,28 @@ class BMOFaceScreen:
         if not self._is_speaking():
             audio.play_bmo_voice()
 
+    def _spawn_hearts(self) -> None:
+        """Solta uns coraçõezinhos subindo (reação de carinho)."""
+        for _ in range(5):
+            self._hearts.append({
+                "x": random.uniform(140, 260),
+                "y": random.uniform(120, 160),
+                "vy": random.uniform(18, 32),       # px/s subindo
+                "vx": random.uniform(-8, 8),
+                "life": random.uniform(1.1, 1.8),
+                "size": random.choice((4, 5, 6)),
+            })
+
     def _start_idle_anim(self) -> None:
-        self.idle_anim = random.choice(IDLE_ANIMS)
+        # viés por humor: sonolento pisca/descansa; carente/entediado tagarela
+        if self._mood == "sleepy":
+            self.idle_anim = random.choice(["BLINK", "DOUBLE_BLINK", "RESTING", "RESTING"])
+        elif self._mood in ("lonely", "bored"):
+            self.idle_anim = random.choice(["SPEAK", "SPEAK", "LOOK_LEFT", "LOOK_RIGHT", "SMILE"])
+        elif self._mood == "excited":
+            self.idle_anim = random.choice(["SPEAK", "SMILE", "LOOK_UP", "DOUBLE_BLINK"])
+        else:
+            self.idle_anim = random.choice(IDLE_ANIMS)
         self.idle_anim_until = self._t + IDLE_ANIM_DURATION
         self.state = "IDLE_ANIM"
         # tagarela quando entra em SPEAK idle (silencia se o TTS está falando)
@@ -174,6 +292,19 @@ class BMOFaceScreen:
         self._t += dt
         # Garante que a câmera está ligada/desligada conforme config atual
         self._sync_camera_hold()
+        self._refresh_mood()
+        self._update_presence()
+        self._update_hearts(dt)
+        # cócegas: energia de arrasto esvai com o tempo
+        if self._tickle > 0:
+            self._tickle = max(0.0, self._tickle - TICKLE_DECAY * dt)
+        # long-press: dedo parado pressionado vira reação "ãh?"
+        if (self._press_t is not None and not self._press_moved
+                and self.state == "TRACKING"
+                and self._t - self._press_t >= LONG_PRESS_S):
+            self._press_t = None
+            self._start_reaction(forced="SURPRISED")
+            self._note_touch("tap")
         # Enquanto o BMO fala (TTS), fica na animação de fala até terminar:
         # não inicia idle/reação, olhos voltam ao centro.
         if self._is_speaking():
@@ -222,6 +353,42 @@ class BMOFaceScreen:
         self._eye_ox += (self._target_ox - self._eye_ox) * 0.18
         self._eye_oy += (self._target_oy - self._eye_oy) * 0.18
 
+    def _refresh_mood(self) -> None:
+        """Relê humor/energia do pet_state de tempos em tempos (cacheado)."""
+        if self.pet is None or self._t - self._mood_at < MOOD_REFRESH_S:
+            return
+        self._mood_at = self._t
+        try:
+            snap = self.pet.get()
+            self._mood = getattr(snap, "mood", "happy")
+            self._energy = getattr(snap, "energy", 0.7)
+        except Exception:
+            pass
+
+    def _update_presence(self) -> None:
+        """BÔNUS: se a câmera está ligada, avisa o pet_state quem está por perto.
+        Sem câmera (camera_held False), não faz nada."""
+        if self.pet is None or not self._camera_held or self.camera is None:
+            return
+        try:
+            present = bool(self.camera.get_faces())
+            self.pet.note_presence(present)
+        except Exception:
+            pass
+
+    def _update_hearts(self, dt: float) -> None:
+        if not self._hearts:
+            return
+        alive = []
+        for h in self._hearts:
+            h["life"] -= dt
+            if h["life"] <= 0:
+                continue
+            h["y"] -= h["vy"] * dt
+            h["x"] += h["vx"] * dt
+            alive.append(h)
+        self._hearts = alive
+
     def _camera_face_target(self) -> tuple[float, float] | None:
         """Retorna (ox, oy) alvo dos olhos baseado no maior rosto detectado."""
         if not self._camera_held:
@@ -252,6 +419,9 @@ class BMOFaceScreen:
             if r == "WINK_LEFT":  return ("WINK_LEFT", "SMILE", None)
             if r == "WINK_RIGHT": return ("WINK_RIGHT", "SMILE", None)
             if r == "SPEAK":      return ("DOT", self._speak_frame(), None)
+            if r == "LOVE":       return ("U_CLOSED", "SMILE", None)   # derretido (+ corações)
+            if r == "LAUGH":      return ("LINE", "SPEAK_BIG", None)   # gargalhada (+ tremor)
+            if r == "GRUMPY":     return ("DOT", "DASH", "FLAT")       # cutucaram o olho
         if self.state == "TRACKING":
             return ("DOT", "SMILE", None)
         if self.state == "IDLE_ANIM":
@@ -263,7 +433,10 @@ class BMOFaceScreen:
             if a == "SMILE":        return ("DOT", "SMILE", None)
             if a == "THINK":        return ("DOT", "SMILE", "FLAT")
             if a == "SPEAK":        return ("DOT", self._speak_frame(), None)
-        # IDLE default — referência: olhos preto-bolinha + sorrisinho em U
+            if a == "RESTING":      return ("U_CLOSED", "SMILE", None)  # olhos de descanso
+        # IDLE default — sonolento descansa os olhos; senão bolinha + sorrisinho
+        if self._mood == "sleepy":
+            return ("U_CLOSED", "DASH", None)
         return ("DOT", "SMILE", None)
 
     def _speak_frame(self) -> str:
@@ -287,12 +460,28 @@ class BMOFaceScreen:
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(BMO_GREEN)
         eye_style, mouth_style, eyebrow = self._current_expression()
-        bob = int(math.sin(self._t * 1.5) * 1.2)
+        # bob: amplitude cresce com a energia; rindo, treme rápido
+        amp = 1.0 + self._energy * 1.6
+        bob = int(math.sin(self._t * 1.5) * amp)
+        if self.reaction == "LAUGH" and self.state == "REACTING":
+            bob += int(math.sin(self._t * 26.0) * 2.0)
         self._draw_eyes(surface, eye_style, bob, eyebrow)
         self._draw_mouth(surface, mouth_style, bob)
+        self._draw_hearts(surface)
         # mini-clock no topo-centro (cor que combina com o verde)
         theme_state.draw_mini_clock(surface, LOGICAL_SIZE[0] // 2, 4, HINT)
         self._draw_menu_hint(surface)
+
+    def _draw_hearts(self, surface: pygame.Surface) -> None:
+        """Coraçõezinhos pixelados subindo (reação de carinho/cafuné)."""
+        for h in self._hearts:
+            x, y, s = int(h["x"]), int(h["y"]), int(h["size"])
+            col = (224, 90, 122)   # rosa avermelhado, contrasta com o verde
+            # dois círculos no topo + um triângulo embaixo = coração simples
+            pygame.draw.circle(surface, col, (x - s // 2, y), max(2, s // 2))
+            pygame.draw.circle(surface, col, (x + s // 2, y), max(2, s // 2))
+            pygame.draw.polygon(surface, col,
+                                [(x - s, y), (x + s, y), (x, y + s + 1)])
 
     def _draw_eyes(self, surface: pygame.Surface, style: str, bob: int, eyebrow: str | None) -> None:
         ox = int(round(self._eye_ox))

@@ -49,6 +49,9 @@ from bmo_os.services.gcalendar import CalendarService
 from bmo_os.services.gpio_button import GPIOButton
 from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.notifications import EventAlerter
+from bmo_os.services.pet_brain import PetBrain
+from bmo_os.services.pet_memory import PetMemory
+from bmo_os.services.pet_state import PetState
 from bmo_os.services.sysinfo import SysInfoService
 from bmo_os.services.todoist import TodoistService
 from bmo_os.services.tts import SCREEN_PHRASES, TTSService
@@ -76,9 +79,15 @@ def build_initial(app: App):
     pomodoro = PomodoroScreen(on_back=app.manager.pop, todoist=todoist)
     # Audição (wake word + Whisper). No PC degrada pra "indisponivel".
     voice = VoiceService()
+    # --- pet: estado emocional + memória + cérebro proativo (autossuficientes,
+    # NÃO dependem de câmera/mic). Tudo degrada sozinho se faltar algo. ---
+    pet = PetState()
+    memory = PetMemory()
+    brain = PetBrain(pet, sysinfo=sysinfo, calendar=calendar, todoist=todoist)
     # BMO responde via LLM (OpenRouter ou NVIDIA NIM — escolhível em SETTINGS->IA).
     # Degrada sem a chave do provedor ativo (OPENROUTER_API_KEY / NVIDIA_API_KEY).
-    chat = ChatService()
+    # memory dá contexto (nome/fatos) e histórico entre conversas.
+    chat = ChatService(memory=memory)
     # Voz do BMO (TTS): Edge TTS (Francisca pt-BR) por padrão — incorporado do
     # módulo de laboratório bmo_voz.py. Degrada sem edge-tts/internet.
     # Volume separado em SETTINGS->IA ("Voz BMO" = tts_volume); 0 = mudo.
@@ -122,6 +131,10 @@ def build_initial(app: App):
             ptt_button.close()
         except Exception:
             pass
+        try:
+            pet.flush()   # grava afeto/streak antes do execv (não perde o convívio)
+        except Exception:
+            pass
         # fecha o pin factory do gpiozero (libera todos os pinos)
         try:
             from gpiozero import Device
@@ -140,7 +153,8 @@ def build_initial(app: App):
 
     def _instantiate_ambient(mode):
         if mode == "face":
-            return BMOFaceScreen(on_open_home=open_home, camera=camera, tts=tts)
+            return BMOFaceScreen(on_open_home=open_home, camera=camera, tts=tts,
+                                 pet_state=pet)
         if mode == "pong":
             return PongAmbientScreen(on_open_home=open_home)
         if mode == "invaders":
@@ -316,7 +330,17 @@ def build_initial(app: App):
         cria tarefa no Todoist e/ou enfileira a navegação pra main thread."""
         if not (text and chat.available):
             return
-        chat.ask(text)   # atualiza last_msg / last_error / last_screen / last_task
+        # conversar conta como convívio (sobe afeto e tira o BMO da solidão)
+        try:
+            pet.touch("talk")
+        except Exception:
+            pass
+        mood = ""
+        try:
+            mood = pet.get().mood
+        except Exception:
+            pass
+        chat.ask(text, mood=mood)   # atualiza last_msg / last_error / last_screen / last_task
         screen_key = (getattr(chat, "last_screen", "") or "").strip()
         # Pediu pra IA ABRIR uma tela? Corta a resposta verbosa da LLM e usa a
         # frase de cache daquela tela (instantânea). A msg da LLM é ignorada.
@@ -335,6 +359,11 @@ def build_initial(app: App):
         if action is not None:
             voice_enqueue(action)
 
+    # Telas onde o BMO pode falar sozinho (ambientes/descanso) — nunca durante
+    # jogos ativos, menus ou suspensão (tela apagada).
+    TALKATIVE_SCREENS = (BMOFaceScreen, ClockScreen, PongAmbientScreen,
+                         SpaceInvadersAmbientScreen, ShufflingAmbientScreen)
+
     def frame_hook(_dt: float) -> None:
         # Roda todo frame (main thread).
         # 1) drena comandos de voz pendentes (a thread de voz só enfileira)
@@ -347,7 +376,20 @@ def build_initial(app: App):
                 fn()
             except Exception:
                 pass
-        # 2) se um evento está próximo, empilha a AlertScreen por cima de
+        # 2) proatividade: o BMO puxa conversa sozinho (com parcimônia), só em
+        # telas tagarelas e quando não está ocupado ouvindo/pensando/falando.
+        if config.get("pet_proactive"):
+            cur = app.manager.current
+            busy = (getattr(voice, "busy", False) or getattr(tts, "speaking", False)
+                    or (getattr(chat, "last_msg", "") or "").strip() == "...")
+            if isinstance(cur, TALKATIVE_SCREENS) and not busy:
+                try:
+                    phrase = brain.tick()
+                except Exception:
+                    phrase = None
+                if phrase:
+                    bmo_say(phrase)
+        # 3) se um evento está próximo, empilha a AlertScreen por cima de
         # qualquer tela (relógio, jogo, suspended...)
         if isinstance(app.manager.current, AlertScreen):
             return
@@ -366,6 +408,27 @@ def build_initial(app: App):
     ai_overlay = {"msg": "", "until": 0.0, "spoke_at": 0.0}
     RESP_SHOW_S = 7.0
 
+    def bmo_say(text: str, mood: str | None = None) -> None:
+        """BMO fala espontaneamente (proatividade): mostra no rodapé E fala, sem
+        duplicar com o auto-speak do overlay (marca ai_overlay['msg'] antes)."""
+        text = (text or "").strip()
+        if not text:
+            return
+        now = time.time()
+        ai_overlay["msg"] = text       # marca ANTES pra o overlay não re-falar
+        ai_overlay["until"] = now + RESP_SHOW_S
+        ai_overlay["spoke_at"] = now
+        try:
+            chat.last_msg = text       # o rodapé exibe via draw_voice_overlay
+        except Exception:
+            pass
+        if tts is not None:
+            try:
+                m = mood if mood is not None else pet.get().mood
+                tts.speak(text, mood=m)
+            except Exception:
+                pass
+
     def draw_voice_overlay(canvas) -> None:
         """Rodapé POR CIMA de qualquer tela: GRAVANDO / PENSANDO durante o
         push-to-talk e a resposta do BMO por alguns segundos depois."""
@@ -380,9 +443,14 @@ def build_initial(app: App):
             ai_overlay["until"] = now + RESP_SHOW_S
             # fala a resposta (conversa OU descrição de visão — ambas caem aqui).
             # speak() é não-bloqueante (fila/thread) e respeita o tts_volume.
+            # passa o humor do pet pra voz sair com a emoção certa (Edge dinâmico).
             if tts is not None:
                 try:
-                    tts.speak(msg)
+                    try:
+                        mood = pet.get().mood
+                    except Exception:
+                        mood = ""
+                    tts.speak(msg, mood=mood)
                     ai_overlay["spoke_at"] = now
                 except Exception:
                     pass
