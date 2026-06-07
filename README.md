@@ -16,8 +16,11 @@ escalada **2x** com nearest-neighbor pra preservar o look de pixel art.
   pequenos, clima top-esq (TEMP / UMID), data bot-dir, brackets nos 4 cantos e
   scanlines sutis. Tap → home.
 - **BMO FACE** — pet virtual procedural: olhos pretos, boquinha, expressões
-  (idle / blink / look / smile / think / speak), reage ao toque (HAPPY /
-  SURPRISED / WINK / SPEAK). Opcionalmente os olhos seguem **seu rosto de
+  (idle / blink / look / smile / think / speak / **dormindo com Zzz**), reage ao
+  toque (HAPPY / SURPRISED / WINK / SPEAK). **Carinho:** cafuné (vários toques
+  seguidos = olhos derretidos), long-press (segura parado = "ãh?"), cutucar o
+  olho (fica emburrado). As expressões e o ritmo mudam com o **humor** do pet
+  (ver seção "Pet virtual"). Opcionalmente os olhos seguem **seu rosto de
   verdade** via câmera (config `BMO TE VE`).
 - **PONG** — bot vs bot rodando no fundo, scores discretos nos cantos.
 - **INVADERS** — nave do BMO vagueia sozinha pelo espaço, caça inimigos
@@ -36,6 +39,10 @@ push-to-talk físico), sem precisar do botão GPIO.
   - **Space Invaders** — touch arrasta nave, auto-fire, 4 tipos de inimigos
     pixel-art coloridos, starfield, vidas, score, game over
   - **Pong** — player (touch arrasta paddle Y) vs bot. Primeiro a 7 pontos
+  - **Flappy** — passarinho minimalista: toque (ou A) bate asa contra a
+    gravidade pra passar pelos canos; +1 por cano, bateu = fim de jogo
+  - **Snake** — cobrinha em grade: vira por setas/botões **ou por toque**
+    (na direção do toque relativo à cabeça); come, cresce e acelera
 - **TASKS** — kanban Todoist 3 colunas (TO-DO / DOING / DONE):
   - Toque + arrasta cards entre colunas
   - Botão SYNC força refresh
@@ -97,12 +104,24 @@ BMO — todas as telas CRT respeitam isso, content e corners empurrados pra dent
   permite 1 captura por vez): monitor, wake e gravação se revezam, com retry ao
   abrir o stream.
 - **Chat (LLM)** — o BMO responde via **OpenRouter, NVIDIA NIM ou Grok** (escolha
-  em SETTINGS → IA). Pede um JSON `{"msg", "screen", "task"}` e, além de responder,
-  pode **abrir uma tela** ou **criar uma tarefa** no Todoist (ver seção "IA").
+  em SETTINGS → IA). Pede um JSON `{"msg", "screen", "task", "facts", "name"}` e,
+  além de responder, pode **abrir uma tela**, **criar uma tarefa** no Todoist e
+  **memorizar** fatos/seu nome. Mantém um **histórico curto** da conversa e injeta
+  o **humor** do pet pra colorir o tom (ver seções "IA" e "Pet virtual").
 - **Visão** — `chat.ask_vision`: manda a imagem da câmera (base64) pro modelo
   multimodal escolhido descrever. Botão **VER (VISÃO)** na tela TESTE.
 - **TTS (voz do BMO)** — Edge TTS (voz Francisca pt-BR) fala as respostas, com
-  **cache de frases fixas** pra latência ~zero (ver seção "IA").
+  **cache de frases fixas** pra latência ~zero. A voz das respostas livres ganha
+  **emoção conforme o humor** do pet (tom/velocidade) — ver seção "IA".
+- **Pet (humor + memória + cérebro)** — o que faz o BMO ser um *bicho de
+  estimação* e não só uma interface. **Autossuficiente: não depende de câmera nem
+  de mic.** Ver seção "Pet virtual".
+  - `pet_state.py` — humor (feliz/animado/sonolento/carente/entediado/amoroso),
+    energia (curva do horário) e **afeto + streak** de convívio, derivados de
+    hora, ociosidade e toques. Persiste em `bmo_pet.json`.
+  - `pet_memory.py` — lembra **nome e fatos** do usuário (`bmo_memory.json`).
+  - `pet_brain.py` — **proatividade**: o BMO puxa conversa sozinho (com
+    parcimônia/cooldowns) usando humor, agenda, tarefas e temperatura da Pi.
 - **Google Calendar** — `gcalendar.py`: lê eventos via iCal secreta (agenda
   privada) ou OAuth (Workspace). `notifications.py` dispara o alerta de evento.
 - **SysInfo** — telemetria de hardware (CPU/temp/memória) pra tela SISTEMA.
@@ -122,13 +141,15 @@ bmo_os/
     config.py          # defaults + load .env + persistência bmo_config.json
   screens/
     clock.py           # ambient: relógio P&B CRT
-    bmo_face.py        # ambient: pet procedural (camera-aware)
+    bmo_face.py        # ambient: pet procedural (humor + carinho + camera-aware)
     pong.py            # PongScreen (jogo) + PongAmbientScreen (bot vs bot)
     space_invaders.py  # SpaceInvadersScreen (jogo) + SpaceInvadersAmbientScreen
+    flappy.py          # FlappyScreen (passarinho: toque/A bate asa)
+    snake.py           # SnakeScreen (cobrinha: setas/botões ou toque)
     shuffler.py        # ShufflingAmbientScreen (cicla as 4 ambient)
     home.py            # carrossel SLEEP/GAMES/TASKS/AGENDA/FOCO/PHOTO/SISTEMA/TESTE/SETTINGS
     sleep.py           # tiles dos 5 ambient modes
-    games.py           # grid estilo celular (Space Invaders + Pong)
+    games.py           # grid estilo celular (Invaders + Pong + Flappy + Snake)
     tasks.py           # kanban Todoist 3 colunas (touch drag)
     agenda.py          # próximos eventos do Google Calendar
     pomodoro.py        # timer de foco por tarefa (FOCO)
@@ -151,8 +172,11 @@ bmo_os/
     camera.py          # picamera2 + cv2, refcount lazy (acquire/release) + capture_jpeg
     audio.py           # sons 8-bit gerados em runtime (numpy)
     voice.py           # mic + STT (Whisper local / API Groq) + push-to-talk + wake
-    chat.py            # LLM (OpenRouter/NVIDIA/Grok) -> JSON {msg,screen,task} + visão
-    tts.py             # voz do BMO: Edge TTS (Francisca pt-BR) > Piper > eSpeak + cache
+    chat.py            # LLM (OpenRouter/NVIDIA/Grok) -> JSON {msg,screen,task,facts,name} + visão
+    tts.py             # voz do BMO: Edge TTS (Francisca pt-BR) > Piper > eSpeak + cache + humor
+    pet_state.py       # humor/energia/afeto/streak do pet (bmo_pet.json) — sem hardware
+    pet_memory.py      # memória do usuário: nome + fatos (bmo_memory.json)
+    pet_brain.py       # proatividade: BMO puxa conversa sozinho (cooldowns)
     gpio_button.py     # botão físico de push-to-talk (gpiozero)
   assets/
     fonts/             # PressStart2P.ttf (ver "Fontes pixel" abaixo)
@@ -258,7 +282,11 @@ escrito sozinho — você não precisa editar à mão):
 - `event_warning_min` — antecedência do alerta da AGENDA
 - IA: `llm_provider` + `{openrouter,nvidia,grok}_model`; `vision_provider` +
   `*_vision_model`; `voice_enabled`, `mic_device`, `tts_volume`, `camera_face_tracking`
+- `pet_proactive` — BMO puxa conversa sozinho (ver "Pet virtual")
 - `todoist_token`, `todoist_project` — fallback se não tiver no env
+
+O **pet** mantém ainda dois arquivos próprios (criados sozinhos, gitignored):
+`bmo_pet.json` (humor/afeto/streak) e `bmo_memory.json` (nome + fatos do usuário).
 
 ## Todoist (kanban)
 
@@ -298,8 +326,9 @@ transcrito (STT) → o texto vai pro LLM → o BMO responde e age.
 
 **Telas/ações que o BMO pode disparar** (campo `screen`):
 `agenda`, `tarefas`, `foco`, `sistema`, `foto`, `jogos`, `pong`, `invaders`,
-`configuracoes`, `relogio`, `home`, `atualizar` (ou `none` pra só conversar).
-O campo `task` (texto) cria uma tarefa no Todoist. Ex.: *"abre o pong"*,
+`flappy`, `snake`, `configuracoes`, `relogio`, `home`, `atualizar` (ou `none` pra
+só conversar). O campo `task` (texto) cria uma tarefa no Todoist; `facts`/`name`
+alimentam a memória do pet. Ex.: *"abre o snake"*, *"bora voar"*,
 *"cria uma tarefa: comprar pão"*, *"se atualiza"*, *"que horas são?"*.
 
 > **Voz falada (TTS) — ATIVA.** O BMO fala as respostas (conversa e descrição de
@@ -341,6 +370,38 @@ XAI_API_KEY=xai-xxxx                    # Grok / xAI (console.x.ai)
 
 Sem a chave do provedor ativo o chat/visão fica indisponível (a tela TESTE
 mostra o erro). Sem mic/STT, o push-to-talk degrada e mostra "indisponivel".
+
+## Pet virtual (humor, memória, carinho)
+
+O BMO não é só uma interface: ele tem **estado emocional, memória e iniciativa**.
+Tudo isso é **modular e autossuficiente** — funciona sem câmera e sem microfone
+(esses entram só como *bônus* quando existem). Três serviços cuidam disso:
+
+**Humor + energia + afeto** (`pet_state.py`): o humor (feliz / animado /
+sonolento / carente / entediado / amoroso) é derivado de sinais que **sempre
+existem** — hora do dia, há quanto tempo ninguém interage, e os toques na tela.
+A energia segue uma curva do horário (manhã animado, madrugada molinho). O
+**afeto** sobe com carinho e a **streak** conta os dias seguidos de convívio.
+Persistido em `bmo_pet.json` (gitignored). O humor muda as **expressões e o ritmo**
+do BMO FACE e colore o **tom da voz/das respostas**.
+
+**Memória** (`pet_memory.py`): o BMO lembra do seu **nome** e de **fatos** que
+você contar ("gosta de café", "trabalha com X"). Ele extrai isso da conversa
+(campos `name`/`facts` do JSON) e injeta um resumo no próximo papo — então te
+chama pelo nome e referencia suas coisas. Guardado em `bmo_memory.json`
+(gitignored).
+
+**Proatividade** (`pet_brain.py`): de vez em quando o BMO **puxa conversa
+sozinho** — "você tem 2 compromissos hoje!", "tô ficando quentinho aqui...",
+"a gente se fala faz 3 dias seguidos!", ou só uma falinha fofa. Com **cooldowns**
+pra não cansar, e só em telas de descanso (nunca durante um jogo ou menu) e
+quando o BMO não está ocupado ouvindo/falando. Liga/desliga pela config
+`pet_proactive` (padrão ligado).
+
+**Carinho (toque):** cafuné (vários toques rápidos = derretido), long-press
+(segura parado = "ãh?") e cutucar o olho (fica emburrado). Tudo isso também
+alimenta o afeto. Sem câmera/mic, a interação por toque + humor + proatividade
+continua 100%.
 
 ## Câmera (AI Camera / IMX500)
 
@@ -426,8 +487,12 @@ canto superior esquerdo pra sair.
 - [ ] **V2.1** — input GPIO completo (D-pad + A/B/MENU) quando os botões chegarem
 - [x] **V2.2** — TTS (voz falada do BMO): Edge TTS / voz Francisca pt-BR
   (incorporado do lab `bmo_voz.py`), fala conversa + descrição de visão
-- [ ] **V2.3** — RetroArch launcher (subprocess) — Games vira lista de ROMs
-- [ ] **V2.4** — gestos de mão (MediaPipe Hands) pra controle sem toque
+- [x] **V2.3** — Pet vivo: humor/energia/afeto/streak (`pet_state`), memória do
+  usuário (`pet_memory`), proatividade (`pet_brain`); voz com emoção; carinho
+  (cafuné/long-press) + animação de dormir na BMO Face
+- [x] **V2.4** — Mais jogos: Flappy + Snake (minimalistas, touch + botões)
+- [ ] **V2.5** — RetroArch launcher (subprocess) — Games vira lista de ROMs
+- [ ] **V2.6** — gestos de mão (MediaPipe Hands) pra controle sem toque
 - [ ] **V3** — IMX500 native inference (objeto/pose direto no chip da câmera)
 - [ ] **V3** — sensores reais (DHT22/BME280 via I2C) em vez/além do clima online
 - [ ] **V3** — wake word offline ("BMO me ouve" sem push-to-talk)
