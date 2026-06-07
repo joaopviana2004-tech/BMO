@@ -36,7 +36,7 @@ REACTIONS = ["HAPPY", "SURPRISED", "WINK_LEFT", "WINK_RIGHT", "SPEAK"]
 IDLE_ANIMS = [
     "BLINK", "DOUBLE_BLINK",
     "LOOK_LEFT", "LOOK_RIGHT", "LOOK_UP",
-    "SMILE", "THINK", "SPEAK",
+    "SMILE", "THINK", "SPEAK", "SLEEP",
 ]
 
 REACTION_DURATION   = 1.6
@@ -50,12 +50,10 @@ TRACK_FACTOR   = 0.06
 # --- carinho / interação física ---
 TAP_BURST_WINDOW = 1.4      # janela (s) p/ contar toques seguidos = cafuné
 TAP_BURST_COUNT  = 3        # nº de toques rápidos que viram cafuné
-TICKLE_THRESHOLD = 240.0    # px acumulados de arrasto rápido = cócegas
-TICKLE_DECAY     = 220.0    # quão rápido a "energia de cócegas" esvai (px/s)
 LONG_PRESS_S     = 0.6      # segurar parado por isso = reação "ãh?"
 MOOD_REFRESH_S   = 0.4      # de quanto em quanto relê o humor do pet_state
 LOVE_DURATION    = 1.8
-LAUGH_DURATION   = 1.6
+SLEEP_DURATION   = 4.0      # cochilo aleatório dura mais que as outras idle anims
 
 
 def _to_logical(pos: tuple[int, int]) -> tuple[int, int]:
@@ -89,12 +87,9 @@ class BMOFaceScreen:
         self._t = 0.0
         # --- carinho / interação física ---
         self._tap_times: list[float] = []   # timestamps de toques (cafuné)
-        self._tickle = 0.0                  # energia acumulada de arrasto rápido
-        self._last_drag_pos: tuple[int, int] | None = None
         self._press_t: float | None = None  # quando o dedo encostou (long-press)
         self._press_pos: tuple[int, int] | None = None
         self._press_moved = False
-        self._hearts: list[dict] = []       # partículas de coraçãozinho (LOVE)
         # --- humor (lido do pet_state, em cache pra não pegar lock todo frame) ---
         self._mood = "happy"
         self._energy = 0.7
@@ -144,36 +139,22 @@ class BMOFaceScreen:
             self._press_t = self._t
             self._press_pos = _to_logical(event.pos)
             self._press_moved = False
-            self._last_drag_pos = self._press_pos
         elif event.type == pygame.MOUSEMOTION:
             if pygame.mouse.get_pressed()[0] and self.state == "TRACKING":
                 pos = _to_logical(event.pos)
                 self._touch_pos = pos
                 self._update_target_from_touch()
-                self._accumulate_tickle(pos)
+                # mexeu o dedo: cancela o long-press (deixa de ser "parado")
+                if self._press_pos is not None:
+                    dx = pos[0] - self._press_pos[0]
+                    dy = pos[1] - self._press_pos[1]
+                    if dx * dx + dy * dy > 16:
+                        self._press_moved = True
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             self._press_t = None
             self._press_pos = None
-            self._last_drag_pos = None
             if self.state == "TRACKING":
                 self._start_reaction()
-
-    def _accumulate_tickle(self, pos: tuple[int, int]) -> None:
-        """Arrasto rápido vira cócegas: acumula distância; ao passar do limiar,
-        BMO ri (uma vez, com cooldown via reação)."""
-        last = self._last_drag_pos
-        self._last_drag_pos = pos
-        if last is None:
-            return
-        dx, dy = pos[0] - last[0], pos[1] - last[1]
-        dist = (dx * dx + dy * dy) ** 0.5
-        if dist > 2:
-            self._press_moved = True
-        self._tickle += dist
-        if self._tickle >= TICKLE_THRESHOLD and self.reaction != "LAUGH":
-            self._tickle = 0.0
-            self._start_reaction(forced="LAUGH")
-            self._note_touch("tickle")
 
     def _handle_action(self, event) -> None:
         action = event.action
@@ -241,12 +222,7 @@ class BMOFaceScreen:
 
     def _start_reaction(self, *, forced: str | None = None) -> None:
         self.reaction = forced or random.choice(REACTIONS)
-        dur = REACTION_DURATION
-        if self.reaction == "LOVE":
-            dur = LOVE_DURATION
-            self._spawn_hearts()
-        elif self.reaction == "LAUGH":
-            dur = LAUGH_DURATION
+        dur = LOVE_DURATION if self.reaction == "LOVE" else REACTION_DURATION
         self.reaction_until = self._t + dur
         self.state = "REACTING"
         self._target_ox = 0.0
@@ -255,29 +231,19 @@ class BMOFaceScreen:
         if not self._is_speaking():
             audio.play_bmo_voice()
 
-    def _spawn_hearts(self) -> None:
-        """Solta uns coraçõezinhos subindo (reação de carinho)."""
-        for _ in range(5):
-            self._hearts.append({
-                "x": random.uniform(140, 260),
-                "y": random.uniform(120, 160),
-                "vy": random.uniform(18, 32),       # px/s subindo
-                "vx": random.uniform(-8, 8),
-                "life": random.uniform(1.1, 1.8),
-                "size": random.choice((4, 5, 6)),
-            })
-
     def _start_idle_anim(self) -> None:
-        # viés por humor: sonolento pisca/descansa; carente/entediado tagarela
+        # viés por humor: sonolento dorme/pisca; carente/entediado tagarela
         if self._mood == "sleepy":
-            self.idle_anim = random.choice(["BLINK", "DOUBLE_BLINK", "RESTING", "RESTING"])
+            self.idle_anim = random.choice(["SLEEP", "SLEEP", "BLINK", "RESTING"])
         elif self._mood in ("lonely", "bored"):
             self.idle_anim = random.choice(["SPEAK", "SPEAK", "LOOK_LEFT", "LOOK_RIGHT", "SMILE"])
         elif self._mood == "excited":
             self.idle_anim = random.choice(["SPEAK", "SMILE", "LOOK_UP", "DOUBLE_BLINK"])
         else:
             self.idle_anim = random.choice(IDLE_ANIMS)
-        self.idle_anim_until = self._t + IDLE_ANIM_DURATION
+        # o cochilo dura mais que as outras animações idle
+        dur = SLEEP_DURATION if self.idle_anim == "SLEEP" else IDLE_ANIM_DURATION
+        self.idle_anim_until = self._t + dur
         self.state = "IDLE_ANIM"
         # tagarela quando entra em SPEAK idle (silencia se o TTS está falando)
         if self.idle_anim == "SPEAK" and not self._is_speaking():
@@ -294,10 +260,6 @@ class BMOFaceScreen:
         self._sync_camera_hold()
         self._refresh_mood()
         self._update_presence()
-        self._update_hearts(dt)
-        # cócegas: energia de arrasto esvai com o tempo
-        if self._tickle > 0:
-            self._tickle = max(0.0, self._tickle - TICKLE_DECAY * dt)
         # long-press: dedo parado pressionado vira reação "ãh?"
         if (self._press_t is not None and not self._press_moved
                 and self.state == "TRACKING"
@@ -376,19 +338,6 @@ class BMOFaceScreen:
         except Exception:
             pass
 
-    def _update_hearts(self, dt: float) -> None:
-        if not self._hearts:
-            return
-        alive = []
-        for h in self._hearts:
-            h["life"] -= dt
-            if h["life"] <= 0:
-                continue
-            h["y"] -= h["vy"] * dt
-            h["x"] += h["vx"] * dt
-            alive.append(h)
-        self._hearts = alive
-
     def _camera_face_target(self) -> tuple[float, float] | None:
         """Retorna (ox, oy) alvo dos olhos baseado no maior rosto detectado."""
         if not self._camera_held:
@@ -419,8 +368,7 @@ class BMOFaceScreen:
             if r == "WINK_LEFT":  return ("WINK_LEFT", "SMILE", None)
             if r == "WINK_RIGHT": return ("WINK_RIGHT", "SMILE", None)
             if r == "SPEAK":      return ("DOT", self._speak_frame(), None)
-            if r == "LOVE":       return ("U_CLOSED", "SMILE", None)   # derretido (+ corações)
-            if r == "LAUGH":      return ("LINE", "SPEAK_BIG", None)   # gargalhada (+ tremor)
+            if r == "LOVE":       return ("U_CLOSED", "SMILE", None)   # derretido (cafuné)
             if r == "GRUMPY":     return ("DOT", "DASH", "FLAT")       # cutucaram o olho
         if self.state == "TRACKING":
             return ("DOT", "SMILE", None)
@@ -434,6 +382,7 @@ class BMOFaceScreen:
             if a == "THINK":        return ("DOT", "SMILE", "FLAT")
             if a == "SPEAK":        return ("DOT", self._speak_frame(), None)
             if a == "RESTING":      return ("U_CLOSED", "SMILE", None)  # olhos de descanso
+            if a == "SLEEP":        return ("U_CLOSED", "DASH", None)   # cochilando (+ Zzz)
         # IDLE default — sonolento descansa os olhos; senão bolinha + sorrisinho
         if self._mood == "sleepy":
             return ("U_CLOSED", "DASH", None)
@@ -460,28 +409,34 @@ class BMOFaceScreen:
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(BMO_GREEN)
         eye_style, mouth_style, eyebrow = self._current_expression()
-        # bob: amplitude cresce com a energia; rindo, treme rápido
-        amp = 1.0 + self._energy * 1.6
-        bob = int(math.sin(self._t * 1.5) * amp)
-        if self.reaction == "LAUGH" and self.state == "REACTING":
-            bob += int(math.sin(self._t * 26.0) * 2.0)
+        # bob: amplitude cresce com a energia; cochilando, respira bem devagar
+        sleeping = self.state == "IDLE_ANIM" and self.idle_anim == "SLEEP"
+        if sleeping:
+            bob = int(math.sin(self._t * 0.8) * 1.2)
+        else:
+            amp = 1.0 + self._energy * 1.6
+            bob = int(math.sin(self._t * 1.5) * amp)
         self._draw_eyes(surface, eye_style, bob, eyebrow)
         self._draw_mouth(surface, mouth_style, bob)
-        self._draw_hearts(surface)
+        if sleeping:
+            self._draw_sleep_zzz(surface)
         # mini-clock no topo-centro (cor que combina com o verde)
         theme_state.draw_mini_clock(surface, LOGICAL_SIZE[0] // 2, 4, HINT)
         self._draw_menu_hint(surface)
 
-    def _draw_hearts(self, surface: pygame.Surface) -> None:
-        """Coraçõezinhos pixelados subindo (reação de carinho/cafuné)."""
-        for h in self._hearts:
-            x, y, s = int(h["x"]), int(h["y"]), int(h["size"])
-            col = (224, 90, 122)   # rosa avermelhado, contrasta com o verde
-            # dois círculos no topo + um triângulo embaixo = coração simples
-            pygame.draw.circle(surface, col, (x - s // 2, y), max(2, s // 2))
-            pygame.draw.circle(surface, col, (x + s // 2, y), max(2, s // 2))
-            pygame.draw.polygon(surface, col,
-                                [(x - s, y), (x + s, y), (x, y + s + 1)])
+    def _draw_sleep_zzz(self, surface: pygame.Surface) -> None:
+        """Três 'z' subindo na diagonal acima do BMO — sinal de cochilo."""
+        base_x, base_y = RIGHT_EYE[0] + 28, RIGHT_EYE[1] - 18
+        for i in range(3):
+            # cada 'z' sobe/aparece em ciclo, defasado pelo índice
+            phase = (self._t * 0.8 - i * 0.45) % 2.4
+            if phase > 1.6:           # pausa entre as repetições
+                continue
+            rise = int(phase * 10)
+            x = base_x + i * 9 + int(math.sin(self._t * 2 + i) * 2)
+            y = base_y - i * 9 - rise
+            img = render_text("z", 8 + i * 2, BLACK)
+            surface.blit(img, img.get_rect(center=(x, y)))
 
     def _draw_eyes(self, surface: pygame.Surface, style: str, bob: int, eyebrow: str | None) -> None:
         ox = int(round(self._eye_ox))
