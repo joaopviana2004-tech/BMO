@@ -8,8 +8,12 @@ Pré-requisito (.env):
     GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET — credencial OAuth do tipo
     "TVs and Limited Input devices" (console.cloud.google.com, Drive API on).
 
-Escopos: openid/email/profile (identidade do perfil) + drive.file (pasta
-Bimo/ no Drive do usuário — preferências hoje; áudios/.md no futuro).
+Escopos: openid/email/profile (identidade do perfil) + drive.file. O Google
+NÃO permite o escopo completo do Drive no device flow — pra isso existe o
+PAREAMENTO PELO PC (scripts/bimo_drive_login.py + services/pairing.py), que
+entrega tokens de Drive completo emitidos por um client "Desktop". Esses
+tokens trazem client_id/client_secret embutidos no tokens.json, e o refresh
+usa a credencial que emitiu o token (ver _refresh_unlocked).
 
 Duas peças:
     DeviceFlow   — thread do fluxo de login (request_code -> polling).
@@ -223,10 +227,14 @@ class Credentials:
             return self._refresh_unlocked()
 
     def _refresh_unlocked(self) -> str:
+        # tokens do pareamento PC trazem o client que os emitiu (Desktop);
+        # tokens do QR usam o client TV do .env. Refresh exige o MESMO client.
+        cid = self._data.get("client_id") or client_id()
+        csec = self._data.get("client_secret") or client_secret()
         try:
             tok = _post(TOKEN_URL, {
-                "client_id": client_id(),
-                "client_secret": client_secret(),
+                "client_id": cid,
+                "client_secret": csec,
                 "refresh_token": self._data["refresh_token"],
                 "grant_type": "refresh_token",
             })

@@ -60,6 +60,7 @@ from bmo_os.services.gpio_button import GPIOButton
 from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.knowledge import KnowledgeService
 from bmo_os.services.notifications import EventAlerter
+from bmo_os.services.pairing import PairingServer, local_ip
 from bmo_os.services.pet_brain import PetBrain
 from bmo_os.services.recorder import RecorderService
 from bmo_os.services.pet_memory import PetMemory
@@ -82,19 +83,43 @@ def show_toast(msg: str) -> None:
     _toast["until"] = time.time() + 4.0
 
 
+# Pareamento pelo PC (Drive COMPLETO): a thread HTTP do PairingServer
+# enfileira aqui; o main thread aplica via _drain_pair (troca de tela e de
+# tokens não pode acontecer fora dele).
+_pair_queue: list = []
+_pair_lock = threading.Lock()
+_pair_apply = {"fn": None}   # definido em main() (precisa de app/_after_login)
+
+
+def _on_pair_request(user: dict, tokens: dict) -> None:
+    with _pair_lock:
+        _pair_queue.append((user, tokens))
+
+
+def _drain_pair() -> None:
+    with _pair_lock:
+        item = _pair_queue.pop(0) if _pair_queue else None
+    if item is not None and _pair_apply["fn"] is not None:
+        try:
+            _pair_apply["fn"](*item)
+        except Exception:
+            pass
+
+
 def _apply_profile_volume() -> None:
     audio.set_volume((config.get("volume") or 100) / 100)
 
 
 def start_drive_sync() -> None:
     """Liga o espelhamento do perfil ativo no Drive: preferências
-    (bmo_config.json) + áudios offline-first (Sync & Destroy).
+    (bmo_config.json) + áudios offline-first (Sync & Destroy) + conhecimento.
 
-    No-op pra convidado, sem sessão ou sem credencial de app — o Bimo segue
-    100% local nesses casos.
+    No-op pra convidado ou sem sessão — o Bimo segue 100% local. Tokens do
+    pareamento PC trazem o client embutido, então funciona até sem
+    GOOGLE_CLIENT_ID no .env do aparelho.
     """
     prof = session.current()
-    if not prof or session.is_guest() or not google_auth.available():
+    if not prof or session.is_guest():
         return
     creds = google_auth.Credentials(session.tokens_path(prof["sub"]))
     if not creds.ok:
@@ -488,6 +513,8 @@ def build_initial(app: App):
 
     def frame_hook(_dt: float) -> None:
         # Roda todo frame (main thread).
+        # 0) pareamento pelo PC pendente (tokens de Drive completo)
+        _drain_pair()
         # 1) drena comandos de voz pendentes (a thread de voz só enfileira)
         while True:
             with voice_lock:
@@ -648,14 +675,50 @@ def main() -> None:
 
     app = App(fullscreen=args.fullscreen)
 
+    def _after_login() -> None:
+        _apply_profile_volume()   # volume/brilho/tema do perfil valem já
+        start_drive_sync()
+        app.manager.replace(build_initial(app))
+
+    # Pareamento pelo PC (scripts/bimo_drive_login.py): recebe tokens com
+    # Drive COMPLETO pela rede local — o QR (device flow) é limitado pelo
+    # Google ao drive.file, que não enxerga a vault sincada pelo Drive Desktop.
+    def _apply_pair(user: dict, tokens: dict) -> None:
+        prof = session.current()
+        if prof is None:
+            # estava na tela LOGIN: o pareamento é o próprio login
+            session.login(user, tokens)
+            _after_login()
+            show_toast(f"Drive completo: {user.get('email', '')}")
+            return
+        if session.is_guest():
+            show_toast("Saia do modo convidado (SETTINGS) e pareie de novo")
+            return
+        if prof.get("sub") != user.get("sub"):
+            show_toast("Conta diferente da sessao — troque o usuario antes")
+            return
+        # mesma conta: troca os tokens (drive.file -> drive completo) e
+        # religa o sync, que já enxerga o Drive inteiro
+        svc = _drive_sync.get("svc")
+        if svc is not None:
+            try:
+                svc.stop()
+            except Exception:
+                pass
+            _drive_sync["svc"] = None
+        google_auth.Credentials.save_initial(
+            session.tokens_path(prof["sub"]), tokens)
+        config.on_change = None
+        start_drive_sync()
+        show_toast("Drive completo conectado!")
+
+    _pair_apply["fn"] = _apply_pair
+    pairing = PairingServer(on_pair=_on_pair_request)
+    pairing.start()
+
     if session.current() is None and google_auth.available():
         # sem sessão: tela de LOGIN (QR + device flow) antes de tudo.
         # Os serviços (threads, câmera, TTS...) só sobem APÓS o login.
-        def _after_login() -> None:
-            _apply_profile_volume()   # volume/brilho/tema do perfil valem já
-            start_drive_sync()
-            app.manager.replace(build_initial(app))
-
         def _on_success(user: dict, tokens: dict) -> None:
             session.login(user, tokens)
             _after_login()
@@ -664,7 +727,10 @@ def main() -> None:
             session.login_guest()
             _after_login()
 
-        initial = LoginScreen(on_success=_on_success, on_guest=_on_guest)
+        initial = LoginScreen(on_success=_on_success, on_guest=_on_guest,
+                              pair_ip=local_ip())
+        # build_initial ainda não rodou: drena o pareamento por aqui
+        app.frame_hook = lambda _dt: _drain_pair()
     else:
         # sessão ativa (reboot) OU sem GOOGLE_CLIENT_ID (modo legado local)
         start_drive_sync()

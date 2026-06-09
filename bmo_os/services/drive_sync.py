@@ -20,11 +20,13 @@
    os arquivos esperam quietos. on_event(msg) avisa a UI.
 
 3) SEGUNDO CÉREBRO (espelho Bimo/Conhecimento -> knowledge/ local): baixa
-   só o que mudou (md5); remove local o que sumiu do Drive — o Drive é a
-   fonte da verdade. A tela CEREBRO lê daí. Quem ALIMENTA a pasta é o
-   scripts/bimo_pc_sync.py rodando no PC (espelha a vault do Obsidian).
-   OBS (escopo drive.file): o app só enxerga arquivos criados pelo PRÓPRIO
-   app — por isso o uploader do PC usa o mesmo GOOGLE_CLIENT_ID.
+   só o que mudou (md5), descendo recursivo nas subpastas da vault; remove
+   local o que sumiu do Drive — o Drive é a fonte da verdade. A tela
+   CEREBRO lê daí.
+   ESCOPO: com o PAREAMENTO PELO PC (scripts/bimo_drive_login.py) o token
+   tem Drive COMPLETO — basta colocar a vault do Obsidian dentro de
+   Bimo/Conhecimento no "Google Drive para Desktop" que o Bimo enxerga.
+   Com login só por QR (drive.file), use scripts/bimo_pc_sync.py no PC.
 
 4) flush(): sync síncrono de tudo — usado no logout (backup final antes
    do wipe) e no desligamento.
@@ -409,23 +411,38 @@ class DriveSync:
         return self._folder(FOLDER_NAME, KNOWLEDGE_FOLDER_NAME)
 
     def _list_remote_notes(self, folder: str) -> list[dict] | None:
-        """Todos os .md de Bimo/Conhecimento ({id,name,md5Checksum}). Paginado."""
+        """Todos os .md de Bimo/Conhecimento ({id,name,md5Checksum}), descendo
+        RECURSIVO nas subpastas — vault do Obsidian tem hierarquia. Pula
+        pastas ocultas (.obsidian, .trash...). Paginado."""
         out: list[dict] = []
-        token = ""
-        while True:
-            q = urllib.parse.quote(f"'{folder}' in parents and trashed=false")
-            url = (f"{FILES_URL}?q={q}&pageSize=1000"
-                   "&fields=nextPageToken,files(id,name,md5Checksum)")
-            if token:
-                url += f"&pageToken={token}"
-            page = self._request(url)
-            if page is None:
-                return None
-            out.extend(f for f in page.get("files", [])
-                       if f.get("name", "").endswith(".md"))
-            token = page.get("nextPageToken", "")
-            if not token:
-                return out
+        queue = [folder]
+        seen: set = set()
+        while queue:
+            fid = queue.pop(0)
+            if fid in seen:
+                continue
+            seen.add(fid)
+            token = ""
+            while True:
+                q = urllib.parse.quote(f"'{fid}' in parents and trashed=false")
+                url = (f"{FILES_URL}?q={q}&pageSize=1000"
+                       "&fields=nextPageToken,files(id,name,md5Checksum,mimeType)")
+                if token:
+                    url += f"&pageToken={token}"
+                page = self._request(url)
+                if page is None:
+                    return None
+                for f in page.get("files", []):
+                    name = f.get("name", "")
+                    if f.get("mimeType") == FOLDER_MIME:
+                        if not name.startswith("."):
+                            queue.append(f["id"])
+                    elif name.endswith(".md"):
+                        out.append(f)
+                token = page.get("nextPageToken", "")
+                if not token:
+                    break
+        return out
 
     def _sync_knowledge(self) -> None:
         """Espelha o Drive na pasta local: baixa novo/mudado, apaga o que sumiu.
@@ -448,6 +465,8 @@ class DriveSync:
         remote_names = set()
         for f in remote:
             name = f["name"]
+            if name in remote_names:
+                continue   # nome duplicado em subpastas: fica o primeiro
             remote_names.add(name)
             local = self.knowledge_dir / name
             if local.exists():
