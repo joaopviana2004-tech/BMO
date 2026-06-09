@@ -56,6 +56,9 @@ class RecorderScreen:
         r.center = (LOGICAL_SIZE[0] // 2, 112)
         return r
 
+    def _back_btn(self) -> pygame.Rect:
+        return pygame.Rect(SAFE_INSET, SAFE_INSET, 52, 16)
+
     # ---------- input ----------
 
     def handle_event(self, event: pygame.event.Event) -> None:
@@ -64,11 +67,14 @@ class RecorderScreen:
         a = event.action
         if a == bmo_input.Action.A:
             self._toggle()
-        elif a == bmo_input.Action.B:
+        elif a in (bmo_input.Action.B, bmo_input.Action.MENU):
             audio.play("back")
             self.on_back()
         elif a == bmo_input.Action.TAP and getattr(event, "pos", None):
-            if self._rec_rect.inflate(20, 20).collidepoint(event.pos):
+            if self._back_btn().collidepoint(event.pos):
+                audio.play("back")
+                self.on_back()
+            elif self._rec_rect.inflate(20, 20).collidepoint(event.pos):
                 self._toggle()
 
     def _toggle(self) -> None:
@@ -89,6 +95,7 @@ class RecorderScreen:
         draw_crt_corners(surface, margin=SAFE_INSET)
         theme_state.draw_status_bar(surface, top_pad=SAFE_INSET + 4,
                                     right_pad=SAFE_INSET + 4)
+        self._draw_back_btn(surface)
         title = render_text("GRAVADOR", 10, CRT_DIM)
         surface.blit(title, title.get_rect(midtop=(LOGICAL_SIZE[0] // 2, SAFE_INSET + 6)))
 
@@ -145,3 +152,15 @@ class RecorderScreen:
             img = render_text(text, 8, color, pixel=False)
             surface.blit(img, img.get_rect(midbottom=(cx, y)))
             y -= 12
+
+    def _draw_back_btn(self, surface: pygame.Surface) -> None:
+        rect = self._back_btn()
+        pygame.draw.rect(surface, CRT_BLACK, rect)
+        pygame.draw.rect(surface, CRT_WHITE, rect, 1)
+        pygame.draw.polygon(surface, CRT_WHITE, [
+            (rect.left + 6, rect.centery - 3),
+            (rect.left + 6, rect.centery + 3),
+            (rect.left + 3, rect.centery),
+        ])
+        img = render_text("MENU", 8, CRT_WHITE, pixel=False)
+        surface.blit(img, img.get_rect(midleft=(rect.left + 12, rect.centery)))

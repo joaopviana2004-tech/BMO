@@ -58,14 +58,18 @@ def _make_qr_surface(data: str, target_px: int) -> pygame.Surface | None:
 class LoginScreen:
     preferred_fps = 15   # tela quase estática; poupa CPU/bateria
 
-    def __init__(self, *, on_success, on_guest, pair_ip: str = "") -> None:
+    def __init__(self, *, on_success, on_guest, pair_ip: str = "",
+                 guest_label: str = "USAR SEM CONTA") -> None:
         """on_success(user, tokens) — conta autorizada; on_guest() — sem conta.
 
         pair_ip: IP do Bimo na LAN — mostra a dica do pareamento pelo PC
-        (scripts/bimo_drive_login.py), que dá Drive COMPLETO ao Bimo."""
+        (scripts/bimo_drive_login.py), que dá Drive COMPLETO ao Bimo.
+        guest_label: texto do botão de saída (vira "VOLTAR" quando a tela é
+        aberta por cima do SETTINGS pra conectar uma conta)."""
         self.on_success = on_success
         self.on_guest = on_guest
         self.pair_ip = pair_ip
+        self.guest_label = guest_label
         self.flow = google_auth.DeviceFlow()
         self._qr_surf: pygame.Surface | None = None
         self._qr_for = ""      # url que gerou o QR cacheado
@@ -162,7 +166,7 @@ class LoginScreen:
             self._draw_button(surface, self._retry_rect, "TENTAR DE NOVO")
 
         if not self._done and state != "success":
-            self._draw_button(surface, self._guest_rect, "USAR SEM CONTA")
+            self._draw_button(surface, self._guest_rect, self.guest_label)
             if self.pair_ip:
                 hint = render_text(
                     f"PELO PC (drive completo): bimo_drive_login.py {self.pair_ip}",

@@ -134,11 +134,14 @@ class BrainScreen:
 
     # ---------- input ----------
 
+    def _back_btn(self) -> pygame.Rect:
+        return pygame.Rect(SAFE_INSET, SAFE_INSET, 52, 16)
+
     def handle_event(self, event: pygame.event.Event) -> None:
         if event.type != bmo_input.ACTION_EVENT:
             return
         a = event.action
-        if a == bmo_input.Action.B:
+        if a in (bmo_input.Action.B, bmo_input.Action.MENU):
             audio.play("back")
             self.on_back()
         elif a in (bmo_input.Action.LEFT, bmo_input.Action.RIGHT) and self._order:
@@ -155,7 +158,11 @@ class BrainScreen:
                 audio.play("select")
                 sync.request_knowledge_sync()
         elif a == bmo_input.Action.TAP and getattr(event, "pos", None):
-            self._tap(event.pos)
+            if self._back_btn().collidepoint(event.pos):
+                audio.play("back")
+                self.on_back()
+            else:
+                self._tap(event.pos)
 
     def _tap(self, pos) -> None:
         best, best_d = "", 18.0   # raio de toque generoso
@@ -229,6 +236,7 @@ class BrainScreen:
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(MX_BG)
         draw_scanlines(surface)
+        self._draw_back_btn(surface)
         title = render_text("SEGUNDO CEREBRO", 10, MX_MID)
         surface.blit(title, title.get_rect(midtop=(LOGICAL_SIZE[0] // 2, SAFE_INSET)))
 
@@ -267,6 +275,18 @@ class BrainScreen:
         if self._selected and self._selected in self._bodies:
             self._draw_selection(surface, g)
         self._draw_footer(surface, g)
+
+    def _draw_back_btn(self, surface) -> None:
+        rect = self._back_btn()
+        pygame.draw.rect(surface, MX_BG, rect)
+        pygame.draw.rect(surface, MX_MID, rect, 1)
+        pygame.draw.polygon(surface, MX_BRIGHT, [
+            (rect.left + 6, rect.centery - 3),
+            (rect.left + 6, rect.centery + 3),
+            (rect.left + 3, rect.centery),
+        ])
+        img = render_text("MENU", 8, MX_BRIGHT, pixel=False)
+        surface.blit(img, img.get_rect(midleft=(rect.left + 12, rect.centery)))
 
     def _draw_selection(self, surface, g) -> None:
         b = self._bodies[self._selected]

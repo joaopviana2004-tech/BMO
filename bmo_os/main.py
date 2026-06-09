@@ -389,6 +389,24 @@ def build_initial(app: App):
         pygame.quit()
         os.execv(sys.executable, [sys.executable, *sys.argv])
 
+    def do_connect() -> None:
+        """SETTINGS -> CONTA -> "Conectar conta": abre o LOGIN (QR) por cima.
+
+        É a saída do modo local/convidado (e serve pra trocar de conta SEM
+        wipe — o perfil anterior fica guardado). No sucesso, ativa o perfil
+        novo e reinicia limpo via execv: o processo novo já boota logado."""
+        def _ok(user: dict, tokens: dict) -> None:
+            session.login(user, tokens)
+            try:
+                cleanup_hardware()
+            except Exception:
+                pass
+            pygame.quit()
+            os.execv(sys.executable, [sys.executable, *sys.argv])
+
+        app.manager.push(LoginScreen(on_success=_ok, on_guest=app.manager.pop,
+                                     pair_ip=local_ip(), guest_label="VOLTAR"))
+
     def make_settings() -> SettingsScreen:
         return SettingsScreen(
             on_back=app.manager.pop,
@@ -398,6 +416,7 @@ def build_initial(app: App):
             on_cleanup=cleanup_hardware,
             tts=tts,
             on_logout=do_logout,
+            on_connect=do_connect,
         )
 
     # ---- comandos de voz -> navegação (executados no main thread) ----

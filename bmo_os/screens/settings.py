@@ -129,6 +129,9 @@ def _conta_items():
     return [
         # 'info' = linha somente-leitura (mostra a conta logada)
         {"type": "info", "key": "account", "label": "Conta"},
+        # abre o LOGIN (QR) por cima — conecta/troca a conta SEM wipe.
+        # É a saída do modo local/convidado sem precisar de logout.
+        {"type": "action", "key": "connect", "label": "Conectar conta"},
         {"type": "action", "key": "logout", "label": "Trocar usuario"},
     ]
 
@@ -159,7 +162,8 @@ class SettingsScreen:
     voice_announce = "Aqui estão as configurações!"   # BMO anuncia ao abrir (cacheado)
 
     def __init__(self, *, on_back, on_open, on_change=None, mic_options=None,
-                 on_cleanup=None, tts=None, on_logout=None) -> None:
+                 on_cleanup=None, tts=None, on_logout=None,
+                 on_connect=None) -> None:
         self.on_back = on_back
         self.on_open = on_open          # push de uma sub-tela
         self.on_change = on_change
@@ -167,6 +171,7 @@ class SettingsScreen:
         self.on_cleanup = on_cleanup    # libera hardware antes do restart/desligar
         self.tts = tts                  # serviço de voz (pra ação "Gerar vozes")
         self.on_logout = on_logout      # Wipe & Load (main.do_logout)
+        self.on_connect = on_connect    # abre o LOGIN QR por cima (main.do_connect)
         self._index = 0
         self._rows = [label for label, _ in CATEGORIES] + ["Voltar"]
 
@@ -205,6 +210,7 @@ class SettingsScreen:
             title=label, items=items_fn(), on_back=self.on_back,
             on_change=self.on_change, mic_options=self.mic_options,
             on_cleanup=self.on_cleanup, tts=self.tts, on_logout=self.on_logout,
+            on_connect=self.on_connect,
         ))
 
     def update(self, dt: float) -> None: ...
@@ -246,7 +252,8 @@ class SettingsScreen:
 
 class SettingsListScreen:
     def __init__(self, *, title, items, on_back, on_change=None, mic_options=None,
-                 on_cleanup=None, tts=None, on_logout=None) -> None:
+                 on_cleanup=None, tts=None, on_logout=None,
+                 on_connect=None) -> None:
         self.title = title
         self.items = items
         self.on_back = on_back
@@ -255,6 +262,7 @@ class SettingsListScreen:
         self.on_cleanup = on_cleanup
         self.tts = tts
         self.on_logout = on_logout
+        self.on_connect = on_connect
         self._index = 0
         self._status = ""
         self._action = None
@@ -375,6 +383,12 @@ class SettingsListScreen:
             else:
                 self._shutdown_confirm_until = self._t + SHUTDOWN_CONFIRM_S
                 self._status = "Toque DESLIGAR de novo p/ confirmar"
+        elif key == "connect":
+            audio.play("select")
+            if self.on_connect is None:
+                self._status = "Indisponivel nesta build"
+            else:
+                self.on_connect()   # LOGIN QR por cima; sucesso reinicia logado
         elif key == "logout":
             audio.play("select")
             if self.on_logout is None:
