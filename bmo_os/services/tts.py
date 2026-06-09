@@ -14,9 +14,16 @@ Env:
     BMO_TTS_EDGE_VOICE   (default pt-BR-FranciscaNeural; tb AntonioNeural/ThalitaNeural)
     BMO_TTS_EDGE_RATE / BMO_TTS_EDGE_PITCH / BMO_TTS_EDGE_VOLUME
 
-Sintetiza num arquivo temporário e toca pelo **mixer do pygame** (respeita o
-volume da config `tts_volume`, sem disputar o device). Fala em thread (fila) —
-`speak()` não bloqueia o render loop. Degrada: sem backend, `available=False`.
+REPRODUÇÃO (refatorada): o áudio é decodificado INTEIRO pra memória
+(pygame.Sound) e tocado no CANAL DE VOZ reservado do mixer único
+(services/audio.py). Nada de streaming (mixer.music) nem player externo
+(mpg123) — eram as causas de fala começando pela metade, volume errado e
+efeitos mudos no Pi (2º handle de ALSA disputando o device). O player
+externo sobrou apenas como último recurso se nenhum decoder existir.
+Frases cacheadas ficam decodificadas em RAM (toque instantâneo).
+Ganho extra da voz: BMO_TTS_GAIN no .env (ex: 1.4 = +40%, com clip seguro).
+Fala em thread (fila) — `speak()` não bloqueia o render loop. Degrada: sem
+backend, `available=False`.
 
 --- Piper (recomendado: voz pt-BR natural) ---
 Setup no Pi:
@@ -55,6 +62,7 @@ import numpy as np
 import pygame
 
 from ..core import config
+from . import audio
 
 # Edge TTS é opcional (precisa de internet). Sem a lib, cai pra piper/espeak.
 try:
@@ -131,7 +139,12 @@ MOOD_VOICE = {
     "bored":   ("+0%",  "+8Hz"),
     "sleepy":  ("-10%", "+2Hz"),    # devagar, grave
 }
-# Players de MP3 externos (fallback se o mixer do pygame não decodificar MP3).
+# Ganho de software da voz (1.0 = neutro). >1 deixa a fala mais alta que o
+# que o Edge entrega (clip seguro). Só afeta a VOZ, não os efeitos.
+TTS_GAIN = float(os.environ.get("BMO_TTS_GAIN", "1.0") or 1.0)
+
+# Players de MP3 externos — APENAS último recurso (sem SDL com mp3 e sem
+# ffmpeg/mpg123 pra decodificar). Caminho normal nunca passa por aqui.
 _MP3_PLAYERS = ["mpg123", "ffplay", "cvlc", "mpv"]
 
 # ----- Cache de frases fixas (tocam direto do disco, sem rede = instantâneo) -----
@@ -241,6 +254,9 @@ class TTSService:
         self._lock = threading.Lock()
         # frases conhecidas (já limpas) que ficam em cache no disco
         self._canon = {clean_for_tts(p, strip_accents=False) for p in CACHE_PHRASES}
+        # frases fixas DECODIFICADAS em RAM (mp3 path -> Sound): tocar uma
+        # frase cacheada vira só um channel.play() — instantâneo de verdade
+        self._snd_cache: dict = {}
         # estado da geração do cache (pra tela SETTINGS mostrar)
         self.cache_building = False
         self.cache_status = ""
@@ -291,7 +307,8 @@ class TTSService:
         self._q.put((text, (mood or "").strip().lower()))
 
     def stop(self) -> None:
-        """Esvazia a fila e corta a fala atual."""
+        """Esvazia a fila e corta a fala atual. SÓ a voz — os efeitos sonoros
+        continuam (antes era pygame.mixer.stop(), que calava tudo)."""
         try:
             while True:
                 self._q.get_nowait()
@@ -303,14 +320,7 @@ class TTSService:
                     self._proc.terminate()
                 except Exception:
                     pass
-        try:
-            pygame.mixer.stop()
-        except Exception:
-            pass
-        try:
-            pygame.mixer.music.stop()   # corta o MP3 do Edge, se estiver tocando
-        except Exception:
-            pass
+        audio.stop_voice()
 
     # ---------- worker ----------
 
@@ -447,12 +457,12 @@ class TTSService:
         # 1) já cacheado: toca direto (instantâneo, sem rede) e NÃO apaga.
         # (Cache usa a prosódia PADRÃO — humor não muda frases fixas.)
         if path.exists() and path.stat().st_size > 64:
-            self._play_mp3(str(path))
+            self._play_mp3(str(path), cache_key=str(path))
             return
         # 2) frase fixa ainda não cacheada: sintetiza DENTRO do cache (persiste)
         if text in self._canon:
             if self._synth_into(text, path):
-                self._play_mp3(str(path))
+                self._play_mp3(str(path), cache_key=str(path))
             return
         # 3) texto dinâmico (resposta do LLM): temporário, toca e apaga.
         # Só aqui o humor colore a voz (rate/pitch).
@@ -486,15 +496,78 @@ class TTSService:
                 except Exception:
                     pass
 
+    # ---------- reprodução (canal de voz reservado — ver services/audio) ----------
+
+    def _apply_gain(self, snd):
+        """BMO_TTS_GAIN > 1: amplifica os samples da fala com clip seguro
+        (resolve voz 'baixa' sem mexer no alsamixer). Só afeta a voz."""
+        if snd is None or abs(TTS_GAIN - 1.0) < 0.01:
+            return snd
+        try:
+            arr = pygame.sndarray.array(snd).astype(np.float32) * TTS_GAIN
+            arr = np.clip(arr, -32768, 32767).astype(np.int16)
+            return pygame.sndarray.make_sound(np.ascontiguousarray(arr))
+        except Exception:
+            return snd
+
+    def _play_sound(self, snd) -> None:
+        """Toca no canal de voz e espera acabar (estamos na thread do worker —
+        o render loop nunca bloqueia aqui)."""
+        ch = audio.play_voice(snd, self._volume())
+        if ch is None:
+            return
+        while ch.get_busy():
+            pygame.time.wait(30)
+
+    def _decode_external(self, mp3: str, wav: str) -> bool:
+        """Decodifica MP3 -> WAV via ffmpeg/mpg123 SEM TOCAR NADA (nenhum
+        handle de áudio é aberto — só conversão de arquivo)."""
+        ff = shutil.which("ffmpeg")
+        if ff:
+            r = subprocess.run(
+                [ff, "-y", "-loglevel", "quiet", "-i", mp3,
+                 "-ar", str(audio.SAMPLE_RATE), "-ac", "2", wav],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+            if r.returncode == 0 and os.path.getsize(wav) > 64:
+                return True
+        mp = shutil.which("mpg123")
+        if mp:
+            r = subprocess.run([mp, "-q", "-w", wav, mp3],
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=30)
+            return r.returncode == 0 and os.path.getsize(wav) > 64
+        return False
+
+    def _decode_mp3(self, path: str):
+        """MP3 -> pygame.Sound com o áudio INTEIRO em memória (zero streaming;
+        é isso que garante que a fala nunca começa cortada).
+        1) SDL_mixer decodifica direto (pygame 2 costuma vir com mp3);
+        2) senão, ffmpeg/mpg123 convertem pra WAV temporário e carregamos."""
+        if not pygame.mixer.get_init():
+            return None
+        try:
+            return pygame.mixer.Sound(path)
+        except Exception:
+            pass
+        fd, tmp = tempfile.mkstemp(suffix=".wav", prefix="bmo_tts_dec_")
+        os.close(fd)
+        try:
+            if self._decode_external(path, tmp):
+                return self._load_sound(tmp)
+        except Exception:
+            pass
+        finally:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+        return None
+
     def _play_wav(self, path: str) -> None:
         if pygame.mixer.get_init():
-            snd = self._load_sound(path)
+            snd = self._apply_gain(self._load_sound(path))
             if snd is not None:
-                snd.set_volume(self._volume())
-                ch = snd.play()
-                if ch is not None:
-                    while ch.get_busy():
-                        pygame.time.wait(40)
+                self._play_sound(snd)
             return
         # sem mixer (raro): toca via aplay
         ap = shutil.which("aplay")
@@ -502,27 +575,21 @@ class TTSService:
             subprocess.run([ap, "-q", path],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    def _play_mp3(self, path: str) -> None:
-        """Toca o MP3 da voz pelo PRÓPRIO mixer do pygame (mixer.music) — mesmo
-        device dos efeitos sonoros. Isso evita a disputa de ALSA que dava com um
-        player externo (mpg123 abria um 2º handle: cortava o início da voz e
-        derrubava os efeitos). Player externo fica só de fallback se o SDL_mixer
-        não decodificar MP3. mixer.music reamostra sozinho (não precisa casar rate)."""
-        if pygame.mixer.get_init():
-            try:
-                pygame.mixer.music.load(path)
-                pygame.mixer.music.set_volume(self._volume())
-                pygame.mixer.music.play()
-                while pygame.mixer.music.get_busy():
-                    pygame.time.wait(30)
-                try:
-                    pygame.mixer.music.unload()
-                except Exception:
-                    pass
+    def _play_mp3(self, path: str, cache_key: str = "") -> None:
+        """Decodifica o MP3 inteiro pra memória e toca no canal de voz.
+
+        cache_key != "": frase fixa — o Sound decodificado fica em RAM e as
+        próximas falas são um channel.play() instantâneo (nem o disco é lido).
+        Player externo APENAS se não houver nenhum decoder (último recurso)."""
+        snd = self._snd_cache.get(cache_key) if cache_key else None
+        if snd is None:
+            snd = self._apply_gain(self._decode_mp3(path))
+            if snd is None:
+                self._play_external(path)   # último recurso (raro)
                 return
-            except Exception:
-                pass   # build do SDL_mixer sem MP3 -> tenta player externo
-        self._play_external(path)
+            if cache_key:
+                self._snd_cache[cache_key] = snd
+        self._play_sound(snd)
 
     def _play_external(self, path: str) -> bool:
         """Toca por um player externo (1º disponível), bloqueante. Aplica o

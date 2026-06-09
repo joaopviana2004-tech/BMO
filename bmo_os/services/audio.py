@@ -25,15 +25,31 @@ Sons disponíveis:
     alarm       — pomodoro troca de fase (bip-bip-bip discreto)
     plim        — notificação chegou (ding leve)
 
+ESTE MÓDULO É O ÚNICO DONO DA SAÍDA DE SOM. Toda reprodução (efeitos E a
+voz do BMO, via tts.py) passa pelo mixer do pygame daqui — nunca por player
+externo (mpg123/ffplay), que abriria um 2º handle de ALSA e disputaria o
+device (era a causa de voz cortada no início e efeitos mudos no Pi).
+
+Anti-suspend (o conserto do atraso no Pi):
+    O ALSA/PipeWire do Pi SUSPENDE o device após ~segundos de silêncio; o
+    resume leva centenas de ms — sons curtos eram engolidos inteiros e tudo
+    parecia atrasado. init() deixa um loop de SILÊNCIO tocando num canal
+    reservado: o device nunca dorme e todo play() sai instantâneo.
+
+Canais reservados:
+    0 = keep-alive (silêncio em loop)      1 = VOZ do BMO (tts.py)
+    Efeitos usam os demais — a fala nunca é roubada por um tick/explosão,
+    e parar a fala não cala os efeitos (e vice-versa).
+
 Latência:
-    Pre_init em 44100Hz + buffer 256 samples = ~5.8ms só do mixer (era 11.6ms
-    quando rodava a 22050). Channels = 32 pra não deixar sons curtos morrerem
-    quando vários disparam juntos (pong bouncing, invaders shoot+explosion).
+    44100Hz + buffer 512 samples = ~11.6ms de mixer (256 dava underrun no
+    Pi = estalos/atraso). Override: BMO_AUDIO_BUFFER no .env.
 
 Sem numpy ou sem audio device → init() volta False e play() é no-op.
 """
 from __future__ import annotations
 
+import os
 import random
 
 import pygame
@@ -47,13 +63,16 @@ except Exception:
 
 
 SAMPLE_RATE = 44100
-BUFFER_SAMPLES = 256
+BUFFER_SAMPLES = int(os.environ.get("BMO_AUDIO_BUFFER", "512"))
 NUM_CHANNELS = 32
+CH_KEEPALIVE = 0   # silêncio em loop (segura o device acordado)
+CH_VOICE = 1       # fala do BMO (tts.py) — canal exclusivo
 
 # Estado do módulo (singleton)
 _available = False
 _sounds: dict[str, pygame.mixer.Sound] = {}
 _bmo_voices: list[pygame.mixer.Sound] = []
+_keepalive: pygame.mixer.Sound | None = None
 _volume = 1.0       # 0.0 .. 1.0 — multiplicado em cada play()
 
 
@@ -177,8 +196,8 @@ _BMO_VOICE_PATTERNS = [
 # ---------- API pública ----------
 
 def init() -> None:
-    """Inicializa o mixer e gera os sons. Idempotente."""
-    global _available, _sounds, _bmo_voices
+    """Inicializa o mixer, gera os sons e liga o keep-alive. Idempotente."""
+    global _available, _sounds, _bmo_voices, _keepalive
     if _available:
         return
     if not HAS_NUMPY:
@@ -209,8 +228,16 @@ def init() -> None:
         }
         _bmo_voices = [_voice_phrase(notes, durs)
                        for notes, durs in _BMO_VOICE_PATTERNS]
-        # Bastante canal pra suportar sons sobrepostos sem cortar
+        # Bastante canal pra suportar sons sobrepostos sem cortar.
+        # Os 2 primeiros são RESERVADOS (keep-alive + voz) — efeitos via
+        # Sound.play() nunca caem neles.
         pygame.mixer.set_num_channels(NUM_CHANNELS)
+        pygame.mixer.set_reserved(2)
+        # Anti-suspend: meio segundo de silêncio em loop infinito. Custa ~0
+        # de CPU e impede o ALSA/PipeWire de suspender o device (a causa de
+        # som atrasado/engolido no Pi).
+        _keepalive = _to_stereo(np.zeros(SAMPLE_RATE // 2, dtype=np.int16))
+        pygame.mixer.Channel(CH_KEEPALIVE).play(_keepalive, loops=-1)
         _available = True
     except Exception:
         _available = False
@@ -241,14 +268,42 @@ def play_bmo_voice() -> None:
     s.play()
 
 
+def play_voice(sound, volume: float = 1.0):
+    """Toca a FALA do BMO no canal reservado de voz (corta a fala anterior,
+    nunca disputa com efeitos). Devolve o Channel ou None (sem mixer).
+
+    tts.py decodifica o áudio INTEIRO pra memória e entrega o Sound aqui —
+    zero streaming, zero player externo, começo nunca cortado."""
+    if not _available or sound is None:
+        return None
+    try:
+        ch = pygame.mixer.Channel(CH_VOICE)
+        sound.set_volume(max(0.0, min(1.0, float(volume))))
+        ch.play(sound)
+        return ch
+    except Exception:
+        return None
+
+
+def stop_voice() -> None:
+    """Cala SÓ a voz do BMO (efeitos continuam)."""
+    if not _available:
+        return
+    try:
+        pygame.mixer.Channel(CH_VOICE).stop()
+    except Exception:
+        pass
+
+
 def is_available() -> bool:
     return _available
 
 
 def shutdown() -> None:
-    global _available, _sounds, _bmo_voices
+    global _available, _sounds, _bmo_voices, _keepalive
     _sounds = {}
     _bmo_voices = []
+    _keepalive = None
     _available = False
     try:
         pygame.mixer.quit()
