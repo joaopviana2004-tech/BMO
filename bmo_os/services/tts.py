@@ -149,6 +149,8 @@ SCREEN_PHRASES = {
     "foco": "Hora de focar!",
     "sistema": "Aqui está o sistema!",
     "foto": "Modo câmera ativado!",
+    "gravador": "Gravador pronto!",
+    "cerebro": "Aqui está o seu cérebro!",
     "jogos": "Bora jogar!",
     "pong": "Bora de Pong!",
     "invaders": "Bora pro espaço!",

@@ -202,6 +202,15 @@ gcal_tokens.json
 # Perfis de usuário (tokens OAuth, preferências, sessão ativa) — NUNCA commitar
 profiles/
 
+# Token do sync de conhecimento do PC (scripts/bimo_pc_sync.py) — NUNCA commitar
+bimo_pc_tokens.json
+
+# Gravações offline-first aguardando sync (modo legado/sem sessão)
+recordings/
+
+# Espelho local das notas do Segundo Cérebro (modo legado/sem sessão)
+knowledge/
+
 # =============================================================
 # Raspberry Pi / deployment
 # =============================================================

@@ -108,6 +108,8 @@ SCREENS_DOC = (
     "- foco: timer pomodoro pra focar numa tarefa.\n"
     "- sistema: hardware da Raspberry Pi (CPU, temperatura, memoria).\n"
     "- foto: abre a camera pra tirar foto.\n"
+    "- gravador: grava audio (aula/reuniao/ideia) pra sincronizar no Drive.\n"
+    "- cerebro: grafo do conhecimento (notas do Obsidian interligadas).\n"
     "- jogos: menu de jogos.\n"
     "- pong: abre direto o jogo Pong.\n"
     "- invaders: abre direto o jogo Space Invaders.\n"
@@ -329,9 +331,9 @@ class ChatService:
             return ""
 
     # chaves de tela aceitas (espelha SCREENS_DOC e o registro do main.py)
-    _SCREENS = {"agenda", "tarefas", "foco", "sistema", "foto", "jogos",
-                "pong", "invaders", "flappy", "snake", "configuracoes",
-                "relogio", "home", "atualizar"}
+    _SCREENS = {"agenda", "tarefas", "foco", "sistema", "foto", "gravador",
+                "cerebro", "jogos", "pong", "invaders", "flappy", "snake",
+                "configuracoes", "relogio", "home", "atualizar"}
 
     def _remember_turn(self, user_text: str, bmo_msg: str) -> None:
         """Guarda a troca no histórico curto (limita a HISTORY_TURNS trocas)."""

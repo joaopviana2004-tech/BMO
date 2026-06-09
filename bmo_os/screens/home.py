@@ -19,8 +19,8 @@ from ..core.widgets import (
 )
 from ..services import audio
 
-ITEMS = ["SLEEP", "SUSPEND", "GAMES", "TASKS", "AGENDA", "FOCO", "PHOTO", "SISTEMA", "TESTE", "SETTINGS"]
-ICONS = ["sleep", "suspend", "games", "tasks", "agenda", "pomodoro", "photo", "sysinfo", "aitest", "settings"]
+ITEMS = ["SLEEP", "SUSPEND", "GAMES", "TASKS", "AGENDA", "FOCO", "GRAVAR", "CEREBRO", "PHOTO", "SISTEMA", "TESTE", "SETTINGS"]
+ICONS = ["sleep", "suspend", "games", "tasks", "agenda", "pomodoro", "recorder", "brain", "photo", "sysinfo", "aitest", "settings"]
 
 
 def _icon_sleep(surf: pygame.Surface, cx: int, cy: int) -> None:
@@ -135,6 +135,30 @@ def _icon_pomodoro(surf: pygame.Surface, cx: int, cy: int) -> None:
     pygame.draw.line(surf, CRT_WHITE, (cx, cy - 11), (cx + 6, cy - 13), 2)
 
 
+def _icon_recorder(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # fita cassete: corpo + 2 carreteis + janelinha, com bolinha REC
+    body = pygame.Rect(0, 0, 40, 26)
+    body.center = (cx, cy)
+    pygame.draw.rect(surf, CRT_WHITE, body, 2, border_radius=3)
+    pygame.draw.circle(surf, CRT_WHITE, (body.left + 11, body.centery), 5, 2)
+    pygame.draw.circle(surf, CRT_WHITE, (body.right - 11, body.centery), 5, 2)
+    pygame.draw.line(surf, CRT_DIM, (body.left + 16, body.centery),
+                     (body.right - 16, body.centery), 2)
+    # bolinha REC no canto
+    pygame.draw.circle(surf, CRT_WHITE, (body.right + 5, body.top - 2), 4)
+
+
+def _icon_brain(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # grafo de conhecimento: nós conectados (mini constelação)
+    nodes = [(cx, cy - 12), (cx - 14, cy + 2), (cx + 13, cy - 2),
+             (cx - 6, cy + 13), (cx + 10, cy + 11)]
+    edges = [(0, 1), (0, 2), (1, 3), (2, 4), (3, 4), (1, 2)]
+    for a, b in edges:
+        pygame.draw.line(surf, CRT_DIM, nodes[a], nodes[b], 1)
+    for i, (x, y) in enumerate(nodes):
+        pygame.draw.circle(surf, CRT_WHITE, (x, y), 4 if i == 0 else 3)
+
+
 def _icon_sysinfo(surf: pygame.Surface, cx: int, cy: int) -> None:
     # chip/processador: corpo quadrado, die interno e perninhas nos 4 lados
     body = pygame.Rect(0, 0, 26, 26)
@@ -164,19 +188,21 @@ def _icon_aitest(surf: pygame.Surface, cx: int, cy: int) -> None:
 
 _DRAW_ICON = [
     _icon_sleep, _icon_suspend, _icon_games, _icon_tasks,
-    _icon_agenda, _icon_pomodoro, _icon_photo, _icon_sysinfo, _icon_aitest, _icon_settings,
+    _icon_agenda, _icon_pomodoro, _icon_recorder, _icon_brain, _icon_photo,
+    _icon_sysinfo, _icon_aitest, _icon_settings,
 ]
 
 
 class HomeScreen:
     def __init__(self, *, on_back, on_open_sleep, on_open_suspend, on_open_games,
-                 on_open_tasks, on_open_agenda, on_open_pomodoro,
-                 on_open_photo, on_open_sysinfo, on_open_teste, on_open_settings) -> None:
+                 on_open_tasks, on_open_agenda, on_open_pomodoro, on_open_recorder,
+                 on_open_brain, on_open_photo, on_open_sysinfo, on_open_teste,
+                 on_open_settings) -> None:
         self.on_back = on_back
         self._on_select = [
             on_open_sleep, on_open_suspend, on_open_games, on_open_tasks,
-            on_open_agenda, on_open_pomodoro, on_open_photo, on_open_sysinfo,
-            on_open_teste, on_open_settings,
+            on_open_agenda, on_open_pomodoro, on_open_recorder, on_open_brain,
+            on_open_photo, on_open_sysinfo, on_open_teste, on_open_settings,
         ]
         self.on_open_games = on_open_games
         self.on_open_settings = on_open_settings

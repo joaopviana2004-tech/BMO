@@ -27,6 +27,7 @@ from bmo_os.screens.agenda import AgendaScreen
 from bmo_os.screens.aitest import AITestScreen
 from bmo_os.screens.alert import AlertScreen
 from bmo_os.screens.bmo_face import BMOFaceScreen
+from bmo_os.screens.brain import BrainScreen
 from bmo_os.screens.clock import ClockScreen
 from bmo_os.screens.flappy import FlappyScreen
 from bmo_os.screens.games import (
@@ -41,6 +42,7 @@ from bmo_os.screens.mic_button import MicButton
 from bmo_os.screens.photo import PHOTOS_DIR, PhotoScreen
 from bmo_os.screens.pomodoro import PomodoroScreen
 from bmo_os.screens.pong import PongAmbientScreen, PongScreen
+from bmo_os.screens.recorder import RecorderScreen
 from bmo_os.screens.settings import SettingsScreen
 from bmo_os.screens.sysinfo import SysInfoScreen
 from bmo_os.screens.shuffler import ShufflingAmbientScreen
@@ -56,8 +58,10 @@ from bmo_os.services.drive_sync import DriveSync
 from bmo_os.services.gcalendar import CalendarService
 from bmo_os.services.gpio_button import GPIOButton
 from bmo_os.services.git_updates import GitUpdatesService
+from bmo_os.services.knowledge import KnowledgeService
 from bmo_os.services.notifications import EventAlerter
 from bmo_os.services.pet_brain import PetBrain
+from bmo_os.services.recorder import RecorderService
 from bmo_os.services.pet_memory import PetMemory
 from bmo_os.services.pet_state import PetState
 from bmo_os.services.sysinfo import SysInfoService
@@ -69,13 +73,22 @@ from bmo_os.services.voice import VoiceService
 # Vive aqui pra o logout do SETTINGS conseguir dar o flush final.
 _drive_sync: dict = {"svc": None}
 
+# Toast não-intrusivo (rodapé): "Sincronização com o Drive concluída" etc.
+_toast = {"msg": "", "until": 0.0}
+
+
+def show_toast(msg: str) -> None:
+    _toast["msg"] = (msg or "").strip()
+    _toast["until"] = time.time() + 4.0
+
 
 def _apply_profile_volume() -> None:
     audio.set_volume((config.get("volume") or 100) / 100)
 
 
 def start_drive_sync() -> None:
-    """Liga o espelhamento do bmo_config.json do perfil ativo no Drive.
+    """Liga o espelhamento do perfil ativo no Drive: preferências
+    (bmo_config.json) + áudios offline-first (Sync & Destroy).
 
     No-op pra convidado, sem sessão ou sem credencial de app — o Bimo segue
     100% local nesses casos.
@@ -87,7 +100,10 @@ def start_drive_sync() -> None:
     if not creds.ok:
         return
     svc = DriveSync(creds, config_path=config.get_path(),
-                    on_pulled=_apply_profile_volume)
+                    on_pulled=_apply_profile_volume,
+                    recordings_dir=session.recordings_dir(),
+                    knowledge_dir=session.knowledge_dir(),
+                    on_event=show_toast)
     config.on_change = svc.mark_dirty   # cada ajuste no SETTINGS agenda upload
     svc.start()
     _drive_sync["svc"] = svc
@@ -114,6 +130,11 @@ def build_initial(app: App):
     pomodoro = PomodoroScreen(on_back=app.manager.pop, todoist=todoist)
     # Audição (wake word + Whisper). No PC degrada pra "indisponivel".
     voice = VoiceService()
+    # Gravador offline-first (aulas/reuniões): WAV local -> Sync & Destroy
+    # no Drive (drive_sync). A pasta é do PERFIL (some no wipe do logout).
+    recorder = RecorderService(voice=voice, recordings_dir=session.recordings_dir())
+    # Segundo Cérebro: grafo das notas .md espelhadas do Drive (tela CEREBRO)
+    knowledge = KnowledgeService(session.knowledge_dir())
     # --- pet: estado emocional + memória + cérebro proativo (autossuficientes,
     # NÃO dependem de câmera/mic). Tudo degrada sozinho se faltar algo. ---
     pet = PetState()
@@ -261,6 +282,14 @@ def build_initial(app: App):
         # Suspende: display off + FPS baixo. Wake → vai direto pro ambient.
         app.manager.push(SuspendedScreen(on_wake=go_ambient))
 
+    def make_recorder_screen() -> RecorderScreen:
+        return RecorderScreen(on_back=app.manager.pop, recorder=recorder,
+                              get_sync=lambda: _drive_sync.get("svc"))
+
+    def make_brain_screen() -> BrainScreen:
+        return BrainScreen(on_back=app.manager.pop, knowledge=knowledge,
+                           get_sync=lambda: _drive_sync.get("svc"))
+
     def make_home() -> HomeScreen:
         return HomeScreen(
             on_back=go_ambient,
@@ -276,6 +305,8 @@ def build_initial(app: App):
                 AgendaScreen(on_back=app.manager.pop, calendar=calendar)
             ),
             on_open_pomodoro=lambda: app.manager.push(pomodoro),
+            on_open_recorder=lambda: app.manager.push(make_recorder_screen()),
+            on_open_brain=lambda: app.manager.push(make_brain_screen()),
             on_open_photo=lambda: app.manager.push(
                 PhotoScreen(
                     on_back=app.manager.pop,
@@ -310,10 +341,14 @@ def build_initial(app: App):
         O restart por execv garante que NENHUM cache do usuário anterior
         (threads, memória do pet, tokens) sobreviva à troca. O processo novo
         cai na tela de LOGIN (sem sessão ativa)."""
+        try:
+            recorder.stop()   # fecha .part -> .wav pra entrar no flush
+        except Exception:
+            pass
         svc = _drive_sync.get("svc")
         if svc is not None:
             try:
-                svc.flush()   # sobe preferências não sincronizadas
+                svc.flush()   # sobe preferências + áudios não sincronizados
             except Exception:
                 pass
             try:
@@ -361,6 +396,10 @@ def build_initial(app: App):
                            _cmd(lambda: app.manager.push(FlappyScreen(on_back=app.manager.pop))))
     voice.register_command(["snake", "cobra", "cobrinha"],
                            _cmd(lambda: app.manager.push(SnakeScreen(on_back=app.manager.pop))))
+    voice.register_command(["gravador", "gravar", "gravacao"],
+                           _cmd(lambda: app.manager.push(make_recorder_screen())))
+    voice.register_command(["cerebro", "conhecimento", "notas", "obsidian"],
+                           _cmd(lambda: app.manager.push(make_brain_screen())))
     voice.register_command(["configura", "ajuste", "settings"], _cmd(lambda: app.manager.push(make_settings())))
     voice.register_command(["menu", "inicio", "casa", "home"], _cmd(open_home))
     voice.register_command(["relogio", "horas", "tela inicial", "descanso"], _cmd(go_ambient))
@@ -399,6 +438,8 @@ def build_initial(app: App):
         "invaders": lambda: app.manager.push(SpaceInvadersScreen(on_back=app.manager.pop)),
         "flappy": lambda: app.manager.push(FlappyScreen(on_back=app.manager.pop)),
         "snake": lambda: app.manager.push(SnakeScreen(on_back=app.manager.pop)),
+        "gravador": lambda: app.manager.push(make_recorder_screen()),
+        "cerebro": lambda: app.manager.push(make_brain_screen()),
         "configuracoes": lambda: app.manager.push(make_settings()),
         # relógio explícito (NÃO o ambient configurado, que pode ser face/pong)
         "relogio": lambda: app.manager.replace(_instantiate_ambient("clock")),
@@ -536,15 +577,19 @@ def build_initial(app: App):
                 except Exception:
                     pass
         showing_resp = now < ai_overlay["until"] and bool(ai_overlay["msg"])
-        if not (busy or thinking or showing_resp):
+        toast_active = bool(_toast["msg"]) and now < _toast["until"]
+        if not (busy or thinking or showing_resp or toast_active):
             return
 
         if busy and ("grav" in status or "ouv" in status):
             label, color, body = "GRAVANDO", Colors.RED, ""
         elif busy or thinking:
             label, color, body = "PENSANDO", Colors.YELLOW, ""
-        else:
+        elif showing_resp:
             label, color, body = "BMO", Colors.CYAN, ai_overlay["msg"]
+        else:
+            # toast do sync (não-intrusivo): "Sincronizacao com o Drive concluida"
+            label, color, body = "DRIVE", Colors.GREEN_BTN, _toast["msg"]
 
         w, h = LOGICAL_SIZE
         bar_h = 16

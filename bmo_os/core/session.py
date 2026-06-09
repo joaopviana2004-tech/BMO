@@ -42,6 +42,25 @@ def current() -> dict | None:
     return _current
 
 
+def recordings_dir() -> Path:
+    """Pasta dos áudios offline-first DO PERFIL ativo (some no wipe do logout).
+
+    Sem sessão (modo legado), cai em <repo>/recordings."""
+    if _current is not None:
+        return profile_dir(_current["sub"]) / "recordings"
+    return config.REPO_ROOT / "recordings"
+
+
+def knowledge_dir() -> Path:
+    """Espelho local das notas .md do Segundo Cérebro (Drive Bimo/Conhecimento).
+
+    É por perfil — a base de conhecimento É o dado mais pessoal que existe,
+    então some no wipe do logout. Sem sessão, <repo>/knowledge."""
+    if _current is not None:
+        return profile_dir(_current["sub"]) / "knowledge"
+    return config.REPO_ROOT / "knowledge"
+
+
 def is_guest() -> bool:
     return _current is not None and _current.get("sub") == GUEST_ID
 
