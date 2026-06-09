@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pygame
 
-from ..core import config, theme_state
+from ..core import config, session, theme_state
 from ..core import input as bmo_input
 from ..core.theme import render_text
 from ..core.widgets import (
@@ -125,11 +125,29 @@ def _ia_items():
     ]
 
 
+def _conta_items():
+    return [
+        # 'info' = linha somente-leitura (mostra a conta logada)
+        {"type": "info", "key": "account", "label": "Conta"},
+        {"type": "action", "key": "logout", "label": "Trocar usuario"},
+    ]
+
+
+def _account_display() -> str:
+    """E-mail (ou nome) do perfil ativo, encurtado pro CRT. 'local' sem sessão."""
+    prof = session.current()
+    if prof is None:
+        return "local"
+    label = (prof.get("email") or prof.get("name") or prof.get("sub") or "?").strip()
+    return label if len(label) <= 22 else label[:21] + "."
+
+
 CATEGORIES = [
     ("SOM", _som_items),
     ("TELA", _tela_items),
     ("SISTEMA", _sistema_items),
     ("IA", _ia_items),
+    ("CONTA", _conta_items),
 ]
 
 
@@ -141,13 +159,14 @@ class SettingsScreen:
     voice_announce = "Aqui estão as configurações!"   # BMO anuncia ao abrir (cacheado)
 
     def __init__(self, *, on_back, on_open, on_change=None, mic_options=None,
-                 on_cleanup=None, tts=None) -> None:
+                 on_cleanup=None, tts=None, on_logout=None) -> None:
         self.on_back = on_back
         self.on_open = on_open          # push de uma sub-tela
         self.on_change = on_change
         self.mic_options = mic_options
         self.on_cleanup = on_cleanup    # libera hardware antes do restart/desligar
         self.tts = tts                  # serviço de voz (pra ação "Gerar vozes")
+        self.on_logout = on_logout      # Wipe & Load (main.do_logout)
         self._index = 0
         self._rows = [label for label, _ in CATEGORIES] + ["Voltar"]
 
@@ -185,7 +204,7 @@ class SettingsScreen:
         self.on_open(SettingsListScreen(
             title=label, items=items_fn(), on_back=self.on_back,
             on_change=self.on_change, mic_options=self.mic_options,
-            on_cleanup=self.on_cleanup, tts=self.tts,
+            on_cleanup=self.on_cleanup, tts=self.tts, on_logout=self.on_logout,
         ))
 
     def update(self, dt: float) -> None: ...
@@ -227,7 +246,7 @@ class SettingsScreen:
 
 class SettingsListScreen:
     def __init__(self, *, title, items, on_back, on_change=None, mic_options=None,
-                 on_cleanup=None, tts=None) -> None:
+                 on_cleanup=None, tts=None, on_logout=None) -> None:
         self.title = title
         self.items = items
         self.on_back = on_back
@@ -235,11 +254,13 @@ class SettingsListScreen:
         self.mic_options = mic_options or (lambda: [])
         self.on_cleanup = on_cleanup
         self.tts = tts
+        self.on_logout = on_logout
         self._index = 0
         self._status = ""
         self._action = None
         self._delay_until = 0.0
         self._shutdown_confirm_until = 0.0
+        self._logout_confirm_until = 0.0
         self._watch_voice = False   # mostrando o progresso de "Gerar vozes"?
         self._t = 0.0
         self._rows = items + [{"type": "action", "key": "back", "label": "Voltar"}]
@@ -354,6 +375,17 @@ class SettingsListScreen:
             else:
                 self._shutdown_confirm_until = self._t + SHUTDOWN_CONFIRM_S
                 self._status = "Toque DESLIGAR de novo p/ confirmar"
+        elif key == "logout":
+            audio.play("select")
+            if self.on_logout is None:
+                self._status = "Indisponivel nesta build"
+            elif self._t < self._logout_confirm_until:
+                # flush no Drive + wipe do perfil + restart (não retorna)
+                self._status = "Salvando e encerrando..."
+                self._action = "logout"
+            else:
+                self._logout_confirm_until = self._t + SHUTDOWN_CONFIRM_S
+                self._status = "Toque de novo p/ trocar usuario"
         elif key == "gen_voice_cache":
             audio.play("select")
             if self.tts is None or getattr(self.tts, "backend", "") != "edge":
@@ -373,9 +405,16 @@ class SettingsListScreen:
             self._action = None; self._restart()
         elif self._action == "shutdown":
             self._action = None; self._do_shutdown()
+        elif self._action == "logout":
+            self._action = None
+            if self.on_logout is not None:
+                self.on_logout()   # flush -> wipe -> execv (não retorna)
         if (self._shutdown_confirm_until > 0 and self._t >= self._shutdown_confirm_until
                 and self._status.startswith("Toque DESLIGAR")):
             self._shutdown_confirm_until = 0.0; self._status = ""
+        if (self._logout_confirm_until > 0 and self._t >= self._logout_confirm_until
+                and self._status.startswith("Toque de novo")):
+            self._logout_confirm_until = 0.0; self._status = ""
         # progresso ao vivo da geração de vozes
         if self._watch_voice and self.tts is not None:
             self._status = "Vozes: " + (getattr(self.tts, "cache_status", "") or "...")
@@ -426,10 +465,16 @@ class SettingsListScreen:
             label_txt = item["label"].upper()
             if item.get("key") == "shutdown" and self._t < self._shutdown_confirm_until:
                 label_txt = "DESLIGAR?"
+            if item.get("key") == "logout" and self._t < self._logout_confirm_until:
+                label_txt = "TROCAR USUARIO?"
             label = render_text(label_txt, 9, fg)
             surface.blit(label, label.get_rect(midleft=(label_x, rect.centery)))
 
-            if item["type"] in ("cycle", "mic", "llm_model"):
+            if item["type"] == "info":
+                val = _account_display() if item["key"] == "account" else ""
+                val_img = render_text(val, 9, fg, pixel=False)
+                surface.blit(val_img, val_img.get_rect(midright=(rect.right - 8, rect.centery)))
+            elif item["type"] in ("cycle", "mic", "llm_model"):
                 if item["type"] == "mic":
                     cur = self._mic_current_display()
                     val = cur if len(cur) <= 12 else cur[:11] + "."

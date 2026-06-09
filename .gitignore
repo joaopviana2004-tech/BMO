@@ -199,6 +199,9 @@ bmo_memory.json
 # Tokens OAuth do Google Calendar (refresh tokens) — NUNCA commitar
 gcal_tokens.json
 
+# Perfis de usuário (tokens OAuth, preferências, sessão ativa) — NUNCA commitar
+profiles/
+
 # =============================================================
 # Raspberry Pi / deployment
 # =============================================================

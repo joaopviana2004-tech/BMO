@@ -1,7 +1,11 @@
-"""Configuração persistente do BMO OS.
+"""Configuração persistente do BMO OS — POR PERFIL.
 
-Carrega/salva um JSON na raiz do repo (bmo_config.json). Pensado pra ter
-poucas chaves — preferências do usuário que sobrevivem entre boots.
+Carrega/salva um JSON de preferências. Sem sessão ativa, usa o arquivo
+legado da raiz (bmo_config.json); com usuário logado, core/session.py
+redireciona pra profiles/<user>/bmo_config.json via set_profile_path().
+
+on_change (módulo) é um hook opcional: drive_sync registra aqui pra marcar
+o config como "dirty" e subir pro Drive quando o usuário mexe no SETTINGS.
 
 Também carrega `.env` da raiz no os.environ na importação (sem dep extra).
 """
@@ -13,8 +17,12 @@ from pathlib import Path
 from threading import Lock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-CONFIG_PATH = REPO_ROOT / "bmo_config.json"
+LEGACY_CONFIG_PATH = REPO_ROOT / "bmo_config.json"
 DOTENV_PATH = REPO_ROOT / ".env"
+
+# Hook chamado após cada set_value(key, value) — fora do lock.
+# drive_sync usa pra agendar o upload do config (debounce).
+on_change = None
 
 
 def _load_dotenv() -> None:
@@ -135,15 +143,39 @@ LLM_VISION_MODELS = {
 
 _lock = Lock()
 _data: dict | None = None
+_path: Path = LEGACY_CONFIG_PATH   # trocado por set_profile_path() na sessão
+
+
+def set_profile_path(path: Path | None) -> None:
+    """Aponta o config pro arquivo do perfil ativo (None = legado da raiz).
+
+    Reseta o cache: o próximo get() já lê as preferências do novo usuário.
+    """
+    global _path, _data
+    with _lock:
+        _path = Path(path) if path is not None else LEGACY_CONFIG_PATH
+        _data = None
+
+
+def get_path() -> Path:
+    with _lock:
+        return _path
+
+
+def reload() -> None:
+    """Força reler o arquivo (ex: drive_sync acabou de baixar do Drive)."""
+    global _data
+    with _lock:
+        _data = None
 
 
 def _load_unlocked() -> dict:
     global _data
     if _data is None:
         merged = dict(DEFAULTS)
-        if CONFIG_PATH.exists():
+        if _path.exists():
             try:
-                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                with open(_path, "r", encoding="utf-8") as f:
                     user = json.load(f)
                 if isinstance(user, dict):
                     merged.update({k: v for k, v in user.items() if k in DEFAULTS})
@@ -163,7 +195,13 @@ def set_value(key: str, value) -> None:
         d = _load_unlocked()
         d[key] = value
         try:
-            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            _path.parent.mkdir(parents=True, exist_ok=True)
+            with open(_path, "w", encoding="utf-8") as f:
                 json.dump(d, f, indent=2)
+        except Exception:
+            pass
+    if on_change is not None:
+        try:
+            on_change(key, value)
         except Exception:
             pass

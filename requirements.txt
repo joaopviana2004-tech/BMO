@@ -2,3 +2,4 @@ pygame-ce>=2.5.0
 numpy>=1.20.0
 icalendar>=5.0.0
 recurring-ical-events>=2.1.0
+qrcode>=7.4

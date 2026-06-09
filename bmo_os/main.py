@@ -20,7 +20,7 @@ import pygame
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from bmo_os.core import config
+from bmo_os.core import config, session
 from bmo_os.core.app import App
 from bmo_os.core.theme import Colors, LOGICAL_SIZE, render_text
 from bmo_os.screens.agenda import AgendaScreen
@@ -36,6 +36,7 @@ from bmo_os.screens.games import (
 from bmo_os.screens.snake import SnakeScreen
 from bmo_os.screens.home import HomeScreen
 from bmo_os.screens.gallery import GalleryScreen
+from bmo_os.screens.login import LoginScreen
 from bmo_os.screens.mic_button import MicButton
 from bmo_os.screens.photo import PHOTOS_DIR, PhotoScreen
 from bmo_os.screens.pomodoro import PomodoroScreen
@@ -48,8 +49,10 @@ from bmo_os.screens.space_invaders import SpaceInvadersAmbientScreen, SpaceInvad
 from bmo_os.screens.suspended import SuspendedScreen
 from bmo_os.screens.tasks import TasksScreen
 from bmo_os.services import audio
+from bmo_os.services import google_auth
 from bmo_os.services.camera import CameraService
 from bmo_os.services.chat import ChatService
+from bmo_os.services.drive_sync import DriveSync
 from bmo_os.services.gcalendar import CalendarService
 from bmo_os.services.gpio_button import GPIOButton
 from bmo_os.services.git_updates import GitUpdatesService
@@ -61,6 +64,33 @@ from bmo_os.services.sysinfo import SysInfoService
 from bmo_os.services.todoist import TodoistService
 from bmo_os.services.tts import SCREEN_PHRASES, TTSService
 from bmo_os.services.voice import VoiceService
+
+# Sync das preferências do perfil com o Drive (None = guest/sem credencial).
+# Vive aqui pra o logout do SETTINGS conseguir dar o flush final.
+_drive_sync: dict = {"svc": None}
+
+
+def _apply_profile_volume() -> None:
+    audio.set_volume((config.get("volume") or 100) / 100)
+
+
+def start_drive_sync() -> None:
+    """Liga o espelhamento do bmo_config.json do perfil ativo no Drive.
+
+    No-op pra convidado, sem sessão ou sem credencial de app — o Bimo segue
+    100% local nesses casos.
+    """
+    prof = session.current()
+    if not prof or session.is_guest() or not google_auth.available():
+        return
+    creds = google_auth.Credentials(session.tokens_path(prof["sub"]))
+    if not creds.ok:
+        return
+    svc = DriveSync(creds, config_path=config.get_path(),
+                    on_pulled=_apply_profile_volume)
+    config.on_change = svc.mark_dirty   # cada ajuste no SETTINGS agenda upload
+    svc.start()
+    _drive_sync["svc"] = svc
 
 
 def build_initial(app: App):
@@ -274,6 +304,31 @@ def build_initial(app: App):
             voice.set_enabled(False)
             voice.set_enabled(True)
 
+    def do_logout() -> None:
+        """Wipe & Load: backup final no Drive -> wipe do perfil -> reinicia.
+
+        O restart por execv garante que NENHUM cache do usuário anterior
+        (threads, memória do pet, tokens) sobreviva à troca. O processo novo
+        cai na tela de LOGIN (sem sessão ativa)."""
+        svc = _drive_sync.get("svc")
+        if svc is not None:
+            try:
+                svc.flush()   # sobe preferências não sincronizadas
+            except Exception:
+                pass
+            try:
+                svc.stop()
+            except Exception:
+                pass
+        config.on_change = None
+        try:
+            cleanup_hardware()
+        except Exception:
+            pass
+        session.logout()
+        pygame.quit()
+        os.execv(sys.executable, [sys.executable, *sys.argv])
+
     def make_settings() -> SettingsScreen:
         return SettingsScreen(
             on_back=app.manager.pop,
@@ -282,6 +337,7 @@ def build_initial(app: App):
             mic_options=voice.list_input_devices,
             on_cleanup=cleanup_hardware,
             tts=tts,
+            on_logout=do_logout,
         )
 
     # ---- comandos de voz -> navegação (executados no main thread) ----
@@ -536,13 +592,40 @@ def main() -> None:
     parser.add_argument("--fullscreen", action="store_true")
     args = parser.parse_args()
 
+    # reativa a sessão gravada (profiles/_active) ANTES de ler o config:
+    # com usuário logado, config.get() já lê as preferências DELE.
+    session.restore()
+
     # mixer precisa ser inicializado ANTES do pygame.init (App.__init__)
     # pra os pre_init params (sample rate, buffer) valerem
     audio.init()
     audio.set_volume((config.get("volume") or 100) / 100)
 
     app = App(fullscreen=args.fullscreen)
-    app.run(build_initial(app))
+
+    if session.current() is None and google_auth.available():
+        # sem sessão: tela de LOGIN (QR + device flow) antes de tudo.
+        # Os serviços (threads, câmera, TTS...) só sobem APÓS o login.
+        def _after_login() -> None:
+            _apply_profile_volume()   # volume/brilho/tema do perfil valem já
+            start_drive_sync()
+            app.manager.replace(build_initial(app))
+
+        def _on_success(user: dict, tokens: dict) -> None:
+            session.login(user, tokens)
+            _after_login()
+
+        def _on_guest() -> None:
+            session.login_guest()
+            _after_login()
+
+        initial = LoginScreen(on_success=_on_success, on_guest=_on_guest)
+    else:
+        # sessão ativa (reboot) OU sem GOOGLE_CLIENT_ID (modo legado local)
+        start_drive_sync()
+        initial = build_initial(app)
+
+    app.run(initial)
 
 
 if __name__ == "__main__":
