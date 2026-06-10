@@ -40,6 +40,9 @@ MX_BRIGHT = (110, 255, 140)
 MX_MID = (50, 170, 85)
 MX_DIM = (22, 80, 42)
 MX_GHOST = (16, 55, 30)
+MX_GLOW = (9, 34, 19)        # halo dos nós + contorno do cérebro (bem fraco)
+MX_PULSE = (160, 255, 185)   # pacote de dados correndo na aresta
+MX_CORE = (225, 255, 235)    # núcleo aceso do nó
 
 MAX_NODES = 80          # acima disso, mostra os mais conectados
 AREA_TOP = 30
@@ -48,9 +51,10 @@ AREA_BOTTOM = 36        # reserva do rodapé (info da nota)
 # física do layout (Fruchterman–Reingold + separação mínima; k escala com nº de nós)
 FR_K_SCALE = 1.28
 FR_ATTRACT = 0.85
-MIN_NODE_SEP = 20.0
-GRAVITY = 0.006
-DAMPING = 0.86
+MIN_NODE_SEP = 26.0     # separação mínima dura entre nós (mundo) — anti-assaroca
+GRAVITY = 0.05          # puxa pra um blob compacto/preenchido (a separação
+                        # garante o mínimo, então pode ser forte sem amontoar)
+DAMPING = 0.88
 MAX_SPEED = 55.0
 SETTLE_STEPS = 90
 
@@ -150,14 +154,7 @@ class BrainScreen:
                 del self._bodies[nid]
         if reshuffle:
             self._settle_layout(SETTLE_STEPS)
-            n = len(self._order)
-            self._cam = [W / 2.0, (AREA_TOP + H - AREA_BOTTOM) / 2.0]
-            if n > 24:
-                self._zoom = max(0.65, 1.5 / math.sqrt(n / 10))
-            elif n > 14:
-                self._zoom = 0.88
-            else:
-                self._zoom = 1.0
+            self._fit_view()
         if self._selected not in self._order:
             self._selected = ""
         if self._split and self._split not in graph.notes:
@@ -208,6 +205,24 @@ class BrainScreen:
         self._zoom = new
         self._cam[0] = wx - (anchor[0] - vc[0]) / new
         self._cam[1] = wy - (anchor[1] - vc[1]) / new
+
+    def _fit_view(self) -> None:
+        """Enquadra todos os nós: câmera no centro da nuvem + zoom que cabe na
+        viewport com margem (evita o grafo cramped/amontoado)."""
+        bodies = [self._bodies[n] for n in self._order if n in self._bodies]
+        if not bodies:
+            return
+        xs = [b.x for b in bodies]
+        ys = [b.y for b in bodies]
+        minx, maxx, miny, maxy = min(xs), max(xs), min(ys), max(ys)
+        gw = max(1.0, maxx - minx)
+        gh = max(1.0, maxy - miny)
+        view = self._view_rect()
+        avail_w = view.width - 2 * (SAFE_INSET + 6)
+        avail_h = (H - AREA_TOP - AREA_BOTTOM) - 2 * 6
+        z = min(avail_w / gw, avail_h / gh)
+        self._zoom = min(max(z, ZOOM_MIN), ZOOM_MAX)
+        self._cam = [(minx + maxx) / 2.0, (miny + maxy) / 2.0]
 
     # ---------- split (nota à direita) ----------
 
@@ -458,6 +473,19 @@ class BrainScreen:
 
     # ---------- física ----------
 
+    def _confine(self, b) -> None:
+        """Mantém o corpo dentro de uma ELIPSE (em vez do retângulo): a nuvem
+        de nós ganha formato oval/cérebro em vez de encostar nos cantos."""
+        cx = W / 2.0
+        cy = (AREA_TOP + H - AREA_BOTTOM) / 2.0
+        rx = (W - 2 * (SAFE_INSET + 10)) / 2.0
+        ry = (H - AREA_TOP - AREA_BOTTOM) / 2.0
+        nx, ny = (b.x - cx) / rx, (b.y - cy) / ry
+        m = math.hypot(nx, ny)
+        if m > 1.0:
+            b.x = cx + nx / m * rx
+            b.y = cy + ny / m * ry
+
     def _layout_k(self) -> float:
         n = max(len(self._order), 1)
         vw = W - 2 * (SAFE_INSET + 10)
@@ -569,14 +597,66 @@ class BrainScreen:
                 b.vy *= MAX_SPEED / sp
             b.x += b.vx * dt * 6
             b.y += b.vy * dt * 6
-            b.x = min(max(b.x, SAFE_INSET + 10), W - SAFE_INSET - 10)
-            b.y = min(max(b.y, AREA_TOP), H - AREA_BOTTOM)
+            self._confine(b)
 
     def _settle_layout(self, steps: int) -> None:
         dt = 1.0 / 30.0
         for i in range(max(0, steps)):
             cool = 1.0 + 0.5 * (1.0 - i / max(1, steps - 1))
             self._physics_step(dt, dragging="", cool=cool)
+            self._separate("", iters=2)
+
+    def _separate(self, dragging: str, iters: int = 6) -> None:
+        """Empurra à força qualquer par mais perto que MIN_NODE_SEP. Garante a
+        distância mínima pedida, independente da física (anti-amontoado).
+
+        Várias passadas (Gauss-Seidel) pra convergir nos aglomerados densos;
+        os nós ficam dentro dos limites da área visível."""
+        ids = self._order
+        bodies = self._bodies
+        sep = MIN_NODE_SEP
+        sep2 = sep * sep
+        n = len(ids)
+        for _ in range(max(1, iters)):
+            moved = False
+            for i in range(n):
+                ba = bodies.get(ids[i])
+                if ba is None:
+                    continue
+                for j in range(i + 1, n):
+                    bb = bodies.get(ids[j])
+                    if bb is None:
+                        continue
+                    dx, dy = ba.x - bb.x, ba.y - bb.y
+                    d2 = dx * dx + dy * dy
+                    if d2 >= sep2:
+                        continue
+                    if d2 < 1e-6:
+                        dx, dy = self._rng.uniform(-1, 1), self._rng.uniform(-1, 1)
+                        d2 = dx * dx + dy * dy or 1.0
+                    d = math.sqrt(d2)
+                    overlap = sep - d
+                    ux, uy = dx / d, dy / d
+                    moved = True
+                    if ids[i] == dragging:
+                        bb.x -= ux * overlap
+                        bb.y -= uy * overlap
+                    elif ids[j] == dragging:
+                        ba.x += ux * overlap
+                        ba.y += uy * overlap
+                    else:
+                        ba.x += ux * overlap * 0.5
+                        ba.y += uy * overlap * 0.5
+                        bb.x -= ux * overlap * 0.5
+                        bb.y -= uy * overlap * 0.5
+            # mantém tudo dentro da elipse (formato oval/cérebro)
+            for nid in ids:
+                b = bodies.get(nid)
+                if b is None or nid == dragging:
+                    continue
+                self._confine(b)
+            if not moved:
+                break
 
     def update(self, dt: float) -> None:
         self._t += dt
@@ -588,7 +668,12 @@ class BrainScreen:
             return
         dt = min(dt, 0.05)
         dragging = self._press["nid"] if (self._press and self._press["moved"]) else ""
-        self._physics_step(dt, dragging=dragging)
+        # forças de layout suaves ao vivo (o settle já organizou): deixa a
+        # separação mandar no espaçamento e o grafo só "respira".
+        # iterações de separação caem com o nº de nós (protege o pior caso no Pi)
+        self._physics_step(dt, dragging=dragging, cool=0.3)
+        n = len(self._order)
+        self._separate(dragging, iters=6 if n <= 45 else (4 if n <= 65 else 3))
         # no split a câmera segue o nó aberto, suave, sem mudar a escala
         if self._split:
             b = self._bodies.get(self._split)
@@ -626,18 +711,31 @@ class BrainScreen:
         self._draw_back_btn(surface)
 
     def _draw_graph(self, surface, g) -> None:
+        view = self._view_rect()
+        self._draw_brain_backdrop(surface, view)
         ghosts = g.ghosts
-        # arestas
+        t = self._t
+        # ── arestas + pacotes de dados correndo (visual de rede) ──
         for a, b in self._shown_edges():
             ba, bb = self._bodies.get(a), self._bodies.get(b)
             if ba is None or bb is None:
                 continue
+            ax, ay = self._w2s(ba.x, ba.y)
+            bx, by = self._w2s(bb.x, bb.y)
             sel = self._selected in (a, b)
             ghost = a in ghosts or b in ghosts
             color = MX_BRIGHT if sel else (MX_GHOST if ghost else MX_DIM)
-            pygame.draw.line(surface, color, self._w2s(ba.x, ba.y),
-                             self._w2s(bb.x, bb.y), 1)
-        # nós
+            pygame.draw.line(surface, color, (ax, ay), (bx, by), 1)
+            if ghost:
+                continue
+            # pulso = nota que viaja pela conexão (fase estável por aresta)
+            ph = (hash((a, b)) & 1023) / 1023.0
+            frac = (t * (0.35 + ph * 0.3) + ph) % 1.0
+            px = int(ax + (bx - ax) * frac)
+            py = int(ay + (by - ay) * frac)
+            pygame.draw.circle(surface, MX_PULSE if sel else MX_MID,
+                               (px, py), 2 if sel else 1)
+        # ── nós: ponto com brilho (halo gradiente + núcleo aceso) ──
         for nid in self._order:
             b = self._bodies.get(nid)
             if b is None:
@@ -645,20 +743,56 @@ class BrainScreen:
             sx, sy = self._w2s(b.x, b.y)
             pos = (int(sx), int(sy))
             if nid in ghosts:
-                pygame.draw.circle(surface, MX_GHOST, pos,
-                                   max(2, int(3 * self._zoom)), 1)
+                pygame.draw.circle(surface, MX_GLOW, pos, max(3, int(4 * self._zoom)))
+                pygame.draw.circle(surface, MX_GHOST, pos, max(2, int(3 * self._zoom)), 1)
                 continue
-            r = int((3 + min(5, g.degree(nid))) * self._zoom)
-            r = max(2, r)
+            deg = g.degree(nid)
+            r = max(2, int((3 + min(5, deg)) * self._zoom))
+            pygame.draw.circle(surface, MX_GLOW, pos, r + 4)   # halo externo
+            pygame.draw.circle(surface, MX_DIM, pos, r + 2)    # halo interno
             if nid == self._selected:
-                pulse = 2 + int((math.sin(self._t * 5) + 1) * 1.5)
+                pulse = 2 + int((math.sin(t * 5) + 1) * 1.5)
                 pygame.draw.circle(surface, MX_BRIGHT, pos, r + pulse, 1)
                 pygame.draw.circle(surface, MX_BRIGHT, pos, r)
+                pygame.draw.circle(surface, MX_CORE, pos, max(1, r // 2))
             else:
                 pygame.draw.circle(surface, MX_MID, pos, r)
+                pygame.draw.circle(surface, MX_CORE, pos, max(1, r // 2))
+                if deg >= 5:                                    # hub: anel extra
+                    pygame.draw.circle(surface, MX_MID, pos, r + 4, 1)
         # label flutuando no nó selecionado
         if self._selected and self._selected in self._bodies:
             self._draw_selection(surface, g)
+
+    def _draw_brain_backdrop(self, surface, view: pygame.Rect) -> None:
+        """Contorno enrugado (giros) + fissura central, bem fraco ao fundo:
+        emoldura os nós num formato de cérebro sem competir com a rede."""
+        cx = view.centerx
+        cy = (AREA_TOP + (H - AREA_BOTTOM)) // 2
+        rx = view.width * 0.43
+        ry = (H - AREA_TOP - AREA_BOTTOM) * 0.46
+        # córtex externo (circunvolução)
+        cortex = []
+        for i in range(60):
+            a = math.tau * i / 60
+            wob = 1.0 + 0.09 * math.sin(a * 7) + 0.05 * math.sin(a * 13 + 1.3)
+            cortex.append((cx + math.cos(a) * rx * wob, cy + math.sin(a) * ry * wob))
+        pygame.draw.lines(surface, MX_GLOW, True, cortex, 1)
+        # uma dobra interna (dá profundidade sem virar mapa de contorno)
+        inner = []
+        for i in range(44):
+            a = math.tau * i / 44
+            wob = 1.0 + 0.10 * math.sin(a * 6 + 2.2)
+            inner.append((cx + math.cos(a) * rx * 0.6 * wob,
+                          cy + math.sin(a) * ry * 0.6 * wob))
+        pygame.draw.lines(surface, MX_GLOW, True, inner, 1)
+        # fissura longitudinal (separa os hemisférios)
+        fissure = []
+        for i in range(15):
+            f = i / 14.0
+            fissure.append((cx + math.sin(f * math.tau * 1.5) * 6,
+                            cy - ry * 0.84 + ry * 1.68 * f))
+        pygame.draw.lines(surface, MX_GLOW, False, fissure, 1)
 
     def _draw_back_btn(self, surface) -> None:
         rect = self._back_btn()
