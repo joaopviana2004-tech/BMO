@@ -20,10 +20,11 @@ from ..core.widgets import (
     LOGICAL_SIZE,
 )
 
-MODES = ["clock", "face", "pong", "invaders", "shuffle"]
+MODES = ["clock", "face", "devhub", "pong", "invaders", "shuffle"]
 LABELS = {
     "clock": "CLOCK",
     "face": "BMO FACE",
+    "devhub": "DEV HUB",
     "pong": "PONG",
     "invaders": "INVADERS",
     "shuffle": "VARIADO",
@@ -94,16 +95,20 @@ class SleepScreen:
         self._draw_hint(surface)
 
     def _tile_rects(self):
-        # 5 tiles em linha, centrados horizontalmente
-        tile_w = tile_h = 50
-        gap = 10
-        total_w = len(MODES) * tile_w + (len(MODES) - 1) * gap
-        start_x = (LOGICAL_SIZE[0] - total_w) // 2
-        y = 64
-        return [
-            pygame.Rect(start_x + i * (tile_w + gap), y, tile_w, tile_h)
-            for i in range(len(MODES))
-        ]
+        # 3x2 grid — 6 modos de descanso
+        tile_w, tile_h = 58, 44
+        gap_x, gap_y = 8, 10
+        cols = 3
+        grid_w = cols * tile_w + (cols - 1) * gap_x
+        start_x = (LOGICAL_SIZE[0] - grid_w) // 2
+        start_y = 58
+        rects = []
+        for i in range(len(MODES)):
+            row, col = divmod(i, cols)
+            x = start_x + col * (tile_w + gap_x)
+            y = start_y + row * (tile_h + gap_y + 16)
+            rects.append(pygame.Rect(x, y, tile_w, tile_h))
+        return rects
 
     def _draw_title(self, surface: pygame.Surface) -> None:
         img = render_text("HOW BMO RESTS", 10, CRT_DIM)
@@ -123,6 +128,8 @@ class SleepScreen:
                 self._draw_pong_preview(surface, rect, selected)
             elif mode == "invaders":
                 self._draw_invaders_preview(surface, rect, selected)
+            elif mode == "devhub":
+                self._draw_devhub_preview(surface, rect, selected)
             else:
                 self._draw_shuffle_preview(surface, rect, selected)
             lbl = render_text(LABELS[mode], 8, color)
@@ -170,6 +177,19 @@ class SleepScreen:
             (cx - 8, sy + 4), (cx - 6, sy), (cx + 6, sy), (cx + 8, sy + 4),
         ])
         pygame.draw.rect(surface, c, (cx - 1, sy - 2, 2, 2))
+
+    def _draw_devhub_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
+        c = CRT_WHITE if bright else CRT_DIM
+        # mini barras de atividade
+        bars = [2, 4, 6, 5, 3, 7, 4]
+        bx = rect.left + 8
+        by = rect.bottom - 10
+        for i, h in enumerate(bars):
+            pygame.draw.rect(surface, c, (bx + i * 6, by - h, 4, h))
+        # linha de commit
+        pygame.draw.circle(surface, c, (rect.left + 10, rect.top + 12), 2)
+        line = render_text("> git", 7, c, pixel=False)
+        surface.blit(line, (rect.left + 14, rect.top + 8))
 
     def _draw_shuffle_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
         c = CRT_WHITE if bright else CRT_DIM

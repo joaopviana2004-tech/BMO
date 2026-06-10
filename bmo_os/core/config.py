@@ -47,7 +47,7 @@ _load_dotenv()
 
 DEFAULTS: dict = {
     "idle_timeout_s": 10,           # quanto tempo a home espera sem input pra voltar
-    "ambient_mode": "clock",        # "clock" | "face" | "pong" | "invaders" | "shuffle"
+    "ambient_mode": "clock",        # "clock" | "face" | "devhub" | "pong" | "invaders" | "shuffle"
     "theme": "auto",                # "auto" | "dark" | "light" — auto = claro 6h-18h
     "brightness": 100,              # 0-100 — overlay de dimming no canvas
     "volume": 100,                  # 0-100 — multiplicado em cada Sound.play()
@@ -88,10 +88,11 @@ DEFAULTS: dict = {
 }
 
 IDLE_TIMEOUT_OPTIONS = [5, 10, 15, 30, 60, 120]
-AMBIENT_MODE_OPTIONS = ["clock", "face", "pong", "invaders", "shuffle"]
+AMBIENT_MODE_OPTIONS = ["clock", "face", "devhub", "pong", "invaders", "shuffle"]
 AMBIENT_MODE_LABELS = {
     "clock": "RELOGIO",
     "face": "BMO FACE",
+    "devhub": "DEV HUB",
     "pong": "PONG",
     "invaders": "INVADERS",
     "shuffle": "VARIADO",

@@ -170,7 +170,7 @@ SCREENS_DOC = (
     "- snake: abre direto o jogo Snake (cobrinha).\n"
     "- configuracoes: ajustes (volume, brilho, tema, etc.).\n"
     "- relogio: tela de descanso com o relogio (modo ambiente).\n"
-    "- home: o menu principal do BMO.\n"
+    "- home: menu principal (categorias IA, REPOUSO, ESTUDOS, AJUSTES).\n"
     "- atualizar: baixa a ultima versao do BMO e reinicia (so se pedirem).\n"
 )
 

@@ -36,7 +36,7 @@ from bmo_os.screens.games import (
     draw_space_invaders_icon,
 )
 from bmo_os.screens.snake import SnakeScreen
-from bmo_os.screens.home import HomeScreen
+from bmo_os.screens.home import HomeScreen, build_categories
 from bmo_os.screens.gallery import GalleryScreen
 from bmo_os.screens.login import LoginScreen
 from bmo_os.screens.mic_button import MicButton
@@ -56,6 +56,7 @@ from bmo_os.services import google_auth
 from bmo_os.services.camera import CameraService
 from bmo_os.services.chat import ChatService
 from bmo_os.services.dev_hub import DevHubService
+from bmo_os.services.github_dev import GitHubPoller
 from bmo_os.services.drive_sync import DriveSync
 from bmo_os.services.gcalendar import CalendarService
 from bmo_os.services.gpio_button import GPIOButton
@@ -112,8 +113,9 @@ def _drain_pair() -> None:
 # mesmo fluxo da fala. O handler real é registrado pelo build_initial.
 _remote_chat = {"fn": None}
 
-# Dev Hub (POST /dev): commits/CI/logs do PC — serviço global (sobrevive ao login).
+# Dev Hub (POST /dev + GitHub API): commits/CI/logs — global (sobrevive ao login).
 _dev_hub = DevHubService()
+_github = GitHubPoller(_dev_hub)
 
 
 def _on_remote_chat(text: str) -> dict:
@@ -266,6 +268,9 @@ def build_initial(app: App):
             return PongAmbientScreen(on_open_home=open_home)
         if mode == "invaders":
             return SpaceInvadersAmbientScreen(on_open_home=open_home)
+        if mode == "devhub":
+            return DevHubScreen(on_open_home=open_home, dev_hub=_dev_hub,
+                                github=_github, ambient=True)
         # default: clock
         return ClockScreen(on_open_home=open_home, git_updates=git_updates)
 
@@ -277,6 +282,7 @@ def build_initial(app: App):
                 ambient_cache[mode] = ShufflingAmbientScreen([
                     _instantiate_ambient("clock"),
                     _instantiate_ambient("face"),
+                    _instantiate_ambient("devhub"),
                     _instantiate_ambient("pong"),
                     _instantiate_ambient("invaders"),
                 ])
@@ -342,44 +348,36 @@ def build_initial(app: App):
                            get_sync=lambda: _drive_sync.get("svc"))
 
     def make_devhub_screen() -> DevHubScreen:
-        return DevHubScreen(on_back=app.manager.pop, dev_hub=_dev_hub)
+        return DevHubScreen(on_back=app.manager.pop, dev_hub=_dev_hub, github=_github)
 
     def make_home() -> HomeScreen:
+        push = app.manager.push
+        pop = app.manager.pop
         return HomeScreen(
             on_back=go_ambient,
-            on_open_sleep=lambda: app.manager.push(
-                SleepScreen(on_back=app.manager.pop, on_select_mode=select_ambient)
+            categories=build_categories(
+                on_brain=lambda: push(make_brain_screen()),
+                on_aitest=lambda: push(
+                    AITestScreen(on_back=pop, voice=voice, camera=camera,
+                                 sysinfo=sysinfo, chat=chat, button=ptt_button,
+                                 on_respond=handle_ai_response)),
+                on_sleep=lambda: push(
+                    SleepScreen(on_back=pop, on_select_mode=select_ambient)),
+                on_suspend=open_suspend,
+                on_tasks=lambda: push(TasksScreen(on_back=pop, todoist=todoist)),
+                on_agenda=lambda: push(AgendaScreen(on_back=pop, calendar=calendar)),
+                on_pomodoro=lambda: push(pomodoro),
+                on_recorder=lambda: push(make_recorder_screen()),
+                on_games=lambda: push(make_games_screen()),
+                on_photo=lambda: push(PhotoScreen(
+                    on_back=pop, camera=camera,
+                    on_open_gallery=lambda: push(
+                        GalleryScreen(on_back=pop, photos_dir=PHOTOS_DIR)),
+                )),
+                on_dev=lambda: push(make_devhub_screen()),
+                on_settings=lambda: push(make_settings()),
+                on_sysinfo=lambda: push(SysInfoScreen(on_back=pop, sysinfo=sysinfo)),
             ),
-            on_open_suspend=open_suspend,
-            on_open_games=lambda: app.manager.push(make_games_screen()),
-            on_open_tasks=lambda: app.manager.push(
-                TasksScreen(on_back=app.manager.pop, todoist=todoist)
-            ),
-            on_open_agenda=lambda: app.manager.push(
-                AgendaScreen(on_back=app.manager.pop, calendar=calendar)
-            ),
-            on_open_pomodoro=lambda: app.manager.push(pomodoro),
-            on_open_recorder=lambda: app.manager.push(make_recorder_screen()),
-            on_open_brain=lambda: app.manager.push(make_brain_screen()),
-            on_open_dev=lambda: app.manager.push(make_devhub_screen()),
-            on_open_photo=lambda: app.manager.push(
-                PhotoScreen(
-                    on_back=app.manager.pop,
-                    camera=camera,
-                    on_open_gallery=lambda: app.manager.push(
-                        GalleryScreen(on_back=app.manager.pop, photos_dir=PHOTOS_DIR)
-                    ),
-                )
-            ),
-            on_open_sysinfo=lambda: app.manager.push(
-                SysInfoScreen(on_back=app.manager.pop, sysinfo=sysinfo)
-            ),
-            on_open_teste=lambda: app.manager.push(
-                AITestScreen(on_back=app.manager.pop, voice=voice, camera=camera,
-                             sysinfo=sysinfo, chat=chat, button=ptt_button,
-                             on_respond=handle_ai_response)
-            ),
-            on_open_settings=lambda: app.manager.push(make_settings()),
         )
 
     def on_setting_change(key, value) -> None:
@@ -787,6 +785,7 @@ def main() -> None:
     pairing = PairingServer(on_pair=_on_pair_request, on_chat=_on_remote_chat,
                             on_dev=_on_dev_event)
     pairing.start()
+    _github.start()
 
     if session.current() is None and google_auth.available():
         # sem sessão: tela de LOGIN (QR + device flow) antes de tudo.

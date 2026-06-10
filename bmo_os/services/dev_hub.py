@@ -44,7 +44,7 @@ class DevLog:
 
 
 class DevHubService:
-    MAX_COMMITS = 24
+    MAX_COMMITS = 40
     MAX_CI = 8
     MAX_LOGS = 20
 
