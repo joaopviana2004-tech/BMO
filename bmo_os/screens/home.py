@@ -17,7 +17,7 @@ from ..core import input as bmo_input
 from ..core.theme import render_text
 from ..core.widgets import (
     CRT_BLACK, CRT_DIM, CRT_WHITE,
-    SAFE_INSET, draw_crt_corners, draw_scanlines,
+    SAFE_INSET, draw_crt_corners, draw_dashed_rect, draw_scanlines,
     LOGICAL_SIZE,
 )
 from ..services import audio
@@ -269,110 +269,283 @@ def build_categories(
     ]
 
 
+W = LOGICAL_SIZE[0]
+H = LOGICAL_SIZE[1]
+
+
 class HomeScreen:
+    """Menu em pager de grades.
+
+    Cada categoria é uma *página*: seus apps aparecem numa grade (vários ícones
+    por vez). Arrasta pro lado (swipe, com inércia/flick) ou usa as setas/←→ pra
+    trocar de categoria, com slide animado e a vizinha 'espiando'. O destaque de
+    seleção desliza suave entre os tiles. Toque num tile abre o app.
+
+    O toque é tratado a partir dos eventos brutos (down/move/up) pra distinguir
+    tap de swipe — o `TAP` sintético do app (postado no press) é ignorado aqui.
+    """
+
     def __init__(self, *, on_back, categories: list[HubCategory]) -> None:
         self.on_back = on_back
         self.categories = categories
-        self._view = "hub"          # hub | category
-        self._cat_index = 0
-        self._item_index = 0
+        self._page = 0            # categoria atual
+        self._sel = 0             # tile selecionado na página (cursor teclado/GPIO)
+        self._t = 0.0
         self._idle = 0.0
         self._timed_out = False
-        self._t = 0.0
+        # animação de slide entre páginas (offset px da página atual; 0 = parado)
+        self._slide = 0.0
+        self._slide_at_press = 0.0
+        # gesto de ponteiro
+        self._ptr_down = False
+        self._moved = False
+        self._press = (0, 0)
+        self._press_t = 0.0
+        # destaque animado [x, y, w, h] e bob de entrada
+        self._hl = [0.0, 0.0, 0.0, 0.0]
+        self._enter_off = 0.0
+        self._snap_hl()
 
+    # ── ciclo de vida ─────────────────────────────────────────────
     def enter(self) -> None:
         self._idle = 0.0
         self._timed_out = False
-        self._view = "hub"
+        self._ptr_down = False
+        self._moved = False
+        self._enter_off = 12.0
+        self._sel = min(self._sel, len(self._active.items) - 1)
+        self._snap_hl()
 
     def exit(self) -> None: ...
 
     @property
-    def _active_items(self) -> list[HubItem]:
-        return self.categories[self._cat_index].items
+    def _active(self) -> HubCategory:
+        return self.categories[self._page]
 
-    def _step(self, delta: int) -> None:
-        if self._view == "hub":
-            self._cat_index = (self._cat_index + delta) % len(self.categories)
+    # ── layout da grade ───────────────────────────────────────────
+    @staticmethod
+    def _cols(n: int) -> int:
+        if n <= 1:
+            return 1
+        if n <= 4:
+            return 2
+        if n <= 6:
+            return 3
+        return 4
+
+    def _layout(self, n: int):
+        ax, ay = SAFE_INSET + 8, SAFE_INSET + 30
+        aw, ah = W - 2 * ax, H - ay - (SAFE_INSET + 18)
+        gap = 10
+        cols = self._cols(n)
+        rows = max(1, (n + cols - 1) // cols)
+        tile_w = min((aw - (cols - 1) * gap) // cols, 118)
+        tile_h = min((ah - (rows - 1) * gap) // rows, 84)
+        grid_h = rows * tile_h + (rows - 1) * gap
+        y0 = ay + (ah - grid_h) // 2
+        return cols, rows, tile_w, tile_h, gap, ax, ay, aw, ah, y0
+
+    def _tile_rect(self, i: int, n: int) -> pygame.Rect:
+        cols, rows, tw, th, gap, ax, ay, aw, ah, y0 = self._layout(n)
+        row, col = i // cols, i % cols
+        in_row = min(cols, n - row * cols)
+        row_w = in_row * tw + (in_row - 1) * gap
+        rx = ax + (aw - row_w) // 2
+        return pygame.Rect(rx + col * (tw + gap), y0 + row * (th + gap), tw, th)
+
+    def _snap_hl(self) -> None:
+        r = self._tile_rect(self._sel, len(self._active.items))
+        self._hl = [float(r.x), float(r.y), float(r.w), float(r.h)]
+
+    # ── navegação ─────────────────────────────────────────────────
+    def _page_step(self, direction: int, sel: str | None = None) -> None:
+        n_pages = len(self.categories)
+        self._page = (self._page + direction) % n_pages
+        self._slide = max(-W, min(W, self._slide + direction * W))
+        n = len(self._active.items)
+        if sel == "first":
+            self._sel = 0
+        elif sel == "last":
+            self._sel = n - 1
         else:
-            self._item_index = (self._item_index + delta) % len(self._active_items)
+            self._sel = min(self._sel, n - 1)
+        self._snap_hl()
+        audio.play("tick")
 
-    def _select(self) -> None:
-        if self._view == "hub":
-            self._view = "category"
-            self._item_index = 0
-            return
-        self._active_items[self._item_index].action()
+    def _launch(self) -> None:
+        audio.play("select")
+        self._active.items[self._sel].action()
 
-    def _go_back(self) -> None:
-        if self._view == "category":
-            self._view = "hub"
-            return
-        self.on_back()
+    def _on_action(self, a) -> None:
+        A = bmo_input.Action
+        n = len(self._active.items)
+        cols = self._cols(n)
+        if a == A.LEFT:
+            if self._sel > 0:
+                self._sel -= 1
+                self._snap_hl()
+                audio.play("tick")
+            else:
+                self._page_step(-1, sel="last")
+        elif a == A.RIGHT:
+            if self._sel < n - 1:
+                self._sel += 1
+                self._snap_hl()
+                audio.play("tick")
+            else:
+                self._page_step(1, sel="first")
+        elif a == A.UP:
+            self._sel = max(0, self._sel - cols)
+            self._snap_hl()
+            audio.play("tick")
+        elif a == A.DOWN:
+            self._sel = min(n - 1, self._sel + cols)
+            self._snap_hl()
+            audio.play("tick")
+        elif a == A.A:
+            self._launch()
+        elif a in (A.MENU, A.B):
+            audio.play("back")
+            self.on_back()
 
-    def _back_btn(self) -> pygame.Rect:
-        return pygame.Rect(SAFE_INSET, SAFE_INSET, 52, 16)
-
-    def _back_label(self) -> str:
-        return "MENU" if self._view == "category" else "VOLTAR"
+    # ── input ─────────────────────────────────────────────────────
+    def _to_logical(self, pos: tuple[int, int]) -> tuple[int, int]:
+        try:
+            win = pygame.display.get_window_size()
+            return (pos[0] * W // win[0], pos[1] * H // win[1])
+        except Exception:
+            return (pos[0] // 2, pos[1] // 2)
 
     def handle_event(self, event: pygame.event.Event) -> None:
-        if event.type != bmo_input.ACTION_EVENT:
+        et = event.type
+        if et == bmo_input.ACTION_EVENT:
+            self._idle = 0.0
+            if event.action == bmo_input.Action.TAP:
+                return  # toque tratado via eventos brutos (tap vs swipe)
+            self._on_action(event.action)
             return
-        self._idle = 0.0
-        action = event.action
-        if action == bmo_input.Action.LEFT:
-            self._step(-1)
-            audio.play("tick")
-        elif action == bmo_input.Action.RIGHT:
-            self._step(1)
-            audio.play("tick")
-        elif action == bmo_input.Action.A:
-            audio.play("select")
-            self._select()
-        elif action in (bmo_input.Action.MENU, bmo_input.Action.B):
-            audio.play("back")
-            self._go_back()
-        elif action == bmo_input.Action.TAP and event.pos is not None:
-            self._handle_tap(event.pos)
+        if et == pygame.MOUSEBUTTONDOWN and getattr(event, "button", 1) == 1:
+            self._idle = 0.0
+            self._ptr_down = True
+            self._moved = False
+            self._press = self._to_logical(event.pos)
+            self._press_t = self._t
+            self._slide_at_press = self._slide
+        elif et == pygame.MOUSEMOTION and self._ptr_down:
+            self._idle = 0.0
+            lx, _ = self._to_logical(event.pos)
+            dx = lx - self._press[0]
+            if abs(dx) > 3:
+                self._moved = True
+            if self._moved:
+                self._slide = max(-W, min(W, self._slide_at_press + dx))
+        elif et == pygame.MOUSEBUTTONUP and getattr(event, "button", 1) == 1 and self._ptr_down:
+            self._ptr_down = False
+            if self._moved:
+                self._settle_drag()
+            else:
+                self._handle_tap(self._press)
+
+    def _settle_drag(self) -> None:
+        flick = (self._t - self._press_t) < 0.32 and abs(self._slide - self._slide_at_press) > 24
+        moved_right = self._slide - self._slide_at_press > 0
+        if self._slide > W * 0.25 or (flick and moved_right):
+            self._page_step(-1)
+        elif self._slide < -W * 0.25 or (flick and not moved_right):
+            self._page_step(1)
+        # senão: volta sozinho pra 0 no update()
 
     def _handle_tap(self, pos: tuple[int, int]) -> None:
         if self._back_btn().collidepoint(pos):
             audio.play("back")
-            self._go_back()
+            self.on_back()
             return
-        cx, cy = LOGICAL_SIZE[0] // 2, 110
-        if pygame.Rect(0, cy - 36, 80, 72).collidepoint(pos):
-            self._step(-1)
-            audio.play("tick")
+        # tile tem prioridade sobre as setas (em página cheia o swipe pagina)
+        if abs(self._slide) < 4:
+            n = len(self._active.items)
+            for i in range(n):
+                if self._tile_rect(i, n).collidepoint(pos):
+                    self._sel = i
+                    self._snap_hl()
+                    self._launch()
+                    return
+        if self._arrow_rect("l").collidepoint(pos):
+            self._page_step(-1)
             return
-        if pygame.Rect(LOGICAL_SIZE[0] - 80, cy - 36, 80, 72).collidepoint(pos):
-            self._step(1)
-            audio.play("tick")
+        if self._arrow_rect("r").collidepoint(pos):
+            self._page_step(1)
             return
-        if pygame.Rect(0, 0, 80, 80).move(cx - 40, cy - 40).collidepoint(pos):
-            audio.play("select")
-            self._select()
 
+    # ── update ────────────────────────────────────────────────────
     def update(self, dt: float) -> None:
         self._t += dt
         self._idle += dt
+        if not self._ptr_down:
+            self._slide += (0.0 - self._slide) * min(1.0, dt * 12)
+            if abs(self._slide) < 0.5:
+                self._slide = 0.0
+        self._enter_off += (0.0 - self._enter_off) * min(1.0, dt * 10)
+        tgt = self._tile_rect(self._sel, len(self._active.items))
+        k = min(1.0, dt * 16)
+        self._hl[0] += (tgt.x - self._hl[0]) * k
+        self._hl[1] += (tgt.y - self._hl[1]) * k
+        self._hl[2] += (tgt.w - self._hl[2]) * k
+        self._hl[3] += (tgt.h - self._hl[3]) * k
         timeout = float(config.get("idle_timeout_s") or 10)
         if self._idle >= timeout and not self._timed_out:
             self._timed_out = True
             self.on_back()
 
+    # ── desenho ───────────────────────────────────────────────────
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill(CRT_BLACK)
         draw_scanlines(surface)
+        self._draw_pages(surface)
         draw_crt_corners(surface, margin=SAFE_INSET)
         theme_state.draw_status_bar(surface, top_pad=SAFE_INSET + 4, right_pad=SAFE_INSET + 4)
         self._draw_back_btn(surface)
-        if self._view == "hub":
-            self._draw_hub(surface)
-        else:
-            self._draw_category(surface)
-        self._draw_hint(surface)
+        self._draw_title(surface)
+        self._draw_arrows(surface)
+        self._draw_dots(surface)
+        self._draw_idle(surface)
+
+    def _draw_pages(self, surface: pygame.Surface) -> None:
+        clip = pygame.Rect(SAFE_INSET, SAFE_INSET + 26, W - 2 * SAFE_INSET, H - 2 * SAFE_INSET - 38)
+        surface.set_clip(clip)
+        y_off = int(self._enter_off)
+        slide = int(self._slide)
+        self._draw_page(surface, self._page, slide, y_off, current=True)
+        n_pages = len(self.categories)
+        if self._slide > 0.5:
+            self._draw_page(surface, (self._page - 1) % n_pages, slide - W, y_off, current=False)
+        elif self._slide < -0.5:
+            self._draw_page(surface, (self._page + 1) % n_pages, slide + W, y_off, current=False)
+        # destaque animado (acompanha o slide da página atual)
+        pulse = (1.0 + math.sin(self._t * 5)) * 1.5
+        hlr = pygame.Rect(int(self._hl[0]) + slide, int(self._hl[1]) + y_off,
+                          int(self._hl[2]), int(self._hl[3]))
+        draw_dashed_rect(surface, CRT_WHITE, hlr.inflate(int(6 + pulse), int(6 + pulse)))
+        surface.set_clip(None)
+
+    def _draw_page(self, surface, page: int, x_off: int, y_off: int, *, current: bool) -> None:
+        items = self.categories[page].items
+        n = len(items)
+        settled = abs(self._slide) < W * 0.5
+        for i, item in enumerate(items):
+            r = self._tile_rect(i, n).move(x_off, y_off)
+            self._draw_tile(surface, r, item, selected=current and settled and i == self._sel)
+
+    def _draw_tile(self, surface, r: pygame.Rect, item: HubItem, *, selected: bool) -> None:
+        pygame.draw.rect(surface, CRT_BLACK, r)
+        pygame.draw.rect(surface, CRT_WHITE if selected else CRT_DIM, r,
+                         2 if selected else 1, border_radius=4)
+        bob = int(math.sin(self._t * 3) * 2) if selected else 0
+        item.draw_icon(surface, r.centerx, r.centery - 6 + bob)
+        lbl = render_text(item.label, 8, CRT_WHITE if selected else CRT_DIM, pixel=False)
+        surface.blit(lbl, lbl.get_rect(midbottom=(r.centerx, r.bottom - 3)))
+
+    def _back_btn(self) -> pygame.Rect:
+        return pygame.Rect(SAFE_INSET, SAFE_INSET, 52, 16)
 
     def _draw_back_btn(self, surface: pygame.Surface) -> None:
         rect = self._back_btn()
@@ -383,81 +556,42 @@ class HomeScreen:
             (rect.left + 6, rect.centery + 3),
             (rect.left + 3, rect.centery),
         ])
-        img = render_text(self._back_label(), 8, CRT_WHITE, pixel=False)
+        img = render_text("VOLTAR", 8, CRT_WHITE, pixel=False)
         surface.blit(img, img.get_rect(midleft=(rect.left + 12, rect.centery)))
 
-    def _draw_hub(self, surface: pygame.Surface) -> None:
-        title = render_text("MENU", 10, CRT_DIM)
-        surface.blit(title, title.get_rect(midtop=(LOGICAL_SIZE[0] // 2, SAFE_INSET + 2)))
-        cat = self.categories[self._cat_index]
-        self._draw_carousel(
-            surface,
-            draw_icon=cat.draw_icon,
-            label=cat.label,
-            subtitle="escolha uma area",
-            index=self._cat_index,
-            total=len(self.categories),
-        )
+    def _draw_title(self, surface: pygame.Surface) -> None:
+        title = render_text(self._active.label, 11, CRT_WHITE)
+        surface.blit(title, title.get_rect(midtop=(W // 2, SAFE_INSET + 1)))
 
-    def _draw_category(self, surface: pygame.Surface) -> None:
-        cat = self.categories[self._cat_index]
-        item = self._active_items[self._item_index]
-        crumb = render_text(cat.label, 9, CRT_DIM)
-        surface.blit(crumb, crumb.get_rect(midtop=(LOGICAL_SIZE[0] // 2, SAFE_INSET + 2)))
-        self._draw_carousel(
-            surface,
-            draw_icon=item.draw_icon,
-            label=item.label,
-            subtitle="",
-            index=self._item_index,
-            total=len(self._active_items),
-        )
+    def _arrow_rect(self, side: str) -> pygame.Rect:
+        cy = 120
+        if side == "l":
+            return pygame.Rect(0, cy - 30, SAFE_INSET + 26, 60)
+        return pygame.Rect(W - (SAFE_INSET + 26), cy - 30, SAFE_INSET + 26, 60)
 
-    def _draw_carousel(
-        self,
-        surface: pygame.Surface,
-        *,
-        draw_icon: Callable,
-        label: str,
-        subtitle: str,
-        index: int,
-        total: int,
-    ) -> None:
-        cx = LOGICAL_SIZE[0] // 2
-        cy = 110
-        bob = int(math.sin(self._t * 3) * 2)
-        bob_arr = int(math.sin(self._t * 4) * 2)
+    def _draw_arrows(self, surface: pygame.Surface) -> None:
+        cy = 120
+        bob = int(math.sin(self._t * 4) * 2)
+        lx = SAFE_INSET + 2 - bob
+        pygame.draw.polygon(surface, CRT_DIM, [(lx + 8, cy - 9), (lx + 8, cy + 9), (lx, cy)])
+        rx = W - SAFE_INSET - 2 + bob
+        pygame.draw.polygon(surface, CRT_DIM, [(rx - 8, cy - 9), (rx - 8, cy + 9), (rx, cy)])
 
-        lx = 28 - bob_arr
-        pts_l = [(lx + 10, cy - 10), (lx + 10, cy + 10), (lx, cy)]
-        pygame.draw.polygon(surface, CRT_WHITE, pts_l)
-
-        rx = LOGICAL_SIZE[0] - 28 + bob_arr
-        pts_r = [(rx - 10, cy - 10), (rx - 10, cy + 10), (rx, cy)]
-        pygame.draw.polygon(surface, CRT_WHITE, pts_r)
-
-        draw_icon(surface, cx, cy + bob)
-
-        lbl = render_text(label, 12, CRT_WHITE)
-        surface.blit(lbl, lbl.get_rect(midtop=(cx, cy + 38)))
-
-        if subtitle:
-            sub = render_text(subtitle, 8, CRT_DIM, pixel=False)
-            surface.blit(sub, sub.get_rect(midtop=(cx, cy + 52)))
-
-        dot_w = 6
-        dots_y = cy + 58 if subtitle else cy + 54
-        total_w = total * dot_w + (total - 1) * 4
-        sx = cx - total_w // 2
+    def _draw_dots(self, surface: pygame.Surface) -> None:
+        total = len(self.categories)
+        dot_w, gap = 7, 4
+        total_w = total * dot_w + (total - 1) * gap
+        sx = W // 2 - total_w // 2
+        y = H - SAFE_INSET - 9
         for i in range(total):
-            color = CRT_WHITE if i == index else CRT_DIM
-            pygame.draw.rect(surface, color, (sx + i * (dot_w + 4), dots_y, dot_w, 2))
+            color = CRT_WHITE if i == self._page else CRT_DIM
+            pygame.draw.rect(surface, color, (sx + i * (dot_w + gap), y, dot_w, 3))
 
-    def _draw_hint(self, surface: pygame.Surface) -> None:
+    def _draw_idle(self, surface: pygame.Surface) -> None:
         timeout = float(config.get("idle_timeout_s") or 10)
-        idle_frac = min(self._idle / timeout, 1.0) if timeout > 0 else 0.0
+        frac = min(self._idle / timeout, 1.0) if timeout > 0 else 0.0
         x = SAFE_INSET + 8
-        max_w = LOGICAL_SIZE[0] - 2 * x
-        bar_w = int(max_w * (1.0 - idle_frac))
+        max_w = W - 2 * x
+        bar_w = int(max_w * (1.0 - frac))
         if bar_w > 0:
-            pygame.draw.rect(surface, CRT_DIM, (x, LOGICAL_SIZE[1] - SAFE_INSET - 4, bar_w, 2))
+            pygame.draw.rect(surface, CRT_DIM, (x, H - SAFE_INSET - 3, bar_w, 2))
