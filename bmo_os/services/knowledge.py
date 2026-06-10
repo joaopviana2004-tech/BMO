@@ -140,6 +140,23 @@ class KnowledgeService:
 
     # ---------- busca (tool notes_query do chat / futuro RAG) ----------
 
+    # palavras vazias do português coloquial: sobram só termos com conteúdo
+    # (nomes curtos como "JP" passam — por isso o mínimo é 2 letras + stoplist)
+    _STOPWORDS = {
+        "a", "o", "e", "é", "as", "os", "ai", "la", "ne", "eh", "ta", "to",
+        "de", "da", "do", "das", "dos", "em", "no", "na", "nos", "nas",
+        "um", "uma", "uns", "umas", "que", "quem", "qual", "quais", "como",
+        "onde", "quando", "por", "pra", "para", "pro", "com", "sem", "sobre",
+        "ele", "ela", "eles", "elas", "eu", "voce", "vc", "tu", "nos",
+        "meu", "minha", "meus", "minhas", "seu", "sua", "seus", "suas",
+        "me", "te", "se", "lhe", "ja", "nao", "sim", "mais", "menos",
+        "muito", "pouco", "tem", "tenho", "faz", "fazer", "ser", "estar",
+        "foi", "era", "sao", "esta", "estao", "oi", "ola", "oq", "obrigado",
+        "tudo", "bem", "bom", "boa", "dia", "tarde", "noite", "hoje",
+        "anotei", "anotou", "escrevi", "nota", "notas", "fala", "diz",
+        "sabe", "conhece", "lembra", "coisa", "coisas", "ent", "dai",
+    }
+
     @staticmethod
     def _fold(s: str) -> str:
         """minúsculas sem acento — busca tolerante a acentuação."""
@@ -151,10 +168,12 @@ class KnowledgeService:
         conteúdo (1 por ocorrência, com teto). Sem embeddings de propósito —
         roda em milissegundos na rasp e não depende de nada externo.
 
-        Retorna [{title, tags, snippet}] das k melhores notas; snippet é a
-        janela de texto em volta do primeiro termo achado."""
+        Retorna [{title, tags, snippet, score}] das k melhores notas; snippet
+        é a janela de texto em volta do primeiro termo achado. score >= 4
+        significa que bateu em título ou tag (match forte)."""
         graph = self.scan()
-        terms = [t for t in re.split(r"\W+", self._fold(query)) if len(t) >= 3]
+        terms = [t for t in re.split(r"\W+", self._fold(query))
+                 if len(t) >= 2 and t not in self._STOPWORDS]
         if not terms or graph.empty:
             return []
         scored = []
@@ -184,6 +203,6 @@ class KnowledgeService:
             start = max(0, (first_hit if first_hit >= 0 else 0) - snippet_chars // 3)
             snippet = " ".join(text[start:start + snippet_chars].split())
             scored.append((score, {"title": note.title, "tags": note.tags,
-                                   "snippet": snippet}))
+                                   "snippet": snippet, "score": score}))
         scored.sort(key=lambda x: -x[0])
         return [hit for _, hit in scored[:k]]

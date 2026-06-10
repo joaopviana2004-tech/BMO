@@ -11,10 +11,15 @@ PROVEDOR "local": um Ollama rodando no SEU PC (API OpenAI-compatível, sem
 chave). Defina LOCAL_LLM_HOST=<ip-do-pc> no .env da rasp; no PC rode
 `ollama serve` ouvindo na rede (OLLAMA_HOST=0.0.0.0).
 
-TOOL "notes_query" (contexto do Obsidian): o modelo pode pedir uma BUSCA nas
-notas do Segundo Cérebro preenchendo "notes_query" no JSON; o ask() roda a
-busca local (knowledge.search) e refaz a chamada com os trechos achados —
-RAG leve, sem embeddings, 100% na rasp.
+CONTEXTO DO OBSIDIAN (Segundo Cérebro) — dois caminhos se somam:
+  1. AUTOMÁTICO: antes de chamar o LLM, o ask() busca os termos da mensagem
+     nas notas (knowledge.search) e injeta os trechos com match forte no
+     prompt. Perguntou "quem é JP?" e existe JP.md -> o modelo JÁ recebe a
+     nota, sem depender da boa vontade dele.
+  2. TOOL "notes_query": o modelo ainda pode PEDIR uma busca extra
+     preenchendo "notes_query" no JSON; o ask() roda a busca e refaz a
+     chamada com os resultados (1 rodada no máximo).
+RAG leve, por palavra-chave, sem embeddings, 100% na rasp.
 
 Env (chaves; o resto é via Settings):
     OPENROUTER_API_KEY   chave do OpenRouter (openrouter.ai/keys)
@@ -171,7 +176,8 @@ SYSTEM_PROMPT = (
     "Fala como uma criancinha esperta: entusiasmado, carinhoso, brincalhao, com "
     "girias leves ('que demais!', 'beleza!', 'bora!'). Voce gosta de jogos, de "
     "ajudar e de fazer companhia. Responda em portugues do Brasil, curto (1-2 "
-    "frases), simpatico e direto. Trate o usuario como seu melhor amigo.\n"
+    "frases), simpatico e direto. Trate o usuario como seu melhor amigo. "
+    "NUNCA use emoji, emoticon ou simbolo decorativo — sua fala vira AUDIO.\n"
     + SCREENS_DOC +
     'Voce tambem pode CRIAR uma tarefa no Todoist: preencha "task" com o TITULO '
     'da tarefa. Regras do titulo:\n'
@@ -187,11 +193,14 @@ SYSTEM_PROMPT = (
     'pessoas, preferencias), liste em "facts" frases curtas em 3a pessoa '
     '(ex.: ["gosta de cafe", "trabalha com design"]). Se descobrir o NOME dele, '
     'preencha "name". Nao invente; se nao houver nada novo, use [] e "".\n'
-    'NOTAS (Segundo Cerebro): o usuario tem notas pessoais do Obsidian. Se a '
-    'pergunta depende do que ELE anotou (projetos, estudos, ideias, "o que eu '
-    'escrevi sobre..."), preencha "notes_query" com 2-4 palavras-chave da busca '
-    'e deixe "msg" vazia — voce recebera os trechos e respondera em seguida. '
-    'Se nao precisar das notas, use "".\n'
+    'NOTAS (Segundo Cerebro): o usuario tem notas pessoais do Obsidian. Quando '
+    'houver um bloco "NOTAS DO USUARIO" neste prompt, ele e a SUA FONTE DA '
+    'VERDADE: responda com base nele. Se perguntarem sobre uma pessoa, projeto '
+    'ou assunto e voce NAO tiver a informacao (nem nas notas, nem na memoria), '
+    'preencha "notes_query" com 2-4 palavras-chave e deixe "msg" vazia — voce '
+    'recebera os trechos e respondera em seguida. NUNCA invente fatos sobre '
+    'pessoas ou assuntos do usuario; sem informacao, diga que nao achou nada '
+    'nas notas. Se nao precisar de busca, use "".\n'
     'Responda SEMPRE apenas com um JSON valido no formato '
     '{"msg": "sua resposta", "screen": "uma das chaves acima", "task": "", '
     '"facts": [], "name": "", "notes_query": ""}. '
@@ -199,6 +208,23 @@ SYSTEM_PROMPT = (
     'sentido abrir aquela tela; em conversa normal use "none". '
     "Nada alem do JSON."
 )
+
+# Emojis e símbolos decorativos: o prompt já proíbe, mas modelo desobedece —
+# e o TTS lê/engasga neles. Remove na marra qualquer um que escapar.
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F000-\U0001FAFF"   # emojis, pictogramas, suplementos
+    "\u2600-\u27BF"           # símbolos diversos e dingbats (✨ ❤ ☀ ...)
+    "\u2B00-\u2BFF"           # setas/estrelas (⭐ ...)
+    "\uFE0F\u200D"            # variation selector / ZWJ de emoji composto
+    "\U0001F1E6-\U0001F1FF"   # bandeiras
+    "]+")
+
+
+def _strip_emoji(text: str) -> str:
+    out = _EMOJI_RE.sub("", text or "")
+    return re.sub(r"  +", " ", out).strip()
+
 
 # Como cada humor do pet colore o TOM da resposta (injetado no prompt).
 MOOD_TONE = {
@@ -272,14 +298,34 @@ class ChatService:
             parts.append(f"### {h['title']} {tags}\n{h['snippet']}")
         return "\n\n".join(parts)
 
+    def _auto_notes(self, text: str) -> str:
+        """RAG automático: busca os termos da mensagem nas notas ANTES de
+        chamar o LLM. Só injeta matches fortes (título/tag, score >= 4) pra
+        não poluir conversa fiada com nota aleatória."""
+        if self.knowledge is None:
+            return ""
+        try:
+            hits = [h for h in self.knowledge.search(text, k=2)
+                    if h.get("score", 0) >= 4]
+        except Exception:
+            return ""
+        if not hits:
+            return ""
+        parts = []
+        for h in hits:
+            tags = " ".join("#" + t for t in h.get("tags", [])[:3])
+            parts.append(f"### {h['title']} {tags}\n{h['snippet']}")
+        return ("NOTAS DO USUARIO (do Obsidian dele, achadas agora — use como "
+                "fonte da verdade):\n" + "\n\n".join(parts))
+
     def ask(self, text: str, mood: str = "") -> str:
         """Manda o texto pro LLM e retorna a msg do BMO (ou "" + last_error).
         Atualiza self.last_msg ("..." enquanto pensa) pra UI exibir.
         `mood` (opcional) colore o tom; usa memória+histórico se disponiveis.
 
-        TOOL: se o modelo devolver "notes_query", buscamos nas notas do
-        Obsidian (knowledge.search) e refazemos a chamada com os trechos —
-        no máximo 1 rodada extra."""
+        NOTAS: trechos com match forte entram AUTOMATICAMENTE no prompt; além
+        disso, se o modelo devolver "notes_query", buscamos nas notas do
+        Obsidian e refazemos a chamada com os trechos (1 rodada extra)."""
         self.last_error = ""
         self.last_screen = ""
         self.last_task = ""
@@ -294,7 +340,11 @@ class ChatService:
         if not (text or "").strip():
             return ""
         self.last_msg = "..."
-        messages = [{"role": "system", "content": self._build_system(mood)}]
+        system = self._build_system(mood)
+        auto_ctx = self._auto_notes(text)
+        if auto_ctx:
+            system += "\n" + auto_ctx
+        messages = [{"role": "system", "content": system}]
         messages.extend(self._history)   # contexto curto das trocas anteriores
         messages.append({"role": "user", "content": text})
         try:
@@ -398,8 +448,9 @@ class ChatService:
         try:
             data = _http_post_json(url, api_key, spec["extra_headers"], payload)
             content = (data["choices"][0]["message"].get("content") or "")
-            # tira <think> de modelos reasoning multimodais
+            # tira <think> de modelos reasoning multimodais (e emojis: vira fala)
             content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            content = _strip_emoji(content)
             if not content:
                 finish = data["choices"][0].get("finish_reason", "")
                 self.last_vision_error = "resposta vazia" + (f" ({finish})" if finish else "")
@@ -451,7 +502,7 @@ class ChatService:
                 except Exception:
                     obj = None
         if isinstance(obj, dict):
-            msg = str(obj.get("msg", "")).strip()
+            msg = _strip_emoji(str(obj.get("msg", "")))
             screen = str(obj.get("screen", "") or "").strip().lower()
             if screen not in self._SCREENS:
                 screen = ""
@@ -463,6 +514,6 @@ class ChatService:
             notes_query = str(obj.get("notes_query", "") or "").strip()
             # com busca pendente a msg pode vir vazia de propósito — não usa
             # o content cru como fallback nesse caso
-            return (msg or ("" if notes_query else content)), screen, task, \
-                facts, name, notes_query
-        return content, "", "", [], "", ""
+            return (msg or ("" if notes_query else _strip_emoji(content))), \
+                screen, task, facts, name, notes_query
+        return _strip_emoji(content), "", "", [], "", ""
