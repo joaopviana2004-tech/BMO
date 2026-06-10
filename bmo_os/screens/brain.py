@@ -40,9 +40,8 @@ MX_BRIGHT = (110, 255, 140)
 MX_MID = (50, 170, 85)
 MX_DIM = (22, 80, 42)
 MX_GHOST = (16, 55, 30)
-MX_GLOW = (9, 34, 19)        # halo dos nós + contorno do cérebro (bem fraco)
+MX_GLOW = (9, 34, 19)        # contorno do cérebro ao fundo (bem fraco)
 MX_PULSE = (160, 255, 185)   # pacote de dados correndo na aresta
-MX_CORE = (225, 255, 235)    # núcleo aceso do nó
 
 MAX_NODES = 80          # acima disso, mostra os mais conectados
 AREA_TOP = 30
@@ -390,6 +389,14 @@ class BrainScreen:
                 self._scroll_note(-1 if pos[1] < H // 2 else 1)
             # toques no grafo são tratados nos eventos raw (press/drag/duplo)
 
+    @staticmethod
+    def _node_radius_world(deg: int) -> float:
+        """Raio (mundo) cresce com o nº de conexões; sqrt p/ hubs não estourarem."""
+        return min(2.0 + 1.7 * math.sqrt(max(0, deg)), 11.0)
+
+    def _node_radius(self, deg: int) -> int:
+        return max(2, int(self._node_radius_world(deg) * self._zoom))
+
     def _node_at(self, pos: tuple[int, int]) -> str:
         """Nó sob o toque, em coords de TELA (área de toque cresce com o zoom)."""
         g = self._graph
@@ -400,7 +407,7 @@ class BrainScreen:
                 continue
             sx, sy = self._w2s(b.x, b.y)
             d = math.hypot(pos[0] - sx, pos[1] - sy)
-            r_node = (3 + min(5, g.degree(nid))) if (g and nid in g.notes) else 3
+            r_node = self._node_radius_world(g.degree(nid)) if (g and nid in g.notes) else 3.0
             if d <= max(12.0, r_node * self._zoom + 8) and d < best_d:
                 best, best_d = nid, d
         return best
@@ -735,7 +742,7 @@ class BrainScreen:
             py = int(ay + (by - ay) * frac)
             pygame.draw.circle(surface, MX_PULSE if sel else MX_MID,
                                (px, py), 2 if sel else 1)
-        # ── nós: ponto com brilho (halo gradiente + núcleo aceso) ──
+        # ── nós: ponto minimalista, raio = nº de conexões ──
         for nid in self._order:
             b = self._bodies.get(nid)
             if b is None:
@@ -743,23 +750,15 @@ class BrainScreen:
             sx, sy = self._w2s(b.x, b.y)
             pos = (int(sx), int(sy))
             if nid in ghosts:
-                pygame.draw.circle(surface, MX_GLOW, pos, max(3, int(4 * self._zoom)))
                 pygame.draw.circle(surface, MX_GHOST, pos, max(2, int(3 * self._zoom)), 1)
                 continue
-            deg = g.degree(nid)
-            r = max(2, int((3 + min(5, deg)) * self._zoom))
-            pygame.draw.circle(surface, MX_GLOW, pos, r + 4)   # halo externo
-            pygame.draw.circle(surface, MX_DIM, pos, r + 2)    # halo interno
+            r = self._node_radius(g.degree(nid))
             if nid == self._selected:
                 pulse = 2 + int((math.sin(t * 5) + 1) * 1.5)
-                pygame.draw.circle(surface, MX_BRIGHT, pos, r + pulse, 1)
                 pygame.draw.circle(surface, MX_BRIGHT, pos, r)
-                pygame.draw.circle(surface, MX_CORE, pos, max(1, r // 2))
+                pygame.draw.circle(surface, MX_BRIGHT, pos, r + pulse, 1)
             else:
                 pygame.draw.circle(surface, MX_MID, pos, r)
-                pygame.draw.circle(surface, MX_CORE, pos, max(1, r // 2))
-                if deg >= 5:                                    # hub: anel extra
-                    pygame.draw.circle(surface, MX_MID, pos, r + 4, 1)
         # label flutuando no nó selecionado
         if self._selected and self._selected in self._bodies:
             self._draw_selection(surface, g)
