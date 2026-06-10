@@ -24,6 +24,7 @@ Controles (tudo sem botão, design minimalista):
 """
 from __future__ import annotations
 
+import datetime as _dt
 import math
 import random
 
@@ -85,8 +86,15 @@ class _Body:
 class BrainScreen:
     voice_announce = "Segundo cérebro na tela."
 
-    def __init__(self, *, on_back, knowledge, get_sync=None) -> None:
+    def __init__(self, *, on_back=None, knowledge, get_sync=None,
+                 on_open_home=None, ambient=False) -> None:
         self.on_back = on_back
+        # modo descanso (screensaver): layout congelado, toque acorda pra home,
+        # um "holofote" passeia pelos nós e os pacotes de dados correm
+        self._ambient = ambient
+        self._wake = on_open_home or on_back or (lambda: None)
+        self.show_mic_button = bool(ambient)   # mic virtual só no descanso
+        self._spot_t = 0.0
         self.knowledge = knowledge
         self.get_sync = get_sync or (lambda: None)
         self._graph = None
@@ -323,6 +331,12 @@ class BrainScreen:
         return pygame.Rect(SAFE_INSET, SAFE_INSET, 52, 16)
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        if self._ambient:
+            # descanso: qualquer ação (toque/tecla) acorda pra home. Usa o
+            # ACTION_EVENT (não o mouse cru) pra apertar o mic NÃO acordar.
+            if event.type == bmo_input.ACTION_EVENT:
+                self._wake()
+            return
         if event.type == bmo_input.ACTION_EVENT:
             self._handle_action(event)
             return
@@ -673,6 +687,17 @@ class BrainScreen:
             self._refresh()
         if not self._order:
             return
+        if self._ambient:
+            # screensaver: layout congelado (poupa CPU/calor no Pi) — só os
+            # pacotes correm e um holofote troca de nó de tempos em tempos
+            self._spot_t += dt
+            if self._spot_t >= 4.5:
+                self._spot_t = 0.0
+                notes = [n for n in self._order
+                         if self._graph and n in self._graph.notes]
+                if notes:
+                    self._selected = self._rng.choice(notes)
+            return
         dt = min(dt, 0.05)
         dragging = self._press["nid"] if (self._press and self._press["moved"]) else ""
         # forças de layout suaves ao vivo (o settle já organizou): deixa a
@@ -697,16 +722,24 @@ class BrainScreen:
 
         g = self._graph
         if g is None or g.empty:
-            self._draw_back_btn(surface)
+            if not self._ambient:
+                self._draw_back_btn(surface)
             title = render_text("SEGUNDO CEREBRO", 10, MX_MID)
             surface.blit(title, title.get_rect(midtop=(W // 2, SAFE_INSET)))
             self._draw_empty(surface)
+            if self._ambient:
+                self._draw_mini_clock(surface)
             return
 
         view = self._view_rect()
         surface.set_clip(view)
         self._draw_graph(surface, g)
         surface.set_clip(None)
+
+        if self._ambient:
+            # descanso: grafo limpo + mini-relógio, sem chrome
+            self._draw_mini_clock(surface)
+            return
 
         if self._split:
             pygame.draw.line(surface, MX_DIM, (view.right, 0), (view.right, H), 1)
@@ -716,6 +749,10 @@ class BrainScreen:
             surface.blit(title, title.get_rect(midtop=(W // 2, SAFE_INSET)))
             self._draw_footer(surface, g)
         self._draw_back_btn(surface)
+
+    def _draw_mini_clock(self, surface) -> None:
+        img = render_text(_dt.datetime.now().strftime("%H:%M"), 10, MX_MID)
+        surface.blit(img, img.get_rect(midtop=(W // 2, SAFE_INSET - 2)))
 
     def _draw_graph(self, surface, g) -> None:
         view = self._view_rect()

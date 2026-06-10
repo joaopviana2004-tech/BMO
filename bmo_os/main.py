@@ -271,6 +271,10 @@ def build_initial(app: App):
         if mode == "devhub":
             return DevHubScreen(on_open_home=open_home, dev_hub=_dev_hub,
                                 github=_github, ambient=True)
+        if mode == "brain":
+            return BrainScreen(on_open_home=open_home, knowledge=knowledge,
+                               get_sync=lambda: _drive_sync.get("svc"),
+                               ambient=True)
         # default: clock
         return ClockScreen(on_open_home=open_home, git_updates=git_updates)
 
@@ -282,6 +286,7 @@ def build_initial(app: App):
                 ambient_cache[mode] = ShufflingAmbientScreen([
                     _instantiate_ambient("clock"),
                     _instantiate_ambient("face"),
+                    _instantiate_ambient("brain"),
                     _instantiate_ambient("devhub"),
                     _instantiate_ambient("pong"),
                     _instantiate_ambient("invaders"),

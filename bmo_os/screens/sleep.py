@@ -20,10 +20,11 @@ from ..core.widgets import (
     LOGICAL_SIZE,
 )
 
-MODES = ["clock", "face", "devhub", "pong", "invaders", "shuffle"]
+MODES = ["clock", "face", "brain", "devhub", "pong", "invaders", "shuffle"]
 LABELS = {
     "clock": "CLOCK",
     "face": "BMO FACE",
+    "brain": "CEREBRO",
     "devhub": "DEV HUB",
     "pong": "PONG",
     "invaders": "INVADERS",
@@ -99,18 +100,20 @@ class SleepScreen:
         self._draw_tiles(surface)
 
     def _tile_rects(self):
-        # 3x2 grid — 6 modos de descanso
-        tile_w, tile_h = 58, 44
-        gap_x, gap_y = 8, 10
-        cols = 3
-        grid_w = cols * tile_w + (cols - 1) * gap_x
-        start_x = (LOGICAL_SIZE[0] - grid_w) // 2
-        start_y = 58
+        # grade adaptativa em 2 linhas (cada linha centralizada)
+        n = len(MODES)
+        cols = 4 if n > 6 else 3
+        tile_w, tile_h = 56, 42
+        gap_x, row_step = 8, 64   # row_step inclui label + tag "ATUAL"
+        start_y = 52
         rects = []
-        for i in range(len(MODES)):
+        for i in range(n):
             row, col = divmod(i, cols)
+            in_row = min(cols, n - row * cols)
+            row_w = in_row * tile_w + (in_row - 1) * gap_x
+            start_x = (LOGICAL_SIZE[0] - row_w) // 2
             x = start_x + col * (tile_w + gap_x)
-            y = start_y + row * (tile_h + gap_y + 16)
+            y = start_y + row * row_step
             rects.append(pygame.Rect(x, y, tile_w, tile_h))
         return rects
 
@@ -149,6 +152,8 @@ class SleepScreen:
                 self._draw_invaders_preview(surface, rect, selected)
             elif mode == "devhub":
                 self._draw_devhub_preview(surface, rect, selected)
+            elif mode == "brain":
+                self._draw_brain_preview(surface, rect, selected)
             else:
                 self._draw_shuffle_preview(surface, rect, selected)
             lbl = render_text(LABELS[mode], 8, color)
@@ -209,6 +214,18 @@ class SleepScreen:
         pygame.draw.circle(surface, c, (rect.left + 10, rect.top + 12), 2)
         line = render_text("> git", 7, c, pixel=False)
         surface.blit(line, (rect.left + 14, rect.top + 8))
+
+    def _draw_brain_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
+        c = CRT_WHITE if bright else CRT_DIM
+        cx, cy = rect.center
+        # mini rede: hub central maior + nós menores (tamanho = conexões)
+        nodes = [(cx, cy), (cx - 13, cy - 7), (cx + 12, cy - 9),
+                 (cx - 9, cy + 9), (cx + 12, cy + 7), (cx + 1, cy - 13)]
+        edges = [(0, 1), (0, 2), (0, 3), (0, 4), (0, 5), (1, 3), (2, 4)]
+        for a, b in edges:
+            pygame.draw.line(surface, c, nodes[a], nodes[b], 1)
+        for i, (x, y) in enumerate(nodes):
+            pygame.draw.circle(surface, c, (x, y), 3 if i == 0 else 2)
 
     def _draw_shuffle_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
         c = CRT_WHITE if bright else CRT_DIM
