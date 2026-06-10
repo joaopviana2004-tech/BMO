@@ -45,13 +45,16 @@ MAX_NODES = 80          # acima disso, mostra os mais conectados
 AREA_TOP = 30
 AREA_BOTTOM = 36        # reserva do rodapé (info da nota)
 
-# física do layout
-REPULSION = 1800.0
-SPRING_K = 0.06
-SPRING_LEN = 46.0
-GRAVITY = 0.035
-DAMPING = 0.85
-MAX_SPEED = 60.0
+# layout: settle offline (anel radial + FR), depois congela — molas ao vivo
+# viravam hairball com dezenas de arestas.
+FR_K_SCALE = 1.55
+FR_ATTRACT = 0.35          # atração fraca (grafo denso não colapsa)
+MIN_NODE_SEP = 34.0
+GRAVITY = 0.0              # sem puxar pro centro
+DAMPING = 0.88
+MAX_SPEED = 80.0
+SETTLE_STEPS = 240
+WORLD_PAD = 1.8            # espaço de layout > viewport (câmera enquadra depois)
 
 # interação
 ZOOM_MIN, ZOOM_MAX = 0.5, 3.0
@@ -107,6 +110,7 @@ class BrainScreen:
         self._split = ""                  # id da nota no painel ("" = fechado)
         self._note_lines: list[str] = []  # linhas já quebradas pro painel
         self._note_scroll = 0
+        self._layout_frozen = False   # True = posições fixas (só arrasta nó)
 
     def enter(self) -> None:
         self._refresh(force=True)
@@ -139,18 +143,18 @@ class BrainScreen:
                 if t in graph.ghosts and t not in ghosts:
                     ghosts.append(t)
         ghosts = ghosts[: max(0, MAX_NODES - len(ids)) // 2]
+        prev_n = len(self._order)
         self._order = ids + ghosts
-        cx, cy = W / 2, (AREA_TOP + H - AREA_BOTTOM) / 2
-        for nid in self._order:
-            if nid not in self._bodies:
-                ang = self._rng.uniform(0, math.tau)
-                r = self._rng.uniform(10, 70)
-                self._bodies[nid] = _Body(cx + math.cos(ang) * r,
-                                          cy + math.sin(ang) * r)
+        reshuffle = force or abs(len(self._order) - prev_n) >= 2
+        self._seed_positions(respread=reshuffle)
         # remove corpos de nós que saíram
         for nid in list(self._bodies):
             if nid not in self._order:
                 del self._bodies[nid]
+        if reshuffle:
+            self._settle_layout(SETTLE_STEPS)
+            self._fit_camera_to_graph()
+            self._layout_frozen = True
         if self._selected not in self._order:
             self._selected = ""
         if self._split and self._split not in graph.notes:
@@ -451,6 +455,160 @@ class BrainScreen:
 
     # ---------- física ----------
 
+    def _world_center(self) -> tuple[float, float]:
+        return (W / 2.0, (AREA_TOP + H - AREA_BOTTOM) / 2.0)
+
+    def _layout_k(self) -> float:
+        """Distância ideal entre nós no espaço de layout expandido."""
+        n = max(len(self._order), 1)
+        vw = (W - 2 * (SAFE_INSET + 10)) * WORLD_PAD
+        vh = (H - AREA_TOP - AREA_BOTTOM) * WORLD_PAD
+        return math.sqrt(vw * vh / n) * FR_K_SCALE
+
+    def _seed_positions(self, *, respread: bool = False) -> None:
+        """Anéis por distância BFS a partir do hub (nota mais conectada)."""
+        if not self._order:
+            return
+        g = self._graph
+        cx, cy = self._world_center()
+        k = self._layout_k()
+
+        # grafo de adjacência (arestas visíveis)
+        adj: dict[str, set[str]] = {nid: set() for nid in self._order}
+        for a, b in self._shown_edges():
+            if a in adj and b in adj:
+                adj[a].add(b)
+                adj[b].add(a)
+
+        # hub = maior grau; BFS pra níveis
+        notes_only = [n for n in self._order if g and n in g.notes]
+        hub = max(notes_only, key=g.degree) if (g and notes_only) else self._order[0]
+        level: dict[str, int] = {hub: 0}
+        queue = [hub]
+        qi = 0
+        while qi < len(queue):
+            cur = queue[qi]
+            qi += 1
+            for nb in adj.get(cur, ()):
+                if nb not in level:
+                    level[nb] = level[cur] + 1
+                    queue.append(nb)
+        max_lv = max(level.values()) if level else 0
+        for nid in self._order:
+            if nid not in level:
+                level[nid] = max_lv + 1
+
+        by_lv: dict[int, list[str]] = {}
+        for nid, lv in level.items():
+            by_lv.setdefault(lv, []).append(nid)
+
+        for lv, nodes in by_lv.items():
+            nodes.sort()
+            ring = k * (lv + 0.35) * 1.15
+            for i, nid in enumerate(nodes):
+                if not respread and nid in self._bodies:
+                    continue
+                if lv == 0 and len(nodes) == 1:
+                    self._bodies[nid] = _Body(cx, cy)
+                    continue
+                ang = math.tau * i / max(1, len(nodes)) + lv * 0.55
+                jitter = self._rng.uniform(0.92, 1.08)
+                self._bodies[nid] = _Body(
+                    cx + math.cos(ang) * ring * jitter,
+                    cy + math.sin(ang) * ring * jitter,
+                )
+
+    def _fit_camera_to_graph(self) -> None:
+        """Enquadra todos os nós na viewport (zoom + centro)."""
+        if not self._order:
+            return
+        xs, ys = [], []
+        for nid in self._order:
+            b = self._bodies.get(nid)
+            if b is not None:
+                xs.append(b.x)
+                ys.append(b.y)
+        if not xs:
+            return
+        pad = 28.0
+        minx, maxx = min(xs) - pad, max(xs) + pad
+        miny, maxy = min(ys) - pad, max(ys) + pad
+        gw = max(maxx - minx, 48.0)
+        gh = max(maxy - miny, 48.0)
+        self._cam[0] = (minx + maxx) / 2.0
+        self._cam[1] = (miny + maxy) / 2.0
+        view = self._view_rect()
+        self._zoom = min(view.width / gw, view.height / gh, ZOOM_MAX)
+        self._zoom = max(self._zoom, ZOOM_MIN)
+
+    def _physics_step(self, dt: float, *, dragging: str, cool: float = 1.0) -> None:
+        if not self._order:
+            return
+        bodies = self._bodies
+        ids = self._order
+        k = self._layout_k()
+        k2 = k * k
+        rep_scale = cool
+        # repulsão entre todos os pares
+        for i, a in enumerate(ids):
+            ba = bodies[a]
+            for b_id in ids[i + 1:]:
+                bb = bodies[b_id]
+                dx, dy = ba.x - bb.x, ba.y - bb.y
+                d = math.hypot(dx, dy)
+                if d < 0.5:
+                    dx, dy = self._rng.uniform(-1, 1), self._rng.uniform(-1, 1)
+                    d = 0.5
+                fr = (k2 / d) * rep_scale
+                if d < MIN_NODE_SEP:
+                    fr += (MIN_NODE_SEP - d) * 4.5 * rep_scale
+                fx, fy = fr * dx / d, fr * dy / d
+                ba.vx += fx * dt
+                ba.vy += fy * dt
+                bb.vx -= fx * dt
+                bb.vy -= fy * dt
+        # atração fraca nas arestas
+        for a, b in self._shown_edges():
+            ba, bb = bodies.get(a), bodies.get(b)
+            if ba is None or bb is None:
+                continue
+            dx, dy = bb.x - ba.x, bb.y - ba.y
+            d = math.hypot(dx, dy) or 0.5
+            fa = (d * d / k) * FR_ATTRACT * rep_scale
+            fx, fy = fa * dx / d, fa * dy / d
+            ba.vx += fx * dt
+            ba.vy += fy * dt
+            bb.vx -= fx * dt
+            bb.vy -= fy * dt
+        for nid in ids:
+            b = bodies[nid]
+            if nid == dragging:
+                b.vx = b.vy = 0.0
+                continue
+            b.vx *= DAMPING
+            b.vy *= DAMPING
+            sp = math.hypot(b.vx, b.vy)
+            if sp > MAX_SPEED:
+                b.vx *= MAX_SPEED / sp
+                b.vy *= MAX_SPEED / sp
+            b.x += b.vx * dt * 6
+            b.y += b.vy * dt * 6
+
+    def _settle_layout(self, steps: int) -> None:
+        """Roda a física várias vezes sem desenhar — grafo já abre espaçado."""
+        dt = 1.0 / 30.0
+        for i in range(max(0, steps)):
+            cool = 1.0 + 0.5 * (1.0 - i / max(1, steps - 1))
+            self._physics_step(dt, dragging="", cool=cool)
+
+    def _edges_to_draw(self) -> list:
+        """Sem foco: só nós. Com toque/split: linhas do nó focado."""
+        edges = self._shown_edges()
+        focus = self._split or self._selected
+        if not focus:
+            return []
+        return [(a, b) for a, b in edges if focus in (a, b)]
+
     def update(self, dt: float) -> None:
         self._t += dt
         self._scan_t += dt
@@ -459,56 +617,16 @@ class BrainScreen:
             self._refresh()
         if not self._order:
             return
-        dt = min(dt, 0.05)
-        bodies = self._bodies
-        ids = self._order
-        cx = W / 2
-        cy = (AREA_TOP + H - AREA_BOTTOM) / 2
-        dragging = self._press["nid"] if (self._press and self._press["moved"]) else ""
-        # repulsão O(n²) — ok pro cap de 80 nós a 30fps
-        for i, a in enumerate(ids):
-            ba = bodies[a]
-            for b_id in ids[i + 1:]:
-                bb = bodies[b_id]
-                dx, dy = ba.x - bb.x, ba.y - bb.y
-                d2 = dx * dx + dy * dy
-                if d2 < 1.0:
-                    dx, dy, d2 = self._rng.uniform(-1, 1), self._rng.uniform(-1, 1), 1.0
-                f = REPULSION / d2
-                d = math.sqrt(d2)
-                fx, fy = f * dx / d, f * dy / d
-                ba.vx += fx * dt; ba.vy += fy * dt
-                bb.vx -= fx * dt; bb.vy -= fy * dt
-        # molas nas arestas
-        for a, b in self._shown_edges():
-            ba, bb = bodies.get(a), bodies.get(b)
-            if ba is None or bb is None:
-                continue
-            dx, dy = bb.x - ba.x, bb.y - ba.y
-            d = math.hypot(dx, dy) or 1.0
-            f = SPRING_K * (d - SPRING_LEN)
-            fx, fy = f * dx / d, f * dy / d
-            ba.vx += fx; ba.vy += fy
-            bb.vx -= fx; bb.vy -= fy
-        # gravidade pro centro + integração
-        for nid in ids:
-            b = bodies[nid]
-            if nid == dragging:
-                b.vx = b.vy = 0.0   # preso no dedo: a física não leva ele
-                continue
-            b.vx += (cx - b.x) * GRAVITY
-            b.vy += (cy - b.y) * GRAVITY
-            b.vx *= DAMPING; b.vy *= DAMPING
-            sp = math.hypot(b.vx, b.vy)
-            if sp > MAX_SPEED:
-                b.vx *= MAX_SPEED / sp; b.vy *= MAX_SPEED / sp
-            b.x += b.vx * dt * 6
-            b.y += b.vy * dt * 6
-            b.x = min(max(b.x, SAFE_INSET + 10), W - SAFE_INSET - 10)
-            b.y = min(max(b.y, AREA_TOP), H - AREA_BOTTOM)
+        # layout congelado após settle — molas contínuas viravam hairball
+        if self._layout_frozen:
+            pass
+        else:
+            dt = min(dt, 0.05)
+            dragging = self._press["nid"] if (self._press and self._press["moved"]) else ""
+            self._physics_step(dt, dragging=dragging)
         # no split a câmera segue o nó aberto, suave, sem mudar a escala
         if self._split:
-            b = bodies.get(self._split)
+            b = self._bodies.get(self._split)
             if b is not None:
                 k = min(1.0, dt * 5)
                 self._cam[0] += (b.x - self._cam[0]) * k
@@ -544,14 +662,14 @@ class BrainScreen:
 
     def _draw_graph(self, surface, g) -> None:
         ghosts = g.ghosts
-        # arestas
-        for a, b in self._shown_edges():
+        # arestas (só do nó em foco — evita hairball com dezenas de links)
+        focus = self._split or self._selected
+        for a, b in self._edges_to_draw():
             ba, bb = self._bodies.get(a), self._bodies.get(b)
             if ba is None or bb is None:
                 continue
-            sel = self._selected in (a, b)
             ghost = a in ghosts or b in ghosts
-            color = MX_BRIGHT if sel else (MX_GHOST if ghost else MX_DIM)
+            color = MX_BRIGHT if focus else (MX_GHOST if ghost else MX_DIM)
             pygame.draw.line(surface, color, self._w2s(ba.x, ba.y),
                              self._w2s(bb.x, bb.y), 1)
         # nós
@@ -652,7 +770,7 @@ class BrainScreen:
                 info += f"  ({stat})"
             img = render_text(info, 8, MX_MID, pixel=False)
             surface.blit(img, img.get_rect(midbottom=(cx, y)))
-            hint = render_text("toque seleciona - 2 toques abre - arrasta/pinca",
+            hint = render_text("toque = conexoes - 2 toques abre nota - pinça zoom",
                                8, MX_DIM, pixel=False)
             surface.blit(hint, hint.get_rect(midbottom=(cx, y - 11)))
 
