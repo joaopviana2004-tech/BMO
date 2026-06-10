@@ -1,9 +1,8 @@
 """Link do Bimo na rede local: pareamento pelo PC + chat remoto de teste.
 
-Além do pareamento (abaixo), o servidor aceita POST /chat {"text": "..."}:
-a mensagem digitada no PC (scripts/bimo_chat.py) entra no MESMO caminho da
-fala (LLM + memória + abrir telas + voz na rasp) e a resposta volta no HTTP.
-É o embrião da extensão de desktop do Bimo.
+Além do pareamento (abaixo), o servidor aceita:
+  POST /chat {"text": "..."}  — chat de texto do PC (scripts/bimo_chat.py)
+  POST /dev  {evento}         — Dev Hub: commits, CI, logs (bimo_dev_bridge.py)
 
 --- Pareamento pelo PC — Drive COMPLETO pro Bimo.
 
@@ -51,9 +50,10 @@ class PairingServer:
     on_chat(text) -> dict roda DIRETO na thread do servidor (a chamada ao LLM
     é bloqueante mesmo; cada request tem sua própria thread)."""
 
-    def __init__(self, on_pair, on_chat=None) -> None:
+    def __init__(self, on_pair, on_chat=None, on_dev=None) -> None:
         self.on_pair = on_pair
         self.on_chat = on_chat
+        self.on_dev = on_dev
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -62,6 +62,7 @@ class PairingServer:
             return
         on_pair = self.on_pair
         on_chat = self.on_chat
+        on_dev = self.on_dev
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *a) -> None:   # sem ruído no stdout
@@ -76,13 +77,16 @@ class PairingServer:
                 self.wfile.write(body)
 
             def do_GET(self) -> None:
-                self._reply(200, {"app": "bimo", "pair": "POST /pair"})
+                self._reply(200, {"app": "bimo",
+                                  "endpoints": ["POST /pair", "POST /chat", "POST /dev"]})
 
             def do_POST(self) -> None:
                 if self.path == "/pair":
                     self._do_pair()
                 elif self.path == "/chat":
                     self._do_chat()
+                elif self.path == "/dev":
+                    self._do_dev()
                 else:
                     self._reply(404, {"error": "not found"})
 
@@ -121,6 +125,23 @@ class PairingServer:
                     self._reply(500, {"error": f"falha: {str(e)[:60]}"})
                     return
                 self._reply(200, {"ok": True, **(result or {})})
+
+            def _do_dev(self) -> None:
+                if on_dev is None:
+                    self._reply(503, {"error": "dev hub indisponivel"})
+                    return
+                try:
+                    n = int(self.headers.get("Content-Length", "0"))
+                    data = json.loads(self.rfile.read(n))
+                except Exception:
+                    self._reply(400, {"error": "payload invalido"})
+                    return
+                try:
+                    result = on_dev(data)
+                except Exception as e:
+                    self._reply(500, {"error": f"falha: {str(e)[:60]}"})
+                    return
+                self._reply(200, result or {"ok": True})
 
         try:
             self._httpd = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)

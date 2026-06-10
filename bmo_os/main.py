@@ -28,6 +28,7 @@ from bmo_os.screens.aitest import AITestScreen
 from bmo_os.screens.alert import AlertScreen
 from bmo_os.screens.bmo_face import BMOFaceScreen
 from bmo_os.screens.brain import BrainScreen
+from bmo_os.screens.devhub import DevHubScreen
 from bmo_os.screens.clock import ClockScreen
 from bmo_os.screens.flappy import FlappyScreen
 from bmo_os.screens.games import (
@@ -54,6 +55,7 @@ from bmo_os.services import audio
 from bmo_os.services import google_auth
 from bmo_os.services.camera import CameraService
 from bmo_os.services.chat import ChatService
+from bmo_os.services.dev_hub import DevHubService
 from bmo_os.services.drive_sync import DriveSync
 from bmo_os.services.gcalendar import CalendarService
 from bmo_os.services.gpio_button import GPIOButton
@@ -110,12 +112,19 @@ def _drain_pair() -> None:
 # mesmo fluxo da fala. O handler real é registrado pelo build_initial.
 _remote_chat = {"fn": None}
 
+# Dev Hub (POST /dev): commits/CI/logs do PC — serviço global (sobrevive ao login).
+_dev_hub = DevHubService()
+
 
 def _on_remote_chat(text: str) -> dict:
     fn = _remote_chat["fn"]
     if fn is None:
         return {"msg": "", "error": "bimo ainda iniciando (ou na tela de login)"}
     return fn(text)
+
+
+def _on_dev_event(payload: dict) -> dict:
+    return _dev_hub.ingest_http(payload)
 
 
 def _apply_profile_volume() -> None:
@@ -332,6 +341,9 @@ def build_initial(app: App):
         return BrainScreen(on_back=app.manager.pop, knowledge=knowledge,
                            get_sync=lambda: _drive_sync.get("svc"))
 
+    def make_devhub_screen() -> DevHubScreen:
+        return DevHubScreen(on_back=app.manager.pop, dev_hub=_dev_hub)
+
     def make_home() -> HomeScreen:
         return HomeScreen(
             on_back=go_ambient,
@@ -349,6 +361,7 @@ def build_initial(app: App):
             on_open_pomodoro=lambda: app.manager.push(pomodoro),
             on_open_recorder=lambda: app.manager.push(make_recorder_screen()),
             on_open_brain=lambda: app.manager.push(make_brain_screen()),
+            on_open_dev=lambda: app.manager.push(make_devhub_screen()),
             on_open_photo=lambda: app.manager.push(
                 PhotoScreen(
                     on_back=app.manager.pop,
@@ -461,6 +474,8 @@ def build_initial(app: App):
                            _cmd(lambda: app.manager.push(make_recorder_screen())))
     voice.register_command(["cerebro", "conhecimento", "notas", "obsidian"],
                            _cmd(lambda: app.manager.push(make_brain_screen())))
+    voice.register_command(["dev", "dev hub", "programacao", "codigo", "git"],
+                           _cmd(lambda: app.manager.push(make_devhub_screen())))
     voice.register_command(["configura", "ajuste", "settings"], _cmd(lambda: app.manager.push(make_settings())))
     voice.register_command(["menu", "inicio", "casa", "home"], _cmd(open_home))
     voice.register_command(["relogio", "horas", "tela inicial", "descanso"], _cmd(go_ambient))
@@ -501,6 +516,7 @@ def build_initial(app: App):
         "snake": lambda: app.manager.push(SnakeScreen(on_back=app.manager.pop)),
         "gravador": lambda: app.manager.push(make_recorder_screen()),
         "cerebro": lambda: app.manager.push(make_brain_screen()),
+        "devhub": lambda: app.manager.push(make_devhub_screen()),
         "configuracoes": lambda: app.manager.push(make_settings()),
         # relógio explícito (NÃO o ambient configurado, que pode ser face/pong)
         "relogio": lambda: app.manager.replace(_instantiate_ambient("clock")),
@@ -768,7 +784,8 @@ def main() -> None:
         show_toast("Drive completo conectado!")
 
     _pair_apply["fn"] = _apply_pair
-    pairing = PairingServer(on_pair=_on_pair_request, on_chat=_on_remote_chat)
+    pairing = PairingServer(on_pair=_on_pair_request, on_chat=_on_remote_chat,
+                            on_dev=_on_dev_event)
     pairing.start()
 
     if session.current() is None and google_auth.available():

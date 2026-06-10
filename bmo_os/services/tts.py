@@ -164,6 +164,7 @@ SCREEN_PHRASES = {
     "foto": "Câmera pronta.",
     "gravador": "Gravador armado. É só mandar.",
     "cerebro": "Segundo cérebro na tela.",
+    "devhub": "Dev Hub na tela.",
     "jogos": "Arcade aberto. Escolhe aí.",
     "pong": "Pong. Clássico nunca falha.",
     "invaders": "Invaders. Boa sorte.",

@@ -19,8 +19,8 @@ from ..core.widgets import (
 )
 from ..services import audio
 
-ITEMS = ["SLEEP", "SUSPEND", "GAMES", "TASKS", "AGENDA", "FOCO", "GRAVAR", "CEREBRO", "PHOTO", "SISTEMA", "TESTE", "SETTINGS"]
-ICONS = ["sleep", "suspend", "games", "tasks", "agenda", "pomodoro", "recorder", "brain", "photo", "sysinfo", "aitest", "settings"]
+ITEMS = ["SLEEP", "SUSPEND", "GAMES", "TASKS", "AGENDA", "FOCO", "GRAVAR", "CEREBRO", "DEV", "PHOTO", "SISTEMA", "TESTE", "SETTINGS"]
+ICONS = ["sleep", "suspend", "games", "tasks", "agenda", "pomodoro", "recorder", "brain", "devhub", "photo", "sysinfo", "aitest", "settings"]
 
 
 def _icon_sleep(surf: pygame.Surface, cx: int, cy: int) -> None:
@@ -148,6 +148,21 @@ def _icon_recorder(surf: pygame.Surface, cx: int, cy: int) -> None:
     pygame.draw.circle(surf, CRT_WHITE, (body.right + 5, body.top - 2), 4)
 
 
+def _icon_devhub(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # terminal: janela + prompt >
+    body = pygame.Rect(0, 0, 38, 28)
+    body.center = (cx, cy)
+    pygame.draw.rect(surf, CRT_WHITE, body, 2, border_radius=2)
+    pygame.draw.rect(surf, CRT_DIM, (body.left + 2, body.top + 2, body.width - 4, 5))
+    pygame.draw.line(surf, CRT_DIM, (body.left + 2, body.top + 9), (body.right - 2, body.top + 9), 1)
+    prompt = render_text(">", 8, CRT_WHITE)
+    surf.blit(prompt, (body.left + 4, body.top + 12))
+    pygame.draw.line(surf, CRT_DIM, (body.left + 12, body.top + 15),
+                     (body.right - 4, body.top + 15), 1)
+    pygame.draw.line(surf, CRT_DIM, (body.left + 12, body.top + 20),
+                     (body.right - 10, body.top + 20), 1)
+
+
 def _icon_brain(surf: pygame.Surface, cx: int, cy: int) -> None:
     # grafo de conhecimento: nós conectados (mini constelação)
     nodes = [(cx, cy - 12), (cx - 14, cy + 2), (cx + 13, cy - 2),
@@ -188,21 +203,22 @@ def _icon_aitest(surf: pygame.Surface, cx: int, cy: int) -> None:
 
 _DRAW_ICON = [
     _icon_sleep, _icon_suspend, _icon_games, _icon_tasks,
-    _icon_agenda, _icon_pomodoro, _icon_recorder, _icon_brain, _icon_photo,
-    _icon_sysinfo, _icon_aitest, _icon_settings,
+    _icon_agenda, _icon_pomodoro, _icon_recorder, _icon_brain, _icon_devhub,
+    _icon_photo, _icon_sysinfo, _icon_aitest, _icon_settings,
 ]
 
 
 class HomeScreen:
     def __init__(self, *, on_back, on_open_sleep, on_open_suspend, on_open_games,
                  on_open_tasks, on_open_agenda, on_open_pomodoro, on_open_recorder,
-                 on_open_brain, on_open_photo, on_open_sysinfo, on_open_teste,
-                 on_open_settings) -> None:
+                 on_open_brain, on_open_dev, on_open_photo, on_open_sysinfo,
+                 on_open_teste, on_open_settings) -> None:
         self.on_back = on_back
         self._on_select = [
             on_open_sleep, on_open_suspend, on_open_games, on_open_tasks,
             on_open_agenda, on_open_pomodoro, on_open_recorder, on_open_brain,
-            on_open_photo, on_open_sysinfo, on_open_teste, on_open_settings,
+            on_open_dev, on_open_photo, on_open_sysinfo, on_open_teste,
+            on_open_settings,
         ]
         self.on_open_games = on_open_games
         self.on_open_settings = on_open_settings
