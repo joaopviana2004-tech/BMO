@@ -1,4 +1,11 @@
-"""Pareamento pelo PC — Drive COMPLETO pro Bimo.
+"""Link do Bimo na rede local: pareamento pelo PC + chat remoto de teste.
+
+Além do pareamento (abaixo), o servidor aceita POST /chat {"text": "..."}:
+a mensagem digitada no PC (scripts/bimo_chat.py) entra no MESMO caminho da
+fala (LLM + memória + abrir telas + voz na rasp) e a resposta volta no HTTP.
+É o embrião da extensão de desktop do Bimo.
+
+--- Pareamento pelo PC — Drive COMPLETO pro Bimo.
 
 O login por QR (device flow) é limitado pelo Google ao escopo drive.file
 (o app só vê arquivos criados por ele mesmo). Pra o Bimo enxergar o Drive
@@ -39,11 +46,14 @@ def local_ip() -> str:
 
 
 class PairingServer:
-    """Servidor de pareamento em thread. on_pair(user, tokens) é chamado na
-    THREAD DO SERVIDOR — quem registra deve enfileirar pro main thread."""
+    """Servidor do link em thread. on_pair(user, tokens) é chamado na THREAD
+    DO SERVIDOR — quem registra deve enfileirar pro main thread.
+    on_chat(text) -> dict roda DIRETO na thread do servidor (a chamada ao LLM
+    é bloqueante mesmo; cada request tem sua própria thread)."""
 
-    def __init__(self, on_pair) -> None:
+    def __init__(self, on_pair, on_chat=None) -> None:
         self.on_pair = on_pair
+        self.on_chat = on_chat
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -51,6 +61,7 @@ class PairingServer:
         if self._thread is not None and self._thread.is_alive():
             return
         on_pair = self.on_pair
+        on_chat = self.on_chat
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *a) -> None:   # sem ruído no stdout
@@ -68,9 +79,14 @@ class PairingServer:
                 self._reply(200, {"app": "bimo", "pair": "POST /pair"})
 
             def do_POST(self) -> None:
-                if self.path != "/pair":
+                if self.path == "/pair":
+                    self._do_pair()
+                elif self.path == "/chat":
+                    self._do_chat()
+                else:
                     self._reply(404, {"error": "not found"})
-                    return
+
+            def _do_pair(self) -> None:
                 try:
                     n = int(self.headers.get("Content-Length", "0"))
                     data = json.loads(self.rfile.read(n))
@@ -87,6 +103,24 @@ class PairingServer:
                     return
                 self._reply(200, {"ok": True,
                                   "msg": f"pareado como {user.get('email', '?')}"})
+
+            def _do_chat(self) -> None:
+                if on_chat is None:
+                    self._reply(503, {"error": "chat remoto indisponivel"})
+                    return
+                try:
+                    n = int(self.headers.get("Content-Length", "0"))
+                    text = str(json.loads(self.rfile.read(n)).get("text", "")).strip()
+                    assert text
+                except Exception:
+                    self._reply(400, {"error": "payload invalido"})
+                    return
+                try:
+                    result = on_chat(text)   # bloqueia até o LLM responder
+                except Exception as e:
+                    self._reply(500, {"error": f"falha: {str(e)[:60]}"})
+                    return
+                self._reply(200, {"ok": True, **(result or {})})
 
         try:
             self._httpd = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)

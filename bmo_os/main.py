@@ -106,6 +106,18 @@ def _drain_pair() -> None:
             pass
 
 
+# Chat remoto (POST /chat no PairingServer): mensagem digitada no PC entra no
+# mesmo fluxo da fala. O handler real é registrado pelo build_initial.
+_remote_chat = {"fn": None}
+
+
+def _on_remote_chat(text: str) -> dict:
+    fn = _remote_chat["fn"]
+    if fn is None:
+        return {"msg": "", "error": "bimo ainda iniciando (ou na tela de login)"}
+    return fn(text)
+
+
 def _apply_profile_volume() -> None:
     audio.set_volume((config.get("volume") or 100) / 100)
 
@@ -168,7 +180,7 @@ def build_initial(app: App):
     # BMO responde via LLM (OpenRouter ou NVIDIA NIM — escolhível em SETTINGS->IA).
     # Degrada sem a chave do provedor ativo (OPENROUTER_API_KEY / NVIDIA_API_KEY).
     # memory dá contexto (nome/fatos) e histórico entre conversas.
-    chat = ChatService(memory=memory)
+    chat = ChatService(memory=memory, knowledge=knowledge)
     # Voz do BMO (TTS): Edge TTS (Francisca pt-BR) por padrão — incorporado do
     # módulo de laboratório bmo_voz.py. Degrada sem edge-tts/internet.
     # Volume separado em SETTINGS->IA ("Voz BMO" = tts_volume); 0 = mudo.
@@ -525,6 +537,24 @@ def build_initial(app: App):
         if action is not None:
             voice_enqueue(action)
 
+    def remote_chat(text: str) -> dict:
+        """Mensagem DIGITADA vinda do PC (scripts/bimo_chat.py): roda o mesmo
+        caminho da fala — LLM + memória + tool das notas + abrir telas + voz
+        na rasp — e devolve a resposta pro PC. Embrião da extensão desktop."""
+        if not chat.available:
+            return {"msg": "", "error":
+                    "LLM indisponivel (provedor/chave em SETTINGS -> IA)"}
+        handle_ai_response(text)
+        msg = (getattr(chat, "last_msg", "") or "").strip()
+        return {
+            "msg": "" if msg == "..." else msg,
+            "screen": getattr(chat, "last_screen", ""),
+            "task": getattr(chat, "last_task", ""),
+            "error": getattr(chat, "last_error", ""),
+        }
+
+    _remote_chat["fn"] = remote_chat
+
     # Telas onde o BMO pode falar sozinho (ambientes/descanso) — nunca durante
     # jogos ativos, menus ou suspensão (tela apagada).
     TALKATIVE_SCREENS = (BMOFaceScreen, ClockScreen, PongAmbientScreen,
@@ -732,7 +762,7 @@ def main() -> None:
         show_toast("Drive completo conectado!")
 
     _pair_apply["fn"] = _apply_pair
-    pairing = PairingServer(on_pair=_on_pair_request)
+    pairing = PairingServer(on_pair=_on_pair_request, on_chat=_on_remote_chat)
     pairing.start()
 
     if session.current() is None and google_auth.available():

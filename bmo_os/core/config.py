@@ -71,6 +71,9 @@ DEFAULTS: dict = {
         or "moonshotai/kimi-k2.6",
     "grok_model": os.environ.get("GROK_MODEL", "").strip()
         or "grok-3",
+    # LLM local no PC (Ollama): defina LOCAL_LLM_HOST=<ip-do-pc> no .env
+    "local_model": os.environ.get("LOCAL_LLM_MODEL", "").strip()
+        or "llama3.2",
     # --- Visão (teste de câmera -> LLM descreve a imagem) — escolha PRÓPRIA ---
     # (separada do chat porque só modelos multimodais enxergam imagem)
     "vision_provider": "openrouter",
@@ -80,6 +83,8 @@ DEFAULTS: dict = {
         or "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
     "grok_vision_model": os.environ.get("GROK_VISION_MODEL", "").strip()
         or "grok-2-vision-1212",
+    "local_vision_model": os.environ.get("LOCAL_LLM_VISION_MODEL", "").strip()
+        or "llava",
 }
 
 IDLE_TIMEOUT_OPTIONS = [5, 10, 15, 30, 60, 120]
@@ -97,8 +102,9 @@ EVENT_WARNING_OPTIONS = [1, 5, 10, 15, 30, 60]   # minutos de antecedência
 
 # --- LLM: provedores e modelos de troca rápida (SETTINGS -> IA) ---
 # Edite à vontade. Os IDs são os esperados por cada API (OpenAI-compatível).
-LLM_PROVIDERS = ["openrouter", "nvidia", "grok"]
-LLM_PROVIDER_LABELS = {"openrouter": "OPENROUTER", "nvidia": "NVIDIA", "grok": "GROK"}
+LLM_PROVIDERS = ["openrouter", "nvidia", "grok", "local"]
+LLM_PROVIDER_LABELS = {"openrouter": "OPENROUTER", "nvidia": "NVIDIA",
+                       "grok": "GROK", "local": "LOCAL (PC)"}
 LLM_MODELS = {
     # OpenRouter (openrouter.ai/models) — modelos free; troque por pagos se quiser
     "openrouter": [
@@ -120,6 +126,14 @@ LLM_MODELS = {
         "grok-3-mini",
         "grok-2-vision-1212",
     ],
+    # Ollama rodando no SEU PC (LOCAL_LLM_HOST no .env). Os nomes são os
+    # do `ollama list` — edite conforme o que você baixou.
+    "local": [
+        "llama3.2",
+        "llama3.1:8b",
+        "qwen2.5:7b",
+        "mistral",
+    ],
 }
 
 # Modelos de VISÃO (multimodais) por provedor — usados no teste de visão.
@@ -138,6 +152,10 @@ LLM_VISION_MODELS = {
     "grok": [
         "grok-2-vision-1212",
         "grok-4",
+    ],
+    "local": [
+        "llava",
+        "llama3.2-vision",
     ],
 }
 

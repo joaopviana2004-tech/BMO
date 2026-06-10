@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import re
 import threading
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -136,3 +137,53 @@ class KnowledgeService:
             self._sig = sig
             self._graph = graph
         return graph
+
+    # ---------- busca (tool notes_query do chat / futuro RAG) ----------
+
+    @staticmethod
+    def _fold(s: str) -> str:
+        """minúsculas sem acento — busca tolerante a acentuação."""
+        nfkd = unicodedata.normalize("NFKD", s.lower())
+        return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+    def search(self, query: str, k: int = 3, snippet_chars: int = 600) -> list[dict]:
+        """Busca por palavras-chave nas notas: título (peso 4), tags (3) e
+        conteúdo (1 por ocorrência, com teto). Sem embeddings de propósito —
+        roda em milissegundos na rasp e não depende de nada externo.
+
+        Retorna [{title, tags, snippet}] das k melhores notas; snippet é a
+        janela de texto em volta do primeiro termo achado."""
+        graph = self.scan()
+        terms = [t for t in re.split(r"\W+", self._fold(query)) if len(t) >= 3]
+        if not terms or graph.empty:
+            return []
+        scored = []
+        for note in graph.notes.values():
+            try:
+                text = note.path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            folded = self._fold(text)
+            title = self._fold(note.title)
+            tags = [self._fold(t) for t in note.tags]
+            score = 0.0
+            first_hit = -1
+            for term in terms:
+                if term in title:
+                    score += 4.0
+                if any(term in tg for tg in tags):
+                    score += 3.0
+                n = folded.count(term)
+                if n:
+                    score += min(n, 6)   # teto: nota gigante não domina tudo
+                    pos = folded.find(term)
+                    if first_hit < 0 or pos < first_hit:
+                        first_hit = pos
+            if score <= 0:
+                continue
+            start = max(0, (first_hit if first_hit >= 0 else 0) - snippet_chars // 3)
+            snippet = " ".join(text[start:start + snippet_chars].split())
+            scored.append((score, {"title": note.title, "tags": note.tags,
+                                   "snippet": snippet}))
+        scored.sort(key=lambda x: -x[0])
+        return [hit for _, hit in scored[:k]]

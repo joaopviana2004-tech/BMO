@@ -1,16 +1,27 @@
-"""BMO conversa via LLM (OpenRouter ou NVIDIA NIM — ambos OpenAI-compatíveis).
+"""BMO conversa via LLM (OpenRouter, NVIDIA NIM, Grok ou LOCAL no seu PC).
 
-Recebe o texto transcrito (do Whisper) e devolve a resposta do BMO. Pede ao
-modelo um JSON {"msg": "..."} e extrai o campo `msg`. urllib puro, degrada
-sem chave (available=False).
+Recebe o texto transcrito (do Whisper) ou digitado (scripts/bimo_chat.py) e
+devolve a resposta do BMO. Pede ao modelo um JSON {"msg": "..."} e extrai o
+campo `msg`. urllib puro, degrada sem chave (available=False).
 
 O provedor e o modelo são escolhidos em SETTINGS -> IA (gravados no config), e
 lidos a cada `ask()` — trocar nas Settings vale na hora, sem reiniciar.
+
+PROVEDOR "local": um Ollama rodando no SEU PC (API OpenAI-compatível, sem
+chave). Defina LOCAL_LLM_HOST=<ip-do-pc> no .env da rasp; no PC rode
+`ollama serve` ouvindo na rede (OLLAMA_HOST=0.0.0.0).
+
+TOOL "notes_query" (contexto do Obsidian): o modelo pode pedir uma BUSCA nas
+notas do Segundo Cérebro preenchendo "notes_query" no JSON; o ask() roda a
+busca local (knowledge.search) e refaz a chamada com os trechos achados —
+RAG leve, sem embeddings, 100% na rasp.
 
 Env (chaves; o resto é via Settings):
     OPENROUTER_API_KEY   chave do OpenRouter (openrouter.ai/keys)
     NVIDIA_API_KEY       chave NIM da NVIDIA (build.nvidia.com), formato nvapi-...
     XAI_API_KEY          chave do Grok / xAI (console.x.ai)
+    LOCAL_LLM_HOST       ip[:porta] do Ollama no PC (porta padrão 11434)
+    LOCAL_LLM_URL        (alternativa) URL completa do /v1/chat/completions
 """
 from __future__ import annotations
 
@@ -52,7 +63,33 @@ PROVIDERS = {
         "json_mode": True,
         "extra_headers": {},
     },
+    # Ollama no PC do dono — sem chave; URL vem do .env (LOCAL_LLM_HOST/URL).
+    # json_mode off: versões variadas do Ollama; o _parse acha o JSON no texto.
+    "local": {
+        "url": "",   # dinâmica — ver local_llm_url()
+        "key_env": "",
+        "model_key": "local_model",
+        "vision_model_key": "local_vision_model",
+        "json_mode": False,
+        "extra_headers": {},
+    },
 }
+
+
+def local_llm_url() -> str:
+    """URL do chat/completions do LLM local (Ollama no PC). "" = não configurado.
+
+    LOCAL_LLM_URL ganha (URL completa); senão LOCAL_LLM_HOST=ip[:porta]
+    (porta padrão 11434, a do Ollama)."""
+    url = os.environ.get("LOCAL_LLM_URL", "").strip()
+    if url:
+        return url
+    host = os.environ.get("LOCAL_LLM_HOST", "").strip()
+    if not host:
+        return ""
+    if ":" not in host:
+        host += ":11434"
+    return f"http://{host}/v1/chat/completions"
 
 
 def _provider(cfg_key: str = "llm_provider") -> str:
@@ -61,14 +98,22 @@ def _provider(cfg_key: str = "llm_provider") -> str:
 
 
 def _resolve(provider_key: str = "llm_provider", model_field: str = "model_key"):
-    """(provider, spec, api_key, model) conforme a config atual.
+    """(provider, spec, url, api_key, model) conforme a config atual.
     provider_key escolhe chat ('llm_provider') ou visão ('vision_provider');
-    model_field escolhe 'model_key' (chat) ou 'vision_model_key' (visão)."""
+    model_field escolhe 'model_key' (chat) ou 'vision_model_key' (visão).
+
+    No provedor "local" não há chave: api_key volta "ollama" (placeholder
+    aceito) quando a URL está configurada, e a URL vem do .env."""
     name = _provider(provider_key)
     spec = PROVIDERS[name]
-    key = os.environ.get(spec["key_env"], "").strip()
+    if name == "local":
+        url = local_llm_url()
+        key = "ollama" if url else ""
+    else:
+        url = spec["url"]
+        key = os.environ.get(spec["key_env"], "").strip()
     model = (config.get(spec[model_field]) or "").strip()
-    return name, spec, key, model
+    return name, spec, url, key, model
 
 
 def _http_post_json(url: str, api_key: str, extra_headers: dict, payload: dict,
@@ -142,9 +187,14 @@ SYSTEM_PROMPT = (
     'pessoas, preferencias), liste em "facts" frases curtas em 3a pessoa '
     '(ex.: ["gosta de cafe", "trabalha com design"]). Se descobrir o NOME dele, '
     'preencha "name". Nao invente; se nao houver nada novo, use [] e "".\n'
+    'NOTAS (Segundo Cerebro): o usuario tem notas pessoais do Obsidian. Se a '
+    'pergunta depende do que ELE anotou (projetos, estudos, ideias, "o que eu '
+    'escrevi sobre..."), preencha "notes_query" com 2-4 palavras-chave da busca '
+    'e deixe "msg" vazia — voce recebera os trechos e respondera em seguida. '
+    'Se nao precisar das notas, use "".\n'
     'Responda SEMPRE apenas com um JSON valido no formato '
     '{"msg": "sua resposta", "screen": "uma das chaves acima", "task": "", '
-    '"facts": [], "name": ""}. '
+    '"facts": [], "name": "", "notes_query": ""}. '
     'Use "screen" diferente de "none" SO quando o usuario pedir ou fizer claro '
     'sentido abrir aquela tela; em conversa normal use "none". '
     "Nada alem do JSON."
@@ -165,13 +215,16 @@ MOOD_TONE = {
 class ChatService:
     HISTORY_TURNS = 6   # quantas trocas (user+assistant) manter de contexto
 
-    def __init__(self, memory=None) -> None:
+    def __init__(self, memory=None, knowledge=None) -> None:
         self.last_error = ""
         self.last_msg = ""       # última resposta do BMO (pra UI ler)
         self.last_screen = ""    # tela que o BMO pediu pra abrir ("" = nenhuma)
         self.last_task = ""      # tarefa que o BMO pediu pra criar ("" = nenhuma)
         # Memória opcional (PetMemory): se None, o chat se comporta como antes.
         self.memory = memory
+        # KnowledgeService opcional: habilita a tool notes_query (RAG das
+        # notas do Obsidian espelhadas do Drive).
+        self.knowledge = knowledge
         # Histórico curto da conversa (pro BMO ter contexto entre falas).
         self._history: list[dict] = []
         # --- visão (descrição de imagem da câmera) ---
@@ -195,24 +248,45 @@ class ChatService:
 
     @property
     def available(self) -> bool:
-        _, _, key, _ = _resolve()
+        _, _, _, key, _ = _resolve()
         return bool(key)
 
     @property
     def vision_available(self) -> bool:
-        _, _, key, model = _resolve("vision_provider", "vision_model_key")
+        _, _, _, key, model = _resolve("vision_provider", "vision_model_key")
         return bool(key and model)
+
+    def _notes_context(self, query: str) -> str:
+        """Roda a busca nas notas do Obsidian e formata os trechos pro LLM."""
+        if self.knowledge is None or not query:
+            return ""
+        try:
+            hits = self.knowledge.search(query, k=3)
+        except Exception:
+            return ""
+        if not hits:
+            return "(nenhuma nota encontrada para essa busca)"
+        parts = []
+        for h in hits:
+            tags = " ".join("#" + t for t in h.get("tags", [])[:3])
+            parts.append(f"### {h['title']} {tags}\n{h['snippet']}")
+        return "\n\n".join(parts)
 
     def ask(self, text: str, mood: str = "") -> str:
         """Manda o texto pro LLM e retorna a msg do BMO (ou "" + last_error).
         Atualiza self.last_msg ("..." enquanto pensa) pra UI exibir.
-        `mood` (opcional) colore o tom; usa memória+histórico se disponiveis."""
+        `mood` (opcional) colore o tom; usa memória+histórico se disponiveis.
+
+        TOOL: se o modelo devolver "notes_query", buscamos nas notas do
+        Obsidian (knowledge.search) e refazemos a chamada com os trechos —
+        no máximo 1 rodada extra."""
         self.last_error = ""
         self.last_screen = ""
         self.last_task = ""
-        provider, spec, api_key, model = _resolve()
+        provider, spec, url, api_key, model = _resolve()
         if not api_key:
-            self.last_error = f"falta {spec['key_env']}"
+            self.last_error = ("configure LOCAL_LLM_HOST no .env" if provider == "local"
+                               else f"falta {spec['key_env']}")
             return ""
         if not model:
             self.last_error = f"sem modelo p/ {provider}"
@@ -223,20 +297,33 @@ class ChatService:
         messages = [{"role": "system", "content": self._build_system(mood)}]
         messages.extend(self._history)   # contexto curto das trocas anteriores
         messages.append({"role": "user", "content": text})
-        payload = {
-            "model": model,
-            "messages": messages,
-            "temperature": 0.6,
-            # modelos de reasoning gastam MUITOS tokens "pensando" antes do
-            # texto final; com pouco teto o content volta vazio. Folga grande.
-            "max_tokens": 4096,
-        }
-        if spec["json_mode"]:
-            payload["response_format"] = {"type": "json_object"}
         try:
-            data = _http_post_json(spec["url"], api_key, spec["extra_headers"], payload)
-            content = data["choices"][0]["message"].get("content")
-            self.last_msg, self.last_screen, self.last_task, facts, name = self._parse(content)
+            for round_ in range(2):   # rodada normal + (opcional) rodada da tool
+                payload = {
+                    "model": model,
+                    "messages": messages,
+                    "temperature": 0.6,
+                    # modelos de reasoning gastam MUITOS tokens "pensando" antes
+                    # do texto final; com pouco teto o content volta vazio.
+                    "max_tokens": 4096,
+                }
+                if spec["json_mode"]:
+                    payload["response_format"] = {"type": "json_object"}
+                data = _http_post_json(url, api_key, spec["extra_headers"], payload)
+                content = data["choices"][0]["message"].get("content")
+                (self.last_msg, self.last_screen, self.last_task,
+                 facts, name, notes_query) = self._parse(content)
+                if notes_query and self.knowledge is not None and round_ == 0:
+                    # o BMO pediu contexto das notas: injeta e refaz
+                    ctx = self._notes_context(notes_query)
+                    messages.append({"role": "assistant", "content": content or ""})
+                    messages.append({"role": "user", "content":
+                                     "RESULTADO DA BUSCA NAS NOTAS DO USUARIO "
+                                     f"(query: {notes_query}):\n{ctx}\n\n"
+                                     "Agora responda a pergunta original usando isso. "
+                                     "Mesmo formato JSON; notes_query vazio."})
+                    continue
+                break
             # grava memória nova (nome/fatos) e guarda a troca no histórico
             if self.memory is not None and self.last_msg:
                 try:
@@ -281,9 +368,12 @@ class ChatService:
         descrição. Usa o vision_provider/modelo do config. Atualiza
         self.last_vision ("..." enquanto pensa) e self.last_vision_error."""
         self.last_vision_error = ""
-        provider, spec, api_key, model = _resolve("vision_provider", "vision_model_key")
+        provider, spec, url, api_key, model = _resolve("vision_provider",
+                                                       "vision_model_key")
         if not api_key:
-            self.last_vision_error = f"falta {spec['key_env']}"
+            self.last_vision_error = ("configure LOCAL_LLM_HOST no .env"
+                                      if provider == "local"
+                                      else f"falta {spec['key_env']}")
             return ""
         if not model:
             self.last_vision_error = f"sem modelo de visao p/ {provider}"
@@ -306,7 +396,7 @@ class ChatService:
             "max_tokens": 512,
         }
         try:
-            data = _http_post_json(spec["url"], api_key, spec["extra_headers"], payload)
+            data = _http_post_json(url, api_key, spec["extra_headers"], payload)
             content = (data["choices"][0]["message"].get("content") or "")
             # tira <think> de modelos reasoning multimodais
             content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
@@ -343,10 +433,10 @@ class ChatService:
         if len(self._history) > max_msgs:
             self._history = self._history[-max_msgs:]
 
-    def _parse(self, content: str) -> tuple[str, str, str, list, str]:
-        """Extrai (msg, screen, task, facts, name) do JSON. Tolerante: tenta o
-        JSON inteiro, depois um objeto no meio do texto. Campos ausentes viram
-        vazio. screen vira "" se ausente/invalido."""
+    def _parse(self, content: str) -> tuple[str, str, str, list, str, str]:
+        """Extrai (msg, screen, task, facts, name, notes_query) do JSON.
+        Tolerante: tenta o JSON inteiro, depois um objeto no meio do texto.
+        Campos ausentes viram vazio. screen vira "" se ausente/invalido."""
         content = (content or "").strip()
         # remove blocos de raciocínio <think>...</think> de modelos reasoning
         content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
@@ -370,5 +460,9 @@ class ChatService:
             facts = [str(f).strip() for f in raw_facts if str(f).strip()] \
                 if isinstance(raw_facts, list) else []
             name = str(obj.get("name", "") or "").strip()
-            return (msg or content), screen, task, facts, name
-        return content, "", "", [], ""
+            notes_query = str(obj.get("notes_query", "") or "").strip()
+            # com busca pendente a msg pode vir vazia de propósito — não usa
+            # o content cru como fallback nesse caso
+            return (msg or ("" if notes_query else content)), screen, task, \
+                facts, name, notes_query
+        return content, "", "", [], "", ""
