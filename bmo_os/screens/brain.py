@@ -8,8 +8,8 @@ mostrando como as notas do Obsidian se conectam. Estilo terminal/matrix
 - linha   = [[wikilink]] entre notas
 - fantasma= link pra nota que não existe (círculo vazado, apagado)
 
-Layout estilo Oráculo (GRAFO.md): espiral de filotaxia no load (hubs no
-centro, folhas na borda), repulsão + colisão + gravidade, assenta e congela.
+Layout força-dirigido rodando ao vivo (repulsão + molas + gravidade pro
+centro): o grafo "respira" e se organiza sozinho na tela.
 
 Controles (tudo sem botão, design minimalista):
 - TAP num nó           seleciona / deseleciona
@@ -45,20 +45,14 @@ MAX_NODES = 80          # acima disso, mostra os mais conectados
 AREA_TOP = 30
 AREA_BOTTOM = 36        # reserva do rodapé (info da nota)
 
-# layout Oráculo — ver gravae-OPS/conhecimentos/GRAFO.md
-GOLDEN_ANGLE = 2.399963229728653
-ORACLE_REPEL = 95.0
-ORACLE_CENTER = 0.038
-ORACLE_LINK_STR = 0.0       # 0 = espalha só com repulsão (sem hairball)
-ORACLE_LINK_DIST = 26.0
-ORACLE_VEL_DECAY = 0.6
-ORACLE_COLLIDE_PAD = 5
-SETTLE_ALPHA_DECAY = 0.028
-SETTLE_MIN_ALPHA = 0.002
-SETTLE_MAX_STEPS = 280
-NODE_TAM = 1.35
-NODE_R_MIN = 3
-NODE_R_MAX = 12
+# física do layout (Fruchterman–Reingold + separação mínima; k escala com nº de nós)
+FR_K_SCALE = 1.28
+FR_ATTRACT = 0.85
+MIN_NODE_SEP = 20.0
+GRAVITY = 0.006
+DAMPING = 0.86
+MAX_SPEED = 55.0
+SETTLE_STEPS = 90
 
 # interação
 ZOOM_MIN, ZOOM_MAX = 0.5, 3.0
@@ -114,7 +108,6 @@ class BrainScreen:
         self._split = ""                  # id da nota no painel ("" = fechado)
         self._note_lines: list[str] = []  # linhas já quebradas pro painel
         self._note_scroll = 0
-        self._layout_frozen = False   # True = posições fixas (só arrasta nó)
 
     def enter(self) -> None:
         self._refresh(force=True)
@@ -150,15 +143,21 @@ class BrainScreen:
         prev_n = len(self._order)
         self._order = ids + ghosts
         reshuffle = force or abs(len(self._order) - prev_n) >= 2
+        self._seed_positions(respread=reshuffle)
         # remove corpos de nós que saíram
         for nid in list(self._bodies):
             if nid not in self._order:
                 del self._bodies[nid]
         if reshuffle:
-            self._run_oracle_layout()
-            self._layout_frozen = True
-        else:
-            self._seed_new_nodes()
+            self._settle_layout(SETTLE_STEPS)
+            n = len(self._order)
+            self._cam = [W / 2.0, (AREA_TOP + H - AREA_BOTTOM) / 2.0]
+            if n > 24:
+                self._zoom = max(0.65, 1.5 / math.sqrt(n / 10))
+            elif n > 14:
+                self._zoom = 0.88
+            else:
+                self._zoom = 1.0
         if self._selected not in self._order:
             self._selected = ""
         if self._split and self._split not in graph.notes:
@@ -386,8 +385,8 @@ class BrainScreen:
                 continue
             sx, sy = self._w2s(b.x, b.y)
             d = math.hypot(pos[0] - sx, pos[1] - sy)
-            r_node = self._node_radius(nid, g)
-            if d <= max(14.0, r_node * self._zoom + 10) and d < best_d:
+            r_node = (3 + min(5, g.degree(nid))) if (g and nid in g.notes) else 3
+            if d <= max(12.0, r_node * self._zoom + 8) and d < best_d:
                 best, best_d = nid, d
         return best
 
@@ -457,176 +456,127 @@ class BrainScreen:
             self._apply_zoom(d / self._pinch_d, mid)
         self._pinch_d = d
 
-    # ---------- layout (Oráculo / filotaxia) ----------
+    # ---------- física ----------
 
-    def _world_center(self) -> tuple[float, float]:
-        return (W / 2.0, (AREA_TOP + H - AREA_BOTTOM) / 2.0)
+    def _layout_k(self) -> float:
+        n = max(len(self._order), 1)
+        vw = W - 2 * (SAFE_INSET + 10)
+        vh = H - AREA_TOP - AREA_BOTTOM
+        return math.sqrt(vw * vh / n) * FR_K_SCALE
 
-    def _graph_bounds(self) -> tuple[float, float, float, float]:
-        """Retângulo útil do grafo (coords de mundo = tela)."""
-        return (SAFE_INSET + 10, AREA_TOP + 6,
-                W - SAFE_INSET - 10, H - AREA_BOTTOM - 4)
-
-    def _clamp_body(self, b: _Body) -> None:
-        x0, y0, x1, y1 = self._graph_bounds()
-        b.x = min(max(b.x, x0), x1)
-        b.y = min(max(b.y, y0), y1)
-
-    def _node_radius(self, nid: str, g) -> float:
-        """Raio ∝ sqrt(grau) — hubs grandes, folhas pequenas."""
-        deg = g.degree(nid) if (g and nid in g.notes) else 0
-        raw = (4.0 + math.sqrt(deg) * 2.1) * NODE_TAM
-        return min(max(raw, NODE_R_MIN), NODE_R_MAX)
-
-    def _center_boost(self, nid: str, g) -> float:
-        """Ilhas puxam mais pro centro (GRAFO.md §3d)."""
-        if g is None or nid not in g.notes:
-            return 1.8
-        d = g.degree(nid)
-        if d == 0:
-            return 5.0
-        if d == 1:
-            return 1.8
-        return 1.0
-
-    def _seed_phyllotaxis(self, *, respread: bool) -> None:
-        """Espiral áurea: maior grau primeiro → centro; menores → borda."""
+    def _seed_positions(self, *, respread: bool = False) -> None:
+        """Anéis por distância BFS a partir do hub (nota mais conectada)."""
         if not self._order:
             return
         g = self._graph
-        cx, cy = self._world_center()
-        x0, y0, x1, y1 = self._graph_bounds()
-        hw = (x1 - x0) * 0.48
-        hh = (y1 - y0) * 0.48
-        nodes = list(self._order)
-        if g:
-            nodes.sort(key=g.degree, reverse=True)
-        n = len(nodes)
-        denom = math.sqrt(0.5 + max(n - 1, 0))
-        for i, nid in enumerate(nodes):
-            if not respread and nid in self._bodies:
-                continue
-            r_norm = math.sqrt(0.5 + i) / max(denom, 0.1)
-            ang = i * GOLDEN_ANGLE
-            j = self._rng.uniform(0.97, 1.03)
-            self._bodies[nid] = _Body(
-                cx + math.cos(ang) * r_norm * hw * j,
-                cy + math.sin(ang) * r_norm * hh * j,
-            )
+        cx, cy = W / 2, (AREA_TOP + H - AREA_BOTTOM) / 2
+        k = self._layout_k()
 
-    def _seed_new_nodes(self) -> None:
-        """Nó novo nasce perto da média dos vizinhos (GRAFO.md §2)."""
-        g = self._graph
-        if g is None:
-            return
+        adj: dict[str, set[str]] = {nid: set() for nid in self._order}
+        for a, b in self._shown_edges():
+            if a in adj and b in adj:
+                adj[a].add(b)
+                adj[b].add(a)
+
+        notes_only = [n for n in self._order if g and n in g.notes]
+        hub = max(notes_only, key=g.degree) if (g and notes_only) else self._order[0]
+        level: dict[str, int] = {hub: 0}
+        queue = [hub]
+        qi = 0
+        while qi < len(queue):
+            cur = queue[qi]
+            qi += 1
+            for nb in adj.get(cur, ()):
+                if nb not in level:
+                    level[nb] = level[cur] + 1
+                    queue.append(nb)
+        max_lv = max(level.values()) if level else 0
         for nid in self._order:
-            if nid in self._bodies:
-                continue
-            xs, ys = [], []
-            for a, b in self._shown_edges():
-                if a == nid and b in self._bodies:
-                    xs.append(self._bodies[b].x)
-                    ys.append(self._bodies[b].y)
-                elif b == nid and a in self._bodies:
-                    xs.append(self._bodies[a].x)
-                    ys.append(self._bodies[a].y)
-            if xs:
-                nx = sum(xs) / len(xs) + self._rng.uniform(-8, 8)
-                ny = sum(ys) / len(ys) + self._rng.uniform(-8, 8)
-            else:
-                cx, cy = self._world_center()
-                nx = cx + self._rng.uniform(-20, 20)
-                ny = cy + self._rng.uniform(-20, 20)
-            self._bodies[nid] = _Body(nx, ny)
-            self._clamp_body(self._bodies[nid])
+            if nid not in level:
+                level[nid] = max_lv + 1
 
-    def _oracle_tick(self, alpha: float) -> None:
-        g = self._graph
+        by_lv: dict[int, list[str]] = {}
+        for nid, lv in level.items():
+            by_lv.setdefault(lv, []).append(nid)
+
+        for lv, nodes in by_lv.items():
+            nodes.sort()
+            ring = k * (lv + 0.35) * 1.15
+            for i, nid in enumerate(nodes):
+                if not respread and nid in self._bodies:
+                    continue
+                if lv == 0 and len(nodes) == 1:
+                    self._bodies[nid] = _Body(cx, cy)
+                    continue
+                ang = math.tau * i / max(1, len(nodes)) + lv * 0.55
+                jitter = self._rng.uniform(0.92, 1.08)
+                self._bodies[nid] = _Body(
+                    cx + math.cos(ang) * ring * jitter,
+                    cy + math.sin(ang) * ring * jitter,
+                )
+
+    def _physics_step(self, dt: float, *, dragging: str, cool: float = 1.0) -> None:
+        if not self._order:
+            return
         bodies = self._bodies
         ids = self._order
-        if not ids:
-            return
-        cx, cy = self._world_center()
-
-        for nid in ids:
-            bodies[nid].vx = bodies[nid].vy = 0.0
-
+        cx = W / 2
+        cy = (AREA_TOP + H - AREA_BOTTOM) / 2
+        k = self._layout_k()
+        k2 = k * k
+        rep_scale = cool
         for i, a in enumerate(ids):
             ba = bodies[a]
-            for b in ids[i + 1:]:
-                bb = bodies[b]
+            for b_id in ids[i + 1:]:
+                bb = bodies[b_id]
                 dx, dy = ba.x - bb.x, ba.y - bb.y
-                d2 = dx * dx + dy * dy
-                if d2 < 0.25:
-                    dx = self._rng.uniform(-0.5, 0.5)
-                    dy = self._rng.uniform(-0.5, 0.5)
-                    d2 = max(dx * dx + dy * dy, 0.25)
-                d = math.sqrt(d2)
-                rep = ORACLE_REPEL * alpha / d2
-                fx, fy = rep * dx / d, rep * dy / d
-                ba.vx += fx
-                ba.vy += fy
-                bb.vx -= fx
-                bb.vy -= fy
-                ra = self._node_radius(a, g)
-                rb = self._node_radius(b, g)
-                min_d = ra + rb + ORACLE_COLLIDE_PAD
-                if d < min_d:
-                    push = (min_d - d) / d * 0.55 * alpha
-                    px, py = push * dx, push * dy
-                    ba.vx += px
-                    ba.vy += py
-                    bb.vx -= px
-                    bb.vy -= py
-
-        if ORACLE_LINK_STR > 0:
-            for a, b in self._shown_edges():
-                ba, bb = bodies.get(a), bodies.get(b)
-                if ba is None or bb is None:
-                    continue
-                dx, dy = bb.x - ba.x, bb.y - ba.y
-                d = math.hypot(dx, dy) or 0.5
-                ga = g.degree(a) if g and a in g.notes else 1
-                gb = g.degree(b) if g and b in g.notes else 1
-                strength = 1.0 / (1.0 + min(ga, gb))
-                f = (d - ORACLE_LINK_DIST) / d * strength * ORACLE_LINK_STR * alpha
-                fx, fy = f * dx, f * dy
-                ba.vx += fx
-                ba.vy += fy
-                bb.vx -= fx
-                bb.vy -= fy
-
+                d = math.hypot(dx, dy)
+                if d < 0.5:
+                    dx, dy = self._rng.uniform(-1, 1), self._rng.uniform(-1, 1)
+                    d = 0.5
+                fr = (k2 / d) * rep_scale
+                if d < MIN_NODE_SEP:
+                    fr += (MIN_NODE_SEP - d) * 2.8 * rep_scale
+                fx, fy = fr * dx / d, fr * dy / d
+                ba.vx += fx * dt
+                ba.vy += fy * dt
+                bb.vx -= fx * dt
+                bb.vy -= fy * dt
+        for a, b in self._shown_edges():
+            ba, bb = bodies.get(a), bodies.get(b)
+            if ba is None or bb is None:
+                continue
+            dx, dy = bb.x - ba.x, bb.y - ba.y
+            d = math.hypot(dx, dy) or 0.5
+            fa = (d * d / k) * FR_ATTRACT * rep_scale
+            fx, fy = fa * dx / d, fa * dy / d
+            ba.vx += fx * dt
+            ba.vy += fy * dt
+            bb.vx -= fx * dt
+            bb.vy -= fy * dt
         for nid in ids:
             b = bodies[nid]
-            cb = self._center_boost(nid, g)
-            b.vx += (cx - b.x) * ORACLE_CENTER * cb * alpha
-            b.vy += (cy - b.y) * ORACLE_CENTER * cb * alpha
-            b.vx *= ORACLE_VEL_DECAY
-            b.vy *= ORACLE_VEL_DECAY
-            b.x += b.vx
-            b.y += b.vy
-            self._clamp_body(b)
+            if nid == dragging:
+                b.vx = b.vy = 0.0
+                continue
+            b.vx += (cx - b.x) * GRAVITY
+            b.vy += (cy - b.y) * GRAVITY
+            b.vx *= DAMPING
+            b.vy *= DAMPING
+            sp = math.hypot(b.vx, b.vy)
+            if sp > MAX_SPEED:
+                b.vx *= MAX_SPEED / sp
+                b.vy *= MAX_SPEED / sp
+            b.x += b.vx * dt * 6
+            b.y += b.vy * dt * 6
+            b.x = min(max(b.x, SAFE_INSET + 10), W - SAFE_INSET - 10)
+            b.y = min(max(b.y, AREA_TOP), H - AREA_BOTTOM)
 
-    def _run_oracle_layout(self) -> None:
-        """Bloom + assenta (GRAFO.md §2–§6)."""
-        self._seed_phyllotaxis(respread=True)
-        alpha = 1.0
-        for _ in range(SETTLE_MAX_STEPS):
-            self._oracle_tick(alpha)
-            alpha += (0.0 - alpha) * SETTLE_ALPHA_DECAY
-            if alpha < SETTLE_MIN_ALPHA:
-                break
-        cx, cy = self._world_center()
-        self._cam = [cx, cy]
-        self._zoom = 1.0
-
-    def _edges_to_draw(self) -> list:
-        """Sem foco: só nós. Com toque/split: linhas do nó focado."""
-        edges = self._shown_edges()
-        focus = self._split or self._selected
-        if not focus:
-            return []
-        return [(a, b) for a, b in edges if focus in (a, b)]
+    def _settle_layout(self, steps: int) -> None:
+        dt = 1.0 / 30.0
+        for i in range(max(0, steps)):
+            cool = 1.0 + 0.5 * (1.0 - i / max(1, steps - 1))
+            self._physics_step(dt, dragging="", cool=cool)
 
     def update(self, dt: float) -> None:
         self._t += dt
@@ -636,7 +586,9 @@ class BrainScreen:
             self._refresh()
         if not self._order:
             return
-        # layout assenta no load e congela (Oráculo §6)
+        dt = min(dt, 0.05)
+        dragging = self._press["nid"] if (self._press and self._press["moved"]) else ""
+        self._physics_step(dt, dragging=dragging)
         # no split a câmera segue o nó aberto, suave, sem mudar a escala
         if self._split:
             b = self._bodies.get(self._split)
@@ -675,14 +627,14 @@ class BrainScreen:
 
     def _draw_graph(self, surface, g) -> None:
         ghosts = g.ghosts
-        # arestas (só do nó em foco — evita hairball com dezenas de links)
-        focus = self._split or self._selected
-        for a, b in self._edges_to_draw():
+        # arestas
+        for a, b in self._shown_edges():
             ba, bb = self._bodies.get(a), self._bodies.get(b)
             if ba is None or bb is None:
                 continue
+            sel = self._selected in (a, b)
             ghost = a in ghosts or b in ghosts
-            color = MX_BRIGHT if focus else (MX_GHOST if ghost else MX_DIM)
+            color = MX_BRIGHT if sel else (MX_GHOST if ghost else MX_DIM)
             pygame.draw.line(surface, color, self._w2s(ba.x, ba.y),
                              self._w2s(bb.x, bb.y), 1)
         # nós
@@ -696,7 +648,8 @@ class BrainScreen:
                 pygame.draw.circle(surface, MX_GHOST, pos,
                                    max(2, int(3 * self._zoom)), 1)
                 continue
-            r = max(2, int(self._node_radius(nid, g) * self._zoom))
+            r = int((3 + min(5, g.degree(nid))) * self._zoom)
+            r = max(2, r)
             if nid == self._selected:
                 pulse = 2 + int((math.sin(self._t * 5) + 1) * 1.5)
                 pygame.draw.circle(surface, MX_BRIGHT, pos, r + pulse, 1)
@@ -782,7 +735,7 @@ class BrainScreen:
                 info += f"  ({stat})"
             img = render_text(info, 8, MX_MID, pixel=False)
             surface.blit(img, img.get_rect(midbottom=(cx, y)))
-            hint = render_text("toque = conexoes - 2 toques abre nota - pinça zoom",
+            hint = render_text("toque seleciona - 2 toques abre - arrasta/pinca",
                                8, MX_DIM, pixel=False)
             surface.blit(hint, hint.get_rect(midbottom=(cx, y - 11)))
 
