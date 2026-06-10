@@ -2,7 +2,7 @@
 
 Nível 1: IA · REPOUSO · ESTUDOS · AJUSTES
 Nível 2: apps da categoria (carrossel horizontal, mesmo estilo CRT).
-B no hub → volta pro ambient; B na subtela → volta pro hub.
+Botão no canto sup-esq: VOLTAR (hub → ambient) ou MENU (subtela → hub).
 """
 from __future__ import annotations
 
@@ -310,6 +310,12 @@ class HomeScreen:
             return
         self.on_back()
 
+    def _back_btn(self) -> pygame.Rect:
+        return pygame.Rect(SAFE_INSET, SAFE_INSET, 52, 16)
+
+    def _back_label(self) -> str:
+        return "MENU" if self._view == "category" else "VOLTAR"
+
     def handle_event(self, event: pygame.event.Event) -> None:
         if event.type != bmo_input.ACTION_EVENT:
             return
@@ -324,13 +330,17 @@ class HomeScreen:
         elif action == bmo_input.Action.A:
             audio.play("select")
             self._select()
-        elif action == bmo_input.Action.B:
+        elif action in (bmo_input.Action.MENU, bmo_input.Action.B):
             audio.play("back")
             self._go_back()
         elif action == bmo_input.Action.TAP and event.pos is not None:
             self._handle_tap(event.pos)
 
     def _handle_tap(self, pos: tuple[int, int]) -> None:
+        if self._back_btn().collidepoint(pos):
+            audio.play("back")
+            self._go_back()
+            return
         cx, cy = LOGICAL_SIZE[0] // 2, 110
         if pygame.Rect(0, cy - 36, 80, 72).collidepoint(pos):
             self._step(-1)
@@ -357,11 +367,24 @@ class HomeScreen:
         draw_scanlines(surface)
         draw_crt_corners(surface, margin=SAFE_INSET)
         theme_state.draw_status_bar(surface, top_pad=SAFE_INSET + 4, right_pad=SAFE_INSET + 4)
+        self._draw_back_btn(surface)
         if self._view == "hub":
             self._draw_hub(surface)
         else:
             self._draw_category(surface)
         self._draw_hint(surface)
+
+    def _draw_back_btn(self, surface: pygame.Surface) -> None:
+        rect = self._back_btn()
+        pygame.draw.rect(surface, CRT_BLACK, rect)
+        pygame.draw.rect(surface, CRT_WHITE, rect, 1)
+        pygame.draw.polygon(surface, CRT_WHITE, [
+            (rect.left + 6, rect.centery - 3),
+            (rect.left + 6, rect.centery + 3),
+            (rect.left + 3, rect.centery),
+        ])
+        img = render_text(self._back_label(), 8, CRT_WHITE, pixel=False)
+        surface.blit(img, img.get_rect(midleft=(rect.left + 12, rect.centery)))
 
     def _draw_hub(self, surface: pygame.Surface) -> None:
         title = render_text("MENU", 10, CRT_DIM)
@@ -431,13 +454,6 @@ class HomeScreen:
             pygame.draw.rect(surface, color, (sx + i * (dot_w + 4), dots_y, dot_w, 2))
 
     def _draw_hint(self, surface: pygame.Surface) -> None:
-        if self._view == "category":
-            hint = "B = voltar"
-        else:
-            hint = "A = abrir"
-        img = render_text(hint, 7, CRT_DIM, pixel=False)
-        surface.blit(img, img.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - SAFE_INSET - 8)))
-
         timeout = float(config.get("idle_timeout_s") or 10)
         idle_frac = min(self._idle / timeout, 1.0) if timeout > 0 else 0.0
         x = SAFE_INSET + 8

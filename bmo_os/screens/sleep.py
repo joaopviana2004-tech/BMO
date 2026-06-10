@@ -58,12 +58,16 @@ class SleepScreen:
         if action in (bmo_input.Action.LEFT, bmo_input.Action.RIGHT):
             self.index = (self.index + 1) % len(MODES)
             audio.play("tick")
-        elif action == bmo_input.Action.B:
+        elif action in (bmo_input.Action.MENU, bmo_input.Action.B):
             audio.play("back")
             self.on_back()
         elif action == bmo_input.Action.A:
             self._select()
         elif action == bmo_input.Action.TAP and event.pos is not None:
+            if self._back_btn().collidepoint(event.pos):
+                audio.play("back")
+                self.on_back()
+                return
             for i, rect in enumerate(self._tile_rects()):
                 if rect.collidepoint(event.pos):
                     if i == self.index:
@@ -90,9 +94,9 @@ class SleepScreen:
         draw_scanlines(surface)
         draw_crt_corners(surface, margin=SAFE_INSET)
         theme_state.draw_status_bar(surface, top_pad=SAFE_INSET + 4, right_pad=SAFE_INSET + 4)
+        self._draw_back_btn(surface)
         self._draw_title(surface)
         self._draw_tiles(surface)
-        self._draw_hint(surface)
 
     def _tile_rects(self):
         # 3x2 grid — 6 modos de descanso
@@ -109,6 +113,21 @@ class SleepScreen:
             y = start_y + row * (tile_h + gap_y + 16)
             rects.append(pygame.Rect(x, y, tile_w, tile_h))
         return rects
+
+    def _back_btn(self) -> pygame.Rect:
+        return pygame.Rect(SAFE_INSET, SAFE_INSET, 52, 16)
+
+    def _draw_back_btn(self, surface: pygame.Surface) -> None:
+        rect = self._back_btn()
+        pygame.draw.rect(surface, CRT_BLACK, rect)
+        pygame.draw.rect(surface, CRT_WHITE, rect, 1)
+        pygame.draw.polygon(surface, CRT_WHITE, [
+            (rect.left + 6, rect.centery - 3),
+            (rect.left + 6, rect.centery + 3),
+            (rect.left + 3, rect.centery),
+        ])
+        img = render_text("MENU", 8, CRT_WHITE, pixel=False)
+        surface.blit(img, img.get_rect(midleft=(rect.left + 12, rect.centery)))
 
     def _draw_title(self, surface: pygame.Surface) -> None:
         img = render_text("HOW BMO RESTS", 10, CRT_DIM)
@@ -229,6 +248,3 @@ class SleepScreen:
         smile = pygame.Rect(face.centerx - 8, face.bottom - 18, 16, 8)
         pygame.draw.arc(surface, c, smile, math.pi, 2 * math.pi, 2)
 
-    def _draw_hint(self, surface: pygame.Surface) -> None:
-        hint = render_text("A = selecionar  B = voltar", 7, CRT_DIM)
-        surface.blit(hint, hint.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, LOGICAL_SIZE[1] - SAFE_INSET - 4)))
