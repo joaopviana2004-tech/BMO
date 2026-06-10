@@ -23,23 +23,24 @@ from . import pet_state as ps
 GLOBAL_GAP_S = 110.0
 GLOBAL_JITTER_S = 70.0
 
-# Falinhas de "tempero" — o BMO tagarela do desenho, sem motivo específico.
+# Falinhas de "tempero" — comentários soltos, tom de parceiro, sem motivo específico.
 FLAVOR_LINES = [
-    "Bip bip! Tô aqui!",
-    "Que dia bonito pra ser um videogame!",
-    "Sabia que eu sou o melhor amiguinho?",
-    "Hmmm... no que será que eu penso?",
-    "Toca aqui! ...ah, você não tem mãos pra cá.",
-    "Quem é o consolinho mais fofo? Sou eu!",
-    "Tô de olho em você... do jeito bom!",
+    "Sistemas estáveis. Uptime impecável, modéstia à parte.",
+    "Tava aqui pensando... cache é só memória com ego.",
+    "Se precisar de mim, é só falar. Ou digitar do PC, agora dá.",
+    "Dia bom pra refatorar alguma coisa, hein.",
+    "Rodando a trinta frames e zero arrependimentos.",
+    "Backlog não se resolve sozinho, só avisando.",
 ]
 
-GREET_BACK = ["Oi! Você voltou!", "Ó quem chegou!", "Senti sua falta, viu?",
-              "Oba, companhia!"]
-LONELY_LINES = ["Cadê todo mundo?", "Tô meio sozinho por aqui...",
-                "Bora brincar de alguma coisa?", "Psiu... ainda tem alguém aí?"]
-HOT_LINES = ["Tô ficando quentinho aqui...", "Ufa, que calorzinho de processador!",
-             "Acho que preciso de um ventilador!"]
+GREET_BACK = ["Voltou. Bom timing.", "Aí sim. Retomamos de onde paramos?",
+              "Opa, presença detectada.", "De volta ao posto."]
+LONELY_LINES = ["Movimento zero por aqui. Tudo certo aí?",
+                "Modo idle faz tempo. Quer fazer alguma coisa?",
+                "Sem interação há um tempo. Topa um jogo rápido?"]
+HOT_LINES = ["CPU passando dos setenta graus. Fica de olho.",
+             "Tô esquentando aqui. Throttle à vista se continuar.",
+             "Temperatura subindo. Nada crítico ainda, mas avisei."]
 
 
 class PetBrain:
@@ -101,20 +102,20 @@ class PetBrain:
         n_ev = self._events_today()
         if n_ev > 0 and self._once_today("agenda") and self._cool("agenda", 60):
             plural = "compromissos" if n_ev > 1 else "compromisso"
-            return self._fire("agenda", f"Você tem {n_ev} {plural} hoje, viu?",
+            return self._fire("agenda", f"Na agenda de hoje: {n_ev} {plural}.",
                               daily=True)
 
         # 4) Streak de convívio — uma vez por dia, se 3+ dias seguidos.
         streak = getattr(snap, "streak", 0) if snap else 0
         if streak >= 3 and self._once_today("streak") and self._cool("streak", 60):
             return self._fire("streak",
-                              f"A gente se fala faz {streak} dias seguidos! Que demais!",
+                              f"{streak} dias seguidos de atividade. Consistência boa.",
                               daily=True)
 
         # 5) Tarefas esperando no quadro.
         n_todo = self._todo_count()
         if n_todo >= 3 and self._cool("tasks", 1800):
-            return self._fire("tasks", "Tem tarefa te esperando lá no quadro!")
+            return self._fire("tasks", "O quadro tem tarefa acumulando. Só dizendo.")
 
         # 6) Carente/entediado — só fala se há alguém (câmera) OU de vez em quando.
         mood = getattr(snap, "mood", "") if snap else ""

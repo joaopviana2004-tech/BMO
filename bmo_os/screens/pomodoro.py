@@ -48,7 +48,7 @@ CX = LOGICAL_SIZE[0] // 2
 
 class PomodoroScreen:
     show_mic_button = True
-    voice_announce = "Hora de focar!"   # BMO anuncia ao abrir (cacheado)
+    voice_announce = "Modo foco. Sem distração agora."   # BMO anuncia ao abrir (cacheado)
     # canto inf-CENTRO: RESET ocupa o inf-esq e FINALIZAR o inf-dir
     mic_btn_rect = (186, 200, 28, 26)
 

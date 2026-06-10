@@ -32,7 +32,7 @@ def _fmt_time(s: float) -> str:
 
 
 class RecorderScreen:
-    voice_announce = "Gravador pronto!"   # falado quando a IA abre a tela
+    voice_announce = "Gravador armado. É só mandar."   # falado quando a IA abre a tela
 
     def __init__(self, *, on_back, recorder, get_sync=None) -> None:
         """get_sync() -> DriveSync ou None (guest/offline não sincroniza)."""

@@ -40,7 +40,7 @@ def _local_now() -> dt.datetime:
 
 class AgendaScreen:
     show_mic_button = True
-    voice_announce = "Aqui está a sua agenda!"   # BMO anuncia ao abrir (cacheado)
+    voice_announce = "Agenda na tela."   # BMO anuncia ao abrir (cacheado)
     # topo, logo à direita do botão HOME (a lista ocupa o resto da tela)
     mic_btn_rect = (70, 12, 28, 26)
 

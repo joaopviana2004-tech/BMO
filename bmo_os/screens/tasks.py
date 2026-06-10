@@ -55,7 +55,7 @@ def _to_logical(pos: tuple[int, int]) -> tuple[int, int]:
 
 class TasksScreen:
     show_mic_button = True   # mic virtual (overlay global do App), canto inf-dir
-    voice_announce = "Aqui estão as suas tarefas!"   # BMO anuncia ao abrir (cacheado)
+    voice_announce = "Seu quadro de tarefas."   # BMO anuncia ao abrir (cacheado)
 
     def __init__(self, *, on_back, todoist: TodoistService) -> None:
         self.on_back = on_back

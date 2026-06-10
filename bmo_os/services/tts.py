@@ -157,30 +157,30 @@ _CACHE_DIR = Path(__file__).resolve().parent.parent / "assets" / "voice_cache"
 # usuário PEDE pra IA abrir a tela, o BMO fala esta frase (cacheada) no lugar da
 # resposta verbosa da LLM.
 SCREEN_PHRASES = {
-    "agenda": "Aqui está a sua agenda!",
-    "tarefas": "Aqui estão as suas tarefas!",
-    "foco": "Hora de focar!",
-    "sistema": "Aqui está o sistema!",
-    "foto": "Modo câmera ativado!",
-    "gravador": "Gravador pronto!",
-    "cerebro": "Aqui está o seu cérebro!",
-    "jogos": "Bora jogar!",
-    "pong": "Bora de Pong!",
-    "invaders": "Bora pro espaço!",
-    "flappy": "Bora voar!",
-    "snake": "Bora de cobrinha!",
-    "configuracoes": "Aqui estão as configurações!",
-    "relogio": "Aqui está o relógio!",
-    "home": "Voltando pro início!",
-    "atualizar": "Já volto, tô me atualizando!",
+    "agenda": "Agenda na tela.",
+    "tarefas": "Seu quadro de tarefas.",
+    "foco": "Modo foco. Sem distração agora.",
+    "sistema": "Diagnóstico do sistema.",
+    "foto": "Câmera pronta.",
+    "gravador": "Gravador armado. É só mandar.",
+    "cerebro": "Segundo cérebro na tela.",
+    "jogos": "Arcade aberto. Escolhe aí.",
+    "pong": "Pong. Clássico nunca falha.",
+    "invaders": "Invaders. Boa sorte.",
+    "flappy": "Flappy. Tenta não bater.",
+    "snake": "Snake. Velha escola.",
+    "configuracoes": "Configurações.",
+    "relogio": "Modo relógio.",
+    "home": "De volta ao menu.",
+    "atualizar": "Atualizando. Volto em instantes.",
 }
 
-# Saudações (a do boot é escolhida por horário) e falinhas divertidas do BMO.
-GREETINGS = ["Olá!", "Oi!", "Bom dia!", "Boa tarde!", "Boa noite!", "E aí, beleza?"]
-FUN_LINES = ["Eu sou o bimu!", "Quem quer jogar videogame?", "Vamos nessa!",
-             "Beleza!", "Toca aqui!", "Que demais!", "Tô pronto!"]
+# Saudações (a do boot é escolhida por horário) e falas curtas do BMO.
+GREETINGS = ["Olá.", "Oi.", "Bom dia.", "Boa tarde.", "Boa noite.", "E aí."]
+FUN_LINES = ["BMO online.", "Sistemas operacionais.", "Pronto pra trabalhar.",
+             "Tudo em ordem por aqui.", "Na escuta."]
 # Confirmações de ação (faladas automaticamente quando o BMO faz algo).
-CONFIRMS = ["Tarefa criada com sucesso!", "Pronto!", "Feito!", "Anotado!"]
+CONFIRMS = ["Tarefa criada.", "Pronto.", "Feito.", "Anotado."]
 
 # Tudo que será pré-gerado/cacheado. Quanto mais, mais respostas instantâneas.
 CACHE_PHRASES = GREETINGS + list(SCREEN_PHRASES.values()) + FUN_LINES + CONFIRMS

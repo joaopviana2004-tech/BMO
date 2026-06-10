@@ -159,7 +159,7 @@ CATEGORIES = [
 # ============================================================
 
 class SettingsScreen:
-    voice_announce = "Aqui estão as configurações!"   # BMO anuncia ao abrir (cacheado)
+    voice_announce = "Configurações."   # BMO anuncia ao abrir (cacheado)
 
     def __init__(self, *, on_back, on_open, on_change=None, mic_options=None,
                  on_cleanup=None, tts=None, on_logout=None,

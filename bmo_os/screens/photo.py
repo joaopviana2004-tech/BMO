@@ -22,7 +22,7 @@ PHOTOS_DIR = Path(__file__).resolve().parent.parent.parent / "photos"
 
 
 class PhotoScreen:
-    voice_announce = "Modo câmera ativado!"   # BMO anuncia ao abrir (cacheado)
+    voice_announce = "Câmera pronta."   # BMO anuncia ao abrir (cacheado)
 
     def __init__(self, on_back, camera: CameraService, on_open_gallery=None) -> None:
         self.on_back = on_back

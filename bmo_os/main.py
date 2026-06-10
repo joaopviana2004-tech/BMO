@@ -530,7 +530,7 @@ def build_initial(app: App):
         if task:
             try:
                 if todoist.create(task) and tts is not None:
-                    tts.speak("Tarefa criada com sucesso!")   # cacheado = instantâneo
+                    tts.speak("Tarefa criada.")   # cacheado = instantâneo
             except Exception:
                 pass
         action = screen_actions.get(screen_key)
@@ -700,9 +700,9 @@ def build_initial(app: App):
     if tts is not None:
         try:
             h = time.localtime().tm_hour
-            greet = "Bom dia!" if 5 <= h < 12 else "Boa tarde!" if 12 <= h < 18 else "Boa noite!"
+            greet = "Bom dia." if 5 <= h < 12 else "Boa tarde." if 12 <= h < 18 else "Boa noite."
             tts.speak(greet)
-            tts.speak("Eu sou o bimu!")
+            tts.speak("BMO online.")
         except Exception:
             pass
 
