@@ -150,9 +150,12 @@ class DevHubScreen:
         # halo central suave
         cx, cy = W // 2, H // 2 - 10
         r = 60 + int(8 * math.sin(self._t * 0.5))
-        glow = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
-        pygame.draw.circle(glow, (*DV_GLOW, 18), (r, r), r)
-        surface.blit(glow, (cx - r, cy - r))
+        try:
+            glow = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(glow, (*DV_GLOW, 18), (r, r), r)
+            surface.blit(glow, (cx - r, cy - r))
+        except (pygame.error, ValueError):
+            pass
 
     # ── modo ambient (descanso) ────────────────────────────────────
 
@@ -169,8 +172,8 @@ class DevHubScreen:
         pygame.draw.line(surface, DV_DIM, (SAFE_INSET, y), (W - SAFE_INSET, y), 1)
         y += 4
 
-        feed_h = H - y - SAFE_INSET - 14
-        self._draw_scrolling_feed(surface, snap["commits"], SAFE_INSET + 2, y, feed_h)
+        feed_h = max(0, H - y - SAFE_INSET - 14)
+        self._draw_scrolling_feed(surface, snap["commits"], y, feed_h)
         self._draw_footer_strip(surface, stats, snap, H - SAFE_INSET - 12)
 
         if stats.sync_error and not snap["commits"]:
@@ -215,7 +218,7 @@ class DevHubScreen:
             if ci_items:
                 ok = sum(1 for c in ci_items if c.status == "success")
                 parts.append(f"CI {ok}/{len(ci_items)}")
-        line = "  ·  ".join(parts) if parts else "github + bridge"
+        line = " | ".join(parts) if parts else "github + bridge"
         col = DV_MID if parts else DV_DIM
         img = render_text(line, 7, col, pixel=False)
         surface.blit(img, img.get_rect(midbottom=(W // 2, y + 10)))
@@ -304,27 +307,34 @@ class DevHubScreen:
         for i, (label, val) in enumerate(cards):
             x = x0 + i * (cw + gap)
             border = DV_CYAN if (big and i == 0 and val > 0) else DV_DIM
-            if big and val > 0:
-                glow_a = int(12 + pulse * 10)
-                glow = pygame.Surface((cw, ch), pygame.SRCALPHA)
-                glow.fill((*DV_CYAN, glow_a))
-                surface.blit(glow, (x, y))
+            if big and val > 0 and cw > 0 and ch > 0:
+                try:
+                    glow_a = int(12 + pulse * 10)
+                    glow = pygame.Surface((cw, ch), pygame.SRCALPHA)
+                    glow.fill((*DV_CYAN, glow_a))
+                    surface.blit(glow, (x, y))
+                except (pygame.error, ValueError):
+                    pass
             pygame.draw.rect(surface, DV_BG2, (x, y, cw, ch))
             pygame.draw.rect(surface, border, (x, y, cw, ch), 1)
             vsize = 14 if big else 11
             vimg = render_text(str(val), vsize, DV_CYAN, pixel=(vsize >= 12))
             surface.blit(vimg, vimg.get_rect(midtop=(x + cw // 2, y + 2)))
-            limg = render_text(label, 6 if big else 6, DV_MID, pixel=False)
+            limg = render_text(label, 7, DV_MID, pixel=False)
             surface.blit(limg, limg.get_rect(midbottom=(x + cw // 2, y + ch - 1)))
         return y + ch
 
     def _draw_sparkline(self, surface, bars: list, x: int, y: int, w: int, h: int) -> None:
         if not bars or len(bars) < 2:
             bars = [0] * 7
-        mx = max(bars) or 1
+        try:
+            mx = max(int(v) for v in bars) or 1
+        except (TypeError, ValueError):
+            bars = [0] * 7
+            mx = 1
         n = len(bars)
         bar_w = max(4, (w - (n - 1) * 3) // n)
-        lbl = render_text("atividade", 6, DV_DIM, pixel=False)
+        lbl = render_text("atividade", 7, DV_DIM, pixel=False)
         surface.blit(lbl, (x, y - 1))
         by = y + 8
         for i, v in enumerate(bars):
@@ -334,12 +344,14 @@ class DevHubScreen:
             pygame.draw.rect(surface, col, (bx, by + h - 4 - bh, bar_w, bh))
 
     def _draw_scrolling_feed(self, surface, commits, y0: int, h: int) -> None:
+        if h <= 0:
+            return
         if not commits:
             txt = render_text("aguardando commits...", 8, DV_DIM, pixel=False)
-            surface.blit(txt, txt.get_rect(midleft=(SAFE_INSET + 4, y0 + h // 2)))
+            surface.blit(txt, txt.get_rect(midleft=(SAFE_INSET + 4, y0 + max(0, h // 2))))
             return
         row_h = 13
-        clip = pygame.Rect(SAFE_INSET, y0, W - 2 * SAFE_INSET, h)
+        clip = pygame.Rect(SAFE_INSET, y0, max(1, W - 2 * SAFE_INSET), max(1, h))
         prev = surface.get_clip()
         surface.set_clip(clip)
         doubled = list(commits) * 2
