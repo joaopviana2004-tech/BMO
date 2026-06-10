@@ -15,10 +15,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import urllib.error
 import urllib.request
 
 PORT = 8377
+
+# console do Windows costuma ser cp1252 e quebra nos emojis do Bimo
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
 
 
 def send(host: str, text: str, timeout: int = 180) -> dict:
