@@ -23,10 +23,12 @@ conta Google que você usa no Bimo. O token fica em bimo_pc_tokens.json
 Pré-requisito no .env (raiz do repo): GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET
 (os mesmos do Bimo).
 
-Espelho PC -> Drive (a vault local é a fonte da verdade):
-    - varre a vault recursivamente por *.md (ignora .obsidian, .trash etc.)
-    - sobe o que é novo/mudou (md5); remove do Drive o que sumiu da vault
-    - nomes achatados (estilo Obsidian: o nome da nota é único na vault)
+Espelho BIDIRECIONAL vault <-> Drive:
+    - SOBE: notas novas/alteradas no Obsidian (md5) -> Bimo/Conhecimento/
+    - BAIXA: notas que o Bimo criou/alterou no Drive -> vault local
+      (notas novas vão pra vault/Bimo/; existentes atualizam no lugar)
+    - REMOVE do Drive só o que sumiu da vault (deleção no Obsidian)
+    - nomes achatados no Drive (estilo Obsidian: nome único na vault)
 
 Deixe rodando em background / inicialização do Windows:
     pythonw scripts/bimo_pc_sync.py "C:\\caminho\\da\\vault"
@@ -40,6 +42,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -52,6 +55,15 @@ from bmo_os.services.drive_sync import (                     # noqa: E402
 
 TOKENS_PATH = ROOT / "bimo_pc_tokens.json"
 SKIP_DIRS = {".obsidian", ".trash", ".git", ".smart-env", "node_modules"}
+BIMO_INBOX = "Bimo"   # subpasta da vault pra notas novas vindas do agente
+
+
+def _parse_rfc3339(ts: str) -> float:
+    try:
+        return datetime.fromisoformat(
+            ts.replace("Z", "+00:00")).astimezone(timezone.utc).timestamp()
+    except Exception:
+        return 0.0
 
 
 # ---------- auth (device flow, mesmo client do Bimo) ----------
@@ -126,25 +138,51 @@ class Drive:
                                 content_type="application/json")
         return (created or {}).get("id", "")
 
-    def list_md(self, folder: str) -> dict | None:
-        """name -> {'id','md5Checksum'} de todos os .md da pasta."""
+    def list_md_recursive(self, folder: str) -> dict | None:
+        """name -> {id, md5Checksum, modifiedTime} — recursivo nas subpastas."""
         out: dict = {}
-        token = ""
-        while True:
-            q = urllib.parse.quote(f"'{folder}' in parents and trashed=false")
-            url = (f"{FILES_URL}?q={q}&pageSize=1000"
-                   "&fields=nextPageToken,files(id,name,md5Checksum)")
-            if token:
-                url += f"&pageToken={token}"
-            page = self._request(url)
-            if page is None:
-                return None
-            for f in page.get("files", []):
-                if f.get("name", "").endswith(".md"):
-                    out[f["name"]] = f
-            token = page.get("nextPageToken", "")
-            if not token:
-                return out
+        queue = [folder]
+        seen: set = set()
+        while queue:
+            fid = queue.pop(0)
+            if fid in seen:
+                continue
+            seen.add(fid)
+            token = ""
+            while True:
+                q = urllib.parse.quote(f"'{fid}' in parents and trashed=false")
+                url = (f"{FILES_URL}?q={q}&pageSize=1000"
+                       "&fields=nextPageToken,files(id,name,md5Checksum,"
+                       "mimeType,modifiedTime)")
+                if token:
+                    url += f"&pageToken={token}"
+                page = self._request(url)
+                if page is None:
+                    return None
+                for f in page.get("files", []):
+                    name = f.get("name", "")
+                    if f.get("mimeType") == FOLDER_MIME:
+                        if not name.startswith("."):
+                            queue.append(f["id"])
+                    elif name.endswith(".md") and name not in out:
+                        out[name] = f
+                token = page.get("nextPageToken", "")
+                if not token:
+                    break
+        return out
+
+    def download(self, file_id: str) -> bytes | None:
+        token = self.creds.get_access_token()
+        if not token:
+            return None
+        req = urllib.request.Request(
+            f"{FILES_URL}/{file_id}?alt=media",
+            headers={"Authorization": f"Bearer {token}"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return resp.read()
+        except Exception:
+            return None
 
     def upload(self, folder: str, name: str, body: bytes, file_id: str = "") -> bool:
         if file_id:
@@ -185,30 +223,80 @@ def scan_vault(vault: Path) -> dict:
 
 
 def sync_once(drive: Drive, vault: Path, folder: str) -> bool:
-    """Um ciclo de espelho. True se concluiu (mesmo sem mudanças)."""
+    """Um ciclo bidirecional. True se concluiu (mesmo sem mudanças)."""
     local = scan_vault(vault)
-    remote = drive.list_md(folder)
+    remote = drive.list_md_recursive(folder)
     if remote is None:
         return False
-    up = rm = 0
+    up = down = rm = 0
+    inbox = vault / BIMO_INBOX
+    inbox.mkdir(exist_ok=True)
+
+    # PULL: Drive -> vault (notas do agente Bimo ou edits remotos)
+    for name, entry in sorted(remote.items()):
+        body = drive.download(entry["id"])
+        if body is None:
+            return False
+        remote_md5 = entry.get("md5Checksum") or hashlib.md5(body).hexdigest()
+        remote_mtime = _parse_rfc3339(entry.get("modifiedTime", ""))
+        path = local.get(name)
+        if path is not None:
+            try:
+                local_body = path.read_bytes()
+                local_md5 = hashlib.md5(local_body).hexdigest()
+                if local_md5 == remote_md5:
+                    continue
+                local_mtime = path.stat().st_mtime
+                if local_mtime > remote_mtime:
+                    continue   # vault mais nova — sobe no push abaixo
+            except OSError:
+                pass
+            dest = path
+        else:
+            dest = inbox / name
+        try:
+            if dest.exists():
+                if hashlib.md5(dest.read_bytes()).hexdigest() == remote_md5:
+                    continue
+            dest.write_bytes(body)
+            down += 1
+            tag = "atualizado" if path else "novo"
+            print(f"  v {name} ({tag})")
+            local[name] = dest
+        except OSError:
+            continue
+
+    # PUSH: vault -> Drive
     for name, path in sorted(local.items()):
         try:
             body = path.read_bytes()
+            local_md5 = hashlib.md5(body).hexdigest()
+            local_mtime = path.stat().st_mtime
         except OSError:
             continue
         entry = remote.get(name)
-        if entry and entry.get("md5Checksum") == hashlib.md5(body).hexdigest():
-            continue
-        if drive.upload(folder, name, body, (entry or {}).get("id", "")):
+        if entry:
+            if entry.get("md5Checksum") == local_md5:
+                continue
+            remote_mtime = _parse_rfc3339(entry.get("modifiedTime", ""))
+            if remote_mtime > local_mtime:
+                continue   # já puxamos acima
+            if drive.upload(folder, name, body, entry["id"]):
+                up += 1
+                print(f"  ^ {name}")
+        elif drive.upload(folder, name, body):
             up += 1
-            print(f"  ^ {name}")
+            print(f"  ^ {name} (novo)")
+
+    # REMOVE do Drive o que sumiu da vault (deleção no Obsidian)
     for name, entry in sorted(remote.items()):
         if name not in local:
             drive.delete(entry["id"])
             rm += 1
-            print(f"  x {name} (removido)")
-    if up or rm:
-        print(f"  = {up} enviado(s), {rm} removido(s), "
+            print(f"  x {name} (removido do Drive)")
+
+    if up or down or rm:
+        print(f"  = {up} enviado(s), {down} baixado(s), {rm} removido(s), "
               f"{len(local)} nota(s) na vault")
     return True
 

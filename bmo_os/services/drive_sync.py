@@ -19,10 +19,11 @@
    batendo, o LOCAL É DESTRUÍDO — memória do Bimo sempre livre. Sem rede,
    os arquivos esperam quietos. on_event(msg) avisa a UI.
 
-3) SEGUNDO CÉREBRO (espelho Bimo/Conhecimento -> knowledge/ local): baixa
-   só o que mudou (md5), descendo recursivo nas subpastas da vault; remove
-   local o que sumiu do Drive — o Drive é a fonte da verdade. A tela
-   CEREBRO lê daí.
+3) SEGUNDO CÉREBRO (espelho BIDIRECIONAL Bimo/Conhecimento <-> knowledge/):
+   - PULL: baixa do Drive o que mudou (md5/mtime), recursivo nas subpastas.
+   - PUSH: sobe notas locais novas/mais novas (tool notes_write do agente).
+   - push_note(): upload imediato de um .md após o agente gravar.
+   O PC puxa essas mudanças via scripts/bimo_pc_sync.py pro Obsidian.
    ESCOPO: com o PAREAMENTO PELO PC (scripts/bimo_drive_login.py) o token
    tem Drive COMPLETO — basta colocar a vault do Obsidian dentro de
    Bimo/Conhecimento no "Google Drive para Desktop" que o Bimo enxerga.
@@ -119,6 +120,35 @@ class DriveSync:
     def request_knowledge_sync(self) -> None:
         """Pede um espelho das notas JÁ (a tela CEREBRO chama no botão SYNC)."""
         self._knowledge_scan_at = 0.0
+
+    def push_note(self, path: Path) -> bool:
+        """Sobe UM .md pra Bimo/Conhecimento/ (chamado após notes_write)."""
+        path = Path(path)
+        if not path.is_file() or path.suffix.lower() != ".md":
+            return False
+        folder = self._ensure_knowledge_folder()
+        if not folder:
+            return False
+        try:
+            body = path.read_bytes()
+        except OSError:
+            return False
+        remote = self._list_remote_notes(folder) or []
+        file_id = ""
+        for f in remote:
+            if f.get("name") == path.name:
+                file_id = f["id"]
+                break
+        ok = self._upload_knowledge_file(folder, path.name, body, file_id)
+        if ok:
+            self.knowledge_sync_at = time.time()
+            self.knowledge_status = f"nota {path.stem} no Drive"
+            if self.on_event is not None:
+                try:
+                    self.on_event(f"Nota {path.stem} no Drive")
+                except Exception:
+                    pass
+        return ok
 
     def flush(self, timeout_s: float = 15.0) -> bool:
         """Sync final SÍNCRONO (logout/desligar): config + áudios pendentes.
@@ -426,7 +456,8 @@ class DriveSync:
             while True:
                 q = urllib.parse.quote(f"'{fid}' in parents and trashed=false")
                 url = (f"{FILES_URL}?q={q}&pageSize=1000"
-                       "&fields=nextPageToken,files(id,name,md5Checksum,mimeType)")
+                       "&fields=nextPageToken,files(id,name,md5Checksum,"
+                       "mimeType,modifiedTime)")
                 if token:
                     url += f"&pageToken={token}"
                 page = self._request(url)
@@ -444,11 +475,48 @@ class DriveSync:
                     break
         return out
 
-    def _sync_knowledge(self) -> None:
-        """Espelha o Drive na pasta local: baixa novo/mudado, apaga o que sumiu.
+    def _upload_knowledge_file(self, folder: str, name: str, body: bytes,
+                               file_id: str = "") -> bool:
+        """Cria ou atualiza um .md em Bimo/Conhecimento/."""
+        if file_id:
+            res = self._request(
+                f"{UPLOAD_URL}/{file_id}?uploadType=media",
+                method="PATCH", data=body, content_type="text/markdown")
+            return res is not None
+        boundary = "bimo-knowledge-boundary"
+        meta = json.dumps({"name": name, "parents": [folder]})
+        payload = (
+            f"--{boundary}\r\n"
+            "Content-Type: application/json; charset=UTF-8\r\n\r\n"
+            f"{meta}\r\n"
+            f"--{boundary}\r\n"
+            "Content-Type: text/markdown\r\n\r\n"
+        ).encode() + body + f"\r\n--{boundary}--".encode()
+        res = self._request(
+            f"{UPLOAD_URL}?uploadType=multipart",
+            method="POST", data=payload,
+            content_type=f"multipart/related; boundary={boundary}")
+        return res is not None
 
-        O Drive é a fonte da verdade (Obsidian do usuário mora lá); a pasta
-        local é só um cache de leitura pra tela CEREBRO e o futuro RAG."""
+    def _download_note(self, file_id: str, dest: Path) -> bool:
+        token = self.creds.get_access_token()
+        if not token:
+            return False
+        req = urllib.request.Request(
+            f"{FILES_URL}/{file_id}?alt=media",
+            headers={"Authorization": f"Bearer {token}"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                dest.write_bytes(resp.read())
+            return True
+        except Exception:
+            return False
+
+    def _sync_knowledge(self) -> None:
+        """Espelho bidirecional: sobe local novo/mais novo, baixa remoto mais novo.
+
+        Deleções no Obsidian (via PC sync) propagam pro cache local; notas
+        recém-criadas pelo agente têm 10 min de graça se o upload falhar."""
         folder = self._ensure_knowledge_folder()
         if not folder:
             self.knowledge_status = "sem rede"
@@ -458,43 +526,77 @@ class DriveSync:
             self.knowledge_status = "sem rede"
             return
         self.knowledge_dir.mkdir(parents=True, exist_ok=True)
-        token = self.creds.get_access_token()
-        if not token:
-            return
-        changed = 0
-        remote_names = set()
+        # nome -> {id, md5Checksum, modifiedTime} (primeiro achado em subpastas)
+        remote_by_name: dict[str, dict] = {}
         for f in remote:
-            name = f["name"]
-            if name in remote_names:
-                continue   # nome duplicado em subpastas: fica o primeiro
-            remote_names.add(name)
-            local = self.knowledge_dir / name
-            if local.exists():
-                try:
-                    if hashlib.md5(local.read_bytes()).hexdigest() == f.get("md5Checksum"):
-                        continue   # já espelhado
-                except OSError:
-                    pass
-            req = urllib.request.Request(
-                f"{FILES_URL}/{f['id']}?alt=media",
-                headers={"Authorization": f"Bearer {token}"})
-            try:
-                with urllib.request.urlopen(req, timeout=20) as resp:
-                    local.write_bytes(resp.read())
-                changed += 1
-            except Exception:
-                self.knowledge_status = "sem rede"
-                return
-        # mirror: o que sumiu do Drive sai do cache local
+            name = f.get("name", "")
+            if name and name not in remote_by_name:
+                remote_by_name[name] = f
+        changed = 0
+        now = time.time()
+
+        # PUSH: local novo ou mais novo que o remoto
         try:
             for local in self.knowledge_dir.glob("*.md"):
-                if local.name not in remote_names:
+                try:
+                    body = local.read_bytes()
+                    local_md5 = hashlib.md5(body).hexdigest()
+                    local_mtime = local.stat().st_mtime
+                except OSError:
+                    continue
+                entry = remote_by_name.get(local.name)
+                if entry:
+                    if entry.get("md5Checksum") == local_md5:
+                        continue
+                    remote_mtime = _parse_rfc3339(entry.get("modifiedTime", ""))
+                    if local_mtime <= remote_mtime:
+                        continue   # remoto ganha no pull abaixo
+                    if self._upload_knowledge_file(
+                            folder, local.name, body, entry["id"]):
+                        changed += 1
+                elif self._upload_knowledge_file(folder, local.name, body):
+                    changed += 1
+                    remote_by_name[local.name] = {"id": "", "md5Checksum": local_md5}
+        except OSError:
+            pass
+
+        # PULL: remoto mais novo ou ausente localmente
+        for name, entry in remote_by_name.items():
+            local = self.knowledge_dir / name
+            remote_md5 = entry.get("md5Checksum", "")
+            if local.exists():
+                try:
+                    if hashlib.md5(local.read_bytes()).hexdigest() == remote_md5:
+                        continue
+                    local_mtime = local.stat().st_mtime
+                except OSError:
+                    local_mtime = 0.0
+                remote_mtime = _parse_rfc3339(entry.get("modifiedTime", ""))
+                if local_mtime > remote_mtime:
+                    continue   # já empurramos acima
+            if self._download_note(entry["id"], local):
+                changed += 1
+            else:
+                self.knowledge_status = "sem rede"
+                return
+
+        # remove local só se sumiu do Drive E não é nota recém-gravada (upload pendente)
+        try:
+            for local in self.knowledge_dir.glob("*.md"):
+                if local.name in remote_by_name:
+                    continue
+                try:
+                    age = now - local.stat().st_mtime
+                except OSError:
+                    age = 0.0
+                if age > 600:
                     local.unlink()
                     changed += 1
         except OSError:
             pass
+
         self.knowledge_sync_at = time.time()
-        self.knowledge_status = f"{len(remote_names)} nota(s)"
+        self.knowledge_status = f"{len(remote_by_name)} nota(s)"
         if changed and self.on_event is not None:
             try:
                 self.on_event("Conhecimento sincronizado")

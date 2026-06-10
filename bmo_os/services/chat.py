@@ -16,9 +16,11 @@ CONTEXTO DO OBSIDIAN (Segundo Cérebro) — dois caminhos se somam:
      nas notas (knowledge.search) e injeta os trechos com match forte no
      prompt. Perguntou "quem é JP?" e existe JP.md -> o modelo JÁ recebe a
      nota, sem depender da boa vontade dele.
-  2. TOOL "notes_query": o modelo ainda pode PEDIR uma busca extra
-     preenchendo "notes_query" no JSON; o ask() roda a busca e refaz a
-     chamada com os resultados (1 rodada no máximo).
+  2. TOOL "notes_query": o modelo PEDE uma busca extra preenchendo
+     "notes_query" no JSON; o ask() roda knowledge.search e refaz a chamada.
+  3. TOOL "notes_write": o modelo CRIA ou ATUALIZA notas preenchendo
+     "notes_write": {"title","body","mode"} — grava local, sobe pro Drive
+     (push_note) e o bimo_pc_sync.py puxa pro Obsidian do PC.
 RAG leve, por palavra-chave, sem embeddings, 100% na rasp.
 
 Env (chaves; o resto é via Settings):
@@ -205,9 +207,15 @@ SYSTEM_PROMPT = (
     'recebera os trechos e respondera em seguida. NUNCA invente fatos sobre '
     'pessoas ou assuntos do usuario; sem informacao, diga que nao achou nada '
     'nas notas. Se nao precisar de busca, use "".\n'
+    'ESCREVER NOTAS: voce pode CRIAR ou ATUALIZAR o Segundo Cerebro do usuario. '
+    'Preencha "notes_write" com {"title": "Nome", "body": "markdown", '
+    '"mode": "create"|"append"|"replace"} e deixe "msg" vazia — a nota sera '
+    'salva e sincronizada no Drive/Obsidian. Use create pra nota nova, append '
+    'pra acrescentar no fim, replace pra sobrescrever (busque antes com '
+    'notes_query se nao souber o conteudo atual). Se nao for escrever, use null.\n'
     'Responda SEMPRE apenas com um JSON valido no formato '
     '{"msg": "sua resposta", "screen": "uma das chaves acima", "task": "", '
-    '"facts": [], "name": "", "notes_query": ""}. '
+    '"facts": [], "name": "", "notes_query": "", "notes_write": null}. '
     'Use "screen" diferente de "none" SO quando o usuario pedir ou fizer claro '
     'sentido abrir aquela tela; em conversa normal use "none". '
     "Nada alem do JSON."
@@ -248,7 +256,9 @@ MOOD_TONE = {
 class ChatService:
     HISTORY_TURNS = 6   # quantas trocas (user+assistant) manter de contexto
 
-    def __init__(self, memory=None, knowledge=None) -> None:
+    MAX_TOOL_ROUNDS = 4   # busca + escrita + resposta (com folga)
+
+    def __init__(self, memory=None, knowledge=None, on_note_saved=None) -> None:
         self.last_error = ""
         self.last_msg = ""       # última resposta do BMO (pra UI ler)
         self.last_screen = ""    # tela que o BMO pediu pra abrir ("" = nenhuma)
@@ -258,9 +268,10 @@ class ChatService:
         self.last_notes: list[str] = []
         # Memória opcional (PetMemory): se None, o chat se comporta como antes.
         self.memory = memory
-        # KnowledgeService opcional: habilita a tool notes_query (RAG das
-        # notas do Obsidian espelhadas do Drive).
+        # KnowledgeService opcional: tools notes_query (ler) e notes_write (gravar).
         self.knowledge = knowledge
+        # Callback após gravar nota: recebe Path e deve subir pro Drive (push_note).
+        self.on_note_saved = on_note_saved
         # Histórico curto da conversa (pro BMO ter contexto entre falas).
         self._history: list[dict] = []
         # --- visão (descrição de imagem da câmera) ---
@@ -316,6 +327,30 @@ class ChatService:
             parts.append(f"### {h['title']} {tags}\n{h['snippet']}")
         return "\n\n".join(parts)
 
+    def _exec_notes_write(self, spec: dict) -> str:
+        """Executa notes_write: grava local + sync Drive."""
+        if self.knowledge is None:
+            return "erro: servico de conhecimento indisponivel"
+        title = str(spec.get("title", "")).strip()
+        body = str(spec.get("body", spec.get("content", "")))
+        mode = str(spec.get("mode", "create")).strip().lower() or "create"
+        if not title:
+            return "erro: titulo da nota vazio"
+        result = self.knowledge.write(title, body, mode=mode)
+        if not result.get("ok"):
+            return f"erro ao gravar: {result.get('error', '?')}"
+        saved_title = result["title"]
+        self._log_notes("write", f"{mode} {saved_title}",
+                        [{"title": saved_title}])
+        sync_ok = False
+        if self.on_note_saved is not None:
+            try:
+                sync_ok = bool(self.on_note_saved(result["path"]))
+            except Exception:
+                sync_ok = False
+        drive = "subiu pro Drive" if sync_ok else "ficou local (sem rede/Drive)"
+        return f"ok: nota '{saved_title}' ({mode}) — {drive}"
+
     def _auto_notes(self, text: str) -> str:
         """RAG automático: busca os termos da mensagem nas notas ANTES de
         chamar o LLM. Só injeta matches fortes (título/tag, score >= 4) pra
@@ -368,7 +403,7 @@ class ChatService:
         messages.extend(self._history)   # contexto curto das trocas anteriores
         messages.append({"role": "user", "content": text})
         try:
-            for round_ in range(2):   # rodada normal + (opcional) rodada da tool
+            for round_ in range(self.MAX_TOOL_ROUNDS):
                 payload = {
                     "model": model,
                     "messages": messages,
@@ -382,16 +417,25 @@ class ChatService:
                 data = _http_post_json(url, api_key, spec["extra_headers"], payload)
                 content = data["choices"][0]["message"].get("content")
                 (self.last_msg, self.last_screen, self.last_task,
-                 facts, name, notes_query) = self._parse(content)
-                if notes_query and self.knowledge is not None and round_ == 0:
-                    # o BMO pediu contexto das notas: injeta e refaz
+                 facts, name, notes_query, notes_write) = self._parse(content)
+                if round_ >= self.MAX_TOOL_ROUNDS - 1:
+                    break
+                if notes_query and self.knowledge is not None:
                     ctx = self._notes_context(notes_query)
                     messages.append({"role": "assistant", "content": content or ""})
                     messages.append({"role": "user", "content":
                                      "RESULTADO DA BUSCA NAS NOTAS DO USUARIO "
                                      f"(query: {notes_query}):\n{ctx}\n\n"
                                      "Agora responda a pergunta original usando isso. "
-                                     "Mesmo formato JSON; notes_query vazio."})
+                                     "Mesmo formato JSON; notes_query null."})
+                    continue
+                if notes_write and self.knowledge is not None:
+                    outcome = self._exec_notes_write(notes_write)
+                    messages.append({"role": "assistant", "content": content or ""})
+                    messages.append({"role": "user", "content":
+                                     f"RESULTADO DA GRAVACAO DA NOTA:\n{outcome}\n\n"
+                                     "Confirme ao usuario o que foi salvo. "
+                                     "Mesmo formato JSON; notes_write null."})
                     continue
                 break
             # grava memória nova (nome/fatos) e guarda a troca no histórico
@@ -505,8 +549,21 @@ class ChatService:
         if len(self._history) > max_msgs:
             self._history = self._history[-max_msgs:]
 
-    def _parse(self, content: str) -> tuple[str, str, str, list, str, str]:
-        """Extrai (msg, screen, task, facts, name, notes_query) do JSON.
+    def _parse_notes_write(self, raw) -> dict | None:
+        """Normaliza notes_write do JSON do modelo."""
+        if not isinstance(raw, dict):
+            return None
+        title = str(raw.get("title", "")).strip()
+        if not title:
+            return None
+        return {
+            "title": title,
+            "body": str(raw.get("body", raw.get("content", ""))),
+            "mode": str(raw.get("mode", "create")).strip().lower() or "create",
+        }
+
+    def _parse(self, content: str) -> tuple[str, str, str, list, str, str, dict | None]:
+        """Extrai (msg, screen, task, facts, name, notes_query, notes_write).
         Tolerante: tenta o JSON inteiro, depois um objeto no meio do texto.
         Campos ausentes viram vazio. screen vira "" se ausente/invalido."""
         content = (content or "").strip()
@@ -533,8 +590,8 @@ class ChatService:
                 if isinstance(raw_facts, list) else []
             name = str(obj.get("name", "") or "").strip()
             notes_query = str(obj.get("notes_query", "") or "").strip()
-            # com busca pendente a msg pode vir vazia de propósito — não usa
-            # o content cru como fallback nesse caso
-            return (msg or ("" if notes_query else _strip_emoji(content))), \
-                screen, task, facts, name, notes_query
-        return _strip_emoji(content), "", "", [], "", ""
+            notes_write = self._parse_notes_write(obj.get("notes_write"))
+            pending = notes_query or notes_write
+            return (msg or ("" if pending else _strip_emoji(content))), \
+                screen, task, facts, name, notes_query, notes_write
+        return _strip_emoji(content), "", "", [], "", "", None

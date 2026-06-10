@@ -180,7 +180,12 @@ def build_initial(app: App):
     # BMO responde via LLM (OpenRouter ou NVIDIA NIM — escolhível em SETTINGS->IA).
     # Degrada sem a chave do provedor ativo (OPENROUTER_API_KEY / NVIDIA_API_KEY).
     # memory dá contexto (nome/fatos) e histórico entre conversas.
-    chat = ChatService(memory=memory, knowledge=knowledge)
+    def _push_note_to_drive(path) -> bool:
+        svc = _drive_sync.get("svc")
+        return bool(svc and svc.push_note(path))
+
+    chat = ChatService(memory=memory, knowledge=knowledge,
+                       on_note_saved=_push_note_to_drive)
     # Voz do BMO (TTS): Edge TTS (Francisca pt-BR) por padrão — incorporado do
     # módulo de laboratório bmo_voz.py. Degrada sem edge-tts/internet.
     # Volume separado em SETTINGS->IA ("Voz BMO" = tts_volume); 0 = mudo.

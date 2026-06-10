@@ -11,8 +11,12 @@ O parse é leve (regex, sem dependência) e cacheado por assinatura da pasta
 reprocessa quando algo mudou no disco — ex: o drive_sync acabou de baixar
 notas novas.
 
-É a fundação do RAG local (V3): por ora alimenta a tela CEREBRO
-(visualização do grafo); depois os mesmos nós viram chunks da base vetorial.
+É a fundação do RAG local (V3): alimenta a tela CEREBRO, o RAG do chat e a
+tool notes_write (o agente pode criar/atualizar notas aqui; o drive_sync
+sobe pro Drive e o bimo_pc_sync.py puxa pro Obsidian do PC).
+
+Escrita pelo agente: create | append | replace — arquivos .md achatados na
+pasta do perfil (mesmo esquema do espelho Drive/Obsidian).
 """
 from __future__ import annotations
 
@@ -21,6 +25,9 @@ import threading
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# caracteres proibidos em nome de arquivo (Windows/Linux)
+_UNSAFE_NAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 # [[Alvo]], [[Alvo|apelido]], [[Alvo#secao]] — captura só o Alvo
 WIKILINK_RE = re.compile(r"\[\[([^\]\|#]+)(?:[#\|][^\]]*)?\]\]")
@@ -206,3 +213,76 @@ class KnowledgeService:
                                    "snippet": snippet, "score": score}))
         scored.sort(key=lambda x: -x[0])
         return [hit for _, hit in scored[:k]]
+
+    # ---------- escrita (tool notes_write do chat) ----------
+
+    @staticmethod
+    def _safe_filename(title: str) -> str:
+        """Título -> nome de arquivo .md seguro (achatado, estilo Obsidian)."""
+        name = _UNSAFE_NAME_RE.sub("", (title or "").strip())
+        name = re.sub(r"\s+", " ", name).strip()
+        if not name:
+            name = "Nota"
+        if name.lower().endswith(".md"):
+            name = name[:-3].strip() or "Nota"
+        if len(name) > 100:
+            name = name[:100].strip()
+        return f"{name}.md"
+
+    def _find_path(self, title: str) -> Path | None:
+        """Acha o .md pelo título (case-insensitive no stem)."""
+        want = self._safe_filename(title).lower()
+        stem = want[:-3] if want.endswith(".md") else want
+        try:
+            for p in self.dir.glob("*.md"):
+                if p.stem.lower() == stem:
+                    return p
+        except OSError:
+            pass
+        return None
+
+    def read_full(self, title: str) -> str:
+        """Conteúdo integral de uma nota (pra append/replace informado)."""
+        path = self._find_path(title)
+        if path is None:
+            return ""
+        try:
+            return path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return ""
+
+    def write(self, title: str, body: str, *, mode: str = "create") -> dict:
+        """Grava nota local. mode: create | append | replace.
+
+        Retorna {ok, title, path, error?}. Invalida o cache do grafo."""
+        mode = (mode or "create").strip().lower()
+        if mode not in ("create", "append", "replace"):
+            return {"ok": False, "error": f"mode invalido: {mode}"}
+        fname = self._safe_filename(title)
+        display = fname[:-3] if fname.lower().endswith(".md") else fname
+        self.dir.mkdir(parents=True, exist_ok=True)
+        path = self._find_path(title) or (self.dir / fname)
+        body = (body or "").rstrip()
+        if mode == "create" and path.exists():
+            return {"ok": False, "error": f"nota ja existe: {display}"}
+        if mode == "append":
+            if path.exists():
+                try:
+                    old = path.read_text(encoding="utf-8", errors="ignore").rstrip()
+                except OSError:
+                    old = ""
+                body = f"{old}\n\n{body}".strip() if old else body
+            elif not body.strip():
+                return {"ok": False, "error": "nota nao existe p/ append"}
+        elif mode == "replace" and not path.exists():
+            # replace em nota inexistente = create
+            pass
+        if not body.strip() and mode != "replace":
+            return {"ok": False, "error": "conteudo vazio"}
+        try:
+            path.write_text(body + "\n", encoding="utf-8")
+        except OSError as e:
+            return {"ok": False, "error": str(e)[:80]}
+        with self._lock:
+            self._sig = ()   # força re-scan do grafo
+        return {"ok": True, "title": path.stem, "path": path}
