@@ -551,6 +551,7 @@ def build_initial(app: App):
             "screen": getattr(chat, "last_screen", ""),
             "task": getattr(chat, "last_task", ""),
             "error": getattr(chat, "last_error", ""),
+            "notes": getattr(chat, "last_notes", []),
         }
 
     _remote_chat["fn"] = remote_chat

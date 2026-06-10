@@ -246,6 +246,9 @@ class ChatService:
         self.last_msg = ""       # última resposta do BMO (pra UI ler)
         self.last_screen = ""    # tela que o BMO pediu pra abrir ("" = nenhuma)
         self.last_task = ""      # tarefa que o BMO pediu pra criar ("" = nenhuma)
+        # Debug do RAG: o que foi pesquisado/lido nas notas na última ask()
+        # (ex.: ["auto 'quem é jp?' -> JP", "tool 'projetos jp' -> Bimo"]).
+        self.last_notes: list[str] = []
         # Memória opcional (PetMemory): se None, o chat se comporta como antes.
         self.memory = memory
         # KnowledgeService opcional: habilita a tool notes_query (RAG das
@@ -282,6 +285,13 @@ class ChatService:
         _, _, _, key, model = _resolve("vision_provider", "vision_model_key")
         return bool(key and model)
 
+    def _log_notes(self, kind: str, query: str, hits: list) -> None:
+        """Registra (e ecoa no console) o que o RAG pesquisou/leu."""
+        titles = ", ".join(h["title"] for h in hits) if hits else "(nada)"
+        entry = f"{kind} '{query}' -> {titles}"
+        self.last_notes.append(entry)
+        print(f"[chat] notas {entry}", flush=True)
+
     def _notes_context(self, query: str) -> str:
         """Roda a busca nas notas do Obsidian e formata os trechos pro LLM."""
         if self.knowledge is None or not query:
@@ -290,6 +300,7 @@ class ChatService:
             hits = self.knowledge.search(query, k=3)
         except Exception:
             return ""
+        self._log_notes("tool", query, hits)
         if not hits:
             return "(nenhuma nota encontrada para essa busca)"
         parts = []
@@ -311,6 +322,7 @@ class ChatService:
             return ""
         if not hits:
             return ""
+        self._log_notes("auto", text, hits)
         parts = []
         for h in hits:
             tags = " ".join("#" + t for t in h.get("tags", [])[:3])
@@ -329,6 +341,7 @@ class ChatService:
         self.last_error = ""
         self.last_screen = ""
         self.last_task = ""
+        self.last_notes = []
         provider, spec, url, api_key, model = _resolve()
         if not api_key:
             self.last_error = ("configure LOCAL_LLM_HOST no .env" if provider == "local"

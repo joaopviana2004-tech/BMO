@@ -39,6 +39,9 @@ def send(host: str, text: str, timeout: int = 180) -> dict:
 def show(res: dict) -> None:
     msg = (res.get("msg") or "").strip()
     err = (res.get("error") or "").strip()
+    for entry in res.get("notes") or []:
+        # debug do RAG: o que o Bimo pesquisou e quais notas leu
+        print(f"      [notas {entry}]")
     if msg:
         print(f"bimo> {msg}")
     extras = []
