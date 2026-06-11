@@ -118,10 +118,11 @@ def crossover(a: Brain, b: Brain) -> Brain:
                  mix(a.w_ho, b.w_ho), mix(a.b_o, b.b_o))
 
 
-def sense(bird_y, pipe_x, gap_y):
+def sense(bird_y, pipe_x, gap_y, bird_x=BIRD_X):
     """Entradas normalizadas do pássaro. MESMA função usada no treino e no jogo
-    (garante que o cérebro salvo se comporte igual nos dois)."""
-    dx = (pipe_x - BIRD_X) / W            # distância até o cano (~0..1+)
+    (garante que o cérebro salvo se comporte igual nos dois). bird_x permite o
+    enxame espalhado: cada pássaro mede a distância a partir da SUA posição."""
+    dx = (pipe_x - bird_x) / W            # distância até o cano (~0..1+)
     dy = (gap_y - bird_y) / H             # vão acima (>0) ou abaixo (<0) do pássaro
     return [dx, dy]
 
@@ -131,18 +132,24 @@ def sense(bird_y, pipe_x, gap_y):
 class World:
     """Canos compartilhados + N pássaros. Avança a física de todos os vivos.
 
-    Os canos são os mesmos pra todos os pássaros (comparação justa) — é o que
-    permite renderizar vários pássaros sobre o mesmo cenário.
+    Os canos são os mesmos pra todos os pássaros (comparação justa). Cada pássaro
+    pode ter um deslocamento horizontal próprio (xoffs) — aí a SUA posição real
+    (BIRD_X+xoff) é usada na visão E na colisão, então o enxame espalhado bate
+    com onde cada um é desenhado (não atravessa cano). Sem xoffs => tudo em
+    BIRD_X (jogo/validação ficam idênticos ao de antes).
     """
 
-    def __init__(self, n: int, seed: int | None = None) -> None:
+    def __init__(self, n: int, seed: int | None = None, xoffs=None) -> None:
         self.rng = random.Random(seed)
+        self.xoffs = list(xoffs) if xoffs else [0] * n
         self.reset(n)
 
     def reset(self, n: int) -> None:
         self.score = 0          # canos passados nesta geração (pelo grupo)
         self.birds = [{"y": H / 2, "vel": 0.0, "alive": True, "fitness": 0.0}
                       for _ in range(n)]
+        if len(self.xoffs) != n:
+            self.xoffs = (list(self.xoffs) + [0] * n)[:n]
         self.pipes = []         # _make_pipe lê self.score (já zerado acima)
         x = W + 40
         for _ in range(3):
@@ -157,26 +164,30 @@ class World:
                                  GROUND_Y - GAP_MARGIN - gap // 2)
         return {"x": float(x), "gap_y": gap_y, "gap": gap, "scored": False}
 
-    def next_pipe(self) -> dict | None:
-        """Primeiro cano cuja borda direita ainda não passou do pássaro."""
+    def next_pipe(self, ref_x: float = BIRD_X) -> dict | None:
+        """Primeiro cano cuja borda direita ainda não passou de ref_x (a posição
+        do pássaro — cada um do enxame tem a sua)."""
         for p in self.pipes:
-            if p["x"] + PIPE_W >= BIRD_X:
+            if p["x"] + PIPE_W >= ref_x:
                 return p
         return self.pipes[0] if self.pipes else None
 
     def step(self, dt: float, brains: list) -> None:
-        p = self.next_pipe()
-        gap_y = p["gap_y"] if p else H / 2
-        pipe_x = p["x"] if p else float(W)
         for i, b in enumerate(self.birds):
             if not b["alive"]:
                 continue
-            if brains[i].flaps(sense(b["y"], pipe_x, gap_y)):
+            # posição REAL deste pássaro (enxame espalhado): visão e colisão usam
+            # o mesmo x em que ele é desenhado, então nada atravessa cano.
+            bx = BIRD_X + self.xoffs[i]
+            p = self.next_pipe(bx)
+            gap_y = p["gap_y"] if p else H / 2
+            pipe_x = p["x"] if p else float(W)
+            if brains[i].flaps(sense(b["y"], pipe_x, gap_y, bx)):
                 b["vel"] = FLAP_V
             b["vel"] = min(MAX_FALL, b["vel"] + GRAVITY * dt)
             b["y"] += b["vel"] * dt
             b["fitness"] += dt
-            if b["y"] >= GROUND_Y - BIRD_R or b["y"] < CEIL_Y + BIRD_R or self._hit(b, p):
+            if b["y"] >= GROUND_Y - BIRD_R or b["y"] < CEIL_Y + BIRD_R or self._hit(b, p, bx):
                 b["alive"] = False
                 self.alive -= 1
         # move canos + pontua (bônus de aptidão pra quem ainda está vivo)
@@ -196,10 +207,10 @@ class World:
         self.t += dt
 
     @staticmethod
-    def _hit(b: dict, p: dict | None) -> bool:
+    def _hit(b: dict, p: dict | None, bx: float = BIRD_X) -> bool:
         if p is None:
             return False
-        if p["x"] > BIRD_X + BIRD_R or p["x"] + PIPE_W < BIRD_X - BIRD_R:
+        if p["x"] > bx + BIRD_R or p["x"] + PIPE_W < bx - BIRD_R:
             return False
         half = p.get("gap", PIPE_GAP) // 2
         gap_top = p["gap_y"] - half

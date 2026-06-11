@@ -59,19 +59,20 @@ class FlappyTrainScreen:
         self._init_population()
 
     def _init_population(self) -> None:
+        # cor viva + deslocamento em X por pássaro. O xoff é a POSIÇÃO REAL do
+        # pássaro (passa pro World): visão e colisão usam o mesmo x do desenho,
+        # então nada atravessa cano. Espalha bem na horizontal mas viesado pra
+        # ESQUERDA (atrás do ponto de física) — nunca na borda nem à frente do
+        # cano. Some no REINICIAR.
+        self._colors = [self._vivid_color() for _ in range(POP)]
+        self._xoff = [random.randint(-42, 4) for _ in range(POP)]
         self.brains = [fai.Brain() for _ in range(POP)]
-        self.world = fai.World(POP)
+        self.world = fai.World(POP, xoffs=self._xoff)
         self.gen = 1
         self.record = 0
         self.best_brain = None
         self._gen_steps = 0
         self._history = []      # pontuação de cada geração (gráfico de recordes)
-        # cor viva aleatória + deslocamento em X por pássaro (só visual — a física
-        # é toda em BIRD_X). Espalha bem na horizontal, mas viesado pra ESQUERDA
-        # (atrás do ponto de física): nunca nasce na borda nem em cima/depois do
-        # cano à frente. Some no REINICIAR.
-        self._colors = [self._vivid_color() for _ in range(POP)]
-        self._xoff = [random.randint(-42, 4) for _ in range(POP)]
 
     @staticmethod
     def _vivid_color() -> tuple[int, int, int]:
@@ -167,10 +168,11 @@ class FlappyTrainScreen:
         if i is None:
             return
         b = self.world.birds[i]
-        p = self.world.next_pipe()
+        bx = BIRD_X + self._xoff[i]      # posição real do líder
+        p = self.world.next_pipe(bx)
         gap_y = p["gap_y"] if p else H / 2
         pipe_x = p["x"] if p else float(W)
-        inputs = fai.sense(b["y"], pipe_x, gap_y)
+        inputs = fai.sense(b["y"], pipe_x, gap_y, bx)
         out, hid = self.brains[i].forward(inputs)
         self._viz = {"inputs": inputs, "hid": hid, "out": out, "brain": self.brains[i]}
 
