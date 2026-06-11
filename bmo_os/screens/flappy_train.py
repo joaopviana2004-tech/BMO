@@ -28,11 +28,12 @@ from ..services.flappy_ai import (
 # paleta do jogo (mesma identidade visual)
 from .flappy import BG, WHITE, DIM, BIRD, BIRD_EYE, PIPE, PIPE_DARK, GROUND
 
-# ---------- parâmetros do GA (leves pro Pi) ----------
+# ---------- parâmetros do GA (leves pro Pi e estáveis entre gerações) ----------
 POP = 24            # tamanho da população (simulada; barata)
 RENDER = 5          # quantos pássaros aparecem por vez (o resto roda invisível)
-ELITE = 1
-MUTATE = 0.12
+ELITE = 2           # melhores preservados intactos (não regridem)
+MUTATE = 0.06       # taxa de mutação LEVE (filhos perto do campeão)
+CROSS = 0.25        # crossover LEVE (raro; padrão é clonar + mutar)
 MAX_GEN_SCORE = 30  # corta a geração quando o grupo passa N canos (mantém o ritmo)
 
 PANEL = pygame.Rect(246, 26, 150, 170)
@@ -92,11 +93,15 @@ class FlappyTrainScreen:
             self._toast("Treino reiniciado")
         elif key == "salvar":
             audio.play("select")
-            brain = self.best_brain or self._current_best_brain()
-            if brain is None:
-                self._toast("Nada pra salvar ainda")
-            elif fai.save_brain(brain, self.gen, self.record):
-                self._toast("Cerebro salvo! (jogar contra)")
+            # valida os candidatos em vários mundos novos e grava o MAIS ROBUSTO
+            # (não o "líder sortudo" de um layout) — é ele que vai pro versus.
+            cands = list(self.brains)
+            if self.best_brain is not None:
+                cands.append(self.best_brain)
+            brain, (mn, _tot) = fai.most_robust(cands)
+            if brain is not None and fai.save_brain(brain, self.gen, self.record):
+                self.best_brain = brain.copy()
+                self._toast(f"Salvo! robustez {mn}/20")
             else:
                 self._toast("Falha ao salvar")
 
@@ -104,24 +109,32 @@ class FlappyTrainScreen:
         self._status = msg
         self._status_until = time.time() + 3.0
 
-    def _current_best_brain(self):
-        i = self.world.best_index()
-        return self.brains[i] if i is not None else None
-
     # ---------- update / GA ----------
 
     def update(self, dt: float) -> None:
         dt = min(dt, 0.05)      # clamp anti-explosão da física em lag
         if self.world.alive > 0 and self.world.score < MAX_GEN_SCORE:
             self.world.step(dt, self.brains)
+            # campeão de TODOS os tempos, rastreado AO VIVO: quando o grupo bate
+            # o recorde, congela o cérebro do líder. É ele que o SALVAR grava
+            # (não o melhor da última geração, que pode ter regredido).
+            if self.world.score > self.record:
+                self.record = self.world.score
+                i = self.world.best_index()
+                if i is not None:
+                    self.best_brain = self.brains[i].copy()
         else:
             self._next_generation()
         self._update_viz()
 
     def _next_generation(self) -> None:
         fitnesses = [b["fitness"] for b in self.world.birds]
-        self.record = max(self.record, self.world.score)
-        self.brains, self.best_brain = fai.evolve(self.brains, fitnesses, ELITE, MUTATE)
+        self.brains, _gen_best = fai.evolve(self.brains, fitnesses, ELITE, MUTATE, CROSS)
+        # injeta o campeão histórico de volta na população: garante que a
+        # próxima geração NUNCA colapse (o melhor pássaro de todos segue vivo
+        # competindo, mesmo se a última geração tiver regredido).
+        if self.best_brain is not None and POP > ELITE:
+            self.brains[ELITE] = self.best_brain.copy()
         self.world.reset(POP)
         self.gen += 1
 

@@ -74,7 +74,9 @@ class Brain:
     def copy(self) -> "Brain":
         return Brain(list(self.w_ih), list(self.b_h), list(self.w_ho), list(self.b_o))
 
-    def mutate(self, rate=0.12, scale=0.45) -> None:
+    def mutate(self, rate=0.06, scale=0.25) -> None:
+        # mutação LEVE: poucos genes mudam, por passos pequenos — mantém os
+        # filhos perto do campeão (evita o colapso entre gerações).
         for lst in (self.w_ih, self.b_h, self.w_ho, self.b_o):
             for k in range(len(lst)):
                 if random.random() < rate:
@@ -198,22 +200,60 @@ class World:
         return max(pool, key=lambda i: self.birds[i]["fitness"])
 
 
-def evolve(brains: list, fitnesses: list, elite: int = 1, mutate_rate: float = 0.12):
-    """Próxima geração: elitismo + crossover de pais bons (torneio) + mutação.
+def evolve(brains: list, fitnesses: list, elite: int = 2,
+           mutate_rate: float = 0.06, cross_rate: float = 0.25):
+    """Próxima geração: elitismo + reprodução LEVE (na maioria das vezes só
+    clona um pai bom + mutação suave; crossover só com prob. cross_rate).
 
     Devolve (proxima_geracao, melhor_cerebro_da_geracao_atual)."""
     n = len(brains)
     order = sorted(range(n), key=lambda i: fitnesses[i], reverse=True)
     ranked = [brains[i] for i in order]
     best = ranked[0].copy()
-    nxt = [ranked[i].copy() for i in range(min(elite, n))]   # elitismo
+    nxt = [ranked[i].copy() for i in range(min(elite, n))]   # elitismo (sem mutar)
     pool = ranked[:max(2, n // 2)]                            # metade superior reproduz
     while len(nxt) < n:
-        pa, pb = random.choice(pool), random.choice(pool)
-        child = crossover(pa, pb)
+        pa = random.choice(pool)
+        # crossover é leve (raro); o padrão é reprodução assexuada (clone)
+        child = crossover(pa, random.choice(pool)) if random.random() < cross_rate else pa.copy()
         child.mutate(mutate_rate)
         nxt.append(child)
     return nxt, best
+
+
+# ---------- validação de robustez (escolher um campeão que generaliza) ----------
+
+def evaluate(brain: Brain, seeds, max_pipes=20, max_steps=2500, dt=1 / 30.0):
+    """Roda o cérebro SOZINHO em vários mundos (um por seed) e mede quão longe
+    vai em cada um. Devolve (menor_pontuacao, soma). Um pássaro robusto passa
+    em todos — um sortudo passa só num layout e morre no primeiro cano de outro.
+    """
+    scores = []
+    for s in seeds:
+        w = World(1, seed=s)
+        steps = 0
+        while w.alive > 0 and w.score < max_pipes and steps < max_steps:
+            w.step(dt, [brain])
+            steps += 1
+        scores.append(w.score)
+    return min(scores), sum(scores)
+
+
+VALIDATION_SEEDS = (11, 22, 33, 44, 55, 66, 77, 88)
+
+
+def most_robust(brains, seeds=VALIDATION_SEEDS):
+    """Entre os cérebros dados, devolve (melhor, (menor, soma)) — o que sobrevive
+    melhor no PIOR caso (e depois no total). É o que deve ir pro 'jogar contra'.
+    """
+    best, best_key = None, (-1, -1)
+    for b in brains:
+        if b is None:
+            continue
+        key = evaluate(b, seeds)
+        if key > best_key:
+            best, best_key = b, key
+    return best, best_key
 
 
 # ---------- persistência do melhor cérebro ("jogar contra") ----------
