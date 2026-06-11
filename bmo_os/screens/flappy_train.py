@@ -3,17 +3,19 @@
 Uma população de pássaros (cada um com uma rede 2->5->1) joga ao mesmo tempo
 sobre os mesmos canos. Quando todos morrem, o algoritmo genético cria a próxima
 geração (elitismo + crossover + mutação). A tela mostra:
-  - até 5 pássaros vivos por vez (o melhor destacado),
+  - até 10 pássaros vivos por vez, cada um numa cor (enxame; o melhor destacado),
   - a rede neural do MELHOR pássaro em tempo real (entradas, hidden, saída),
   - HUD com geração / vivos / pontos / recorde,
   - botões REINICIAR (zera o treino) e SALVAR (grava o melhor cérebro pra
     "jogar contra" no Flappy normal).
 
-Roda a 30 FPS (preferred_fps) e renderiza no máx. 5 pássaros pra não esquentar
+Roda a 30 FPS (preferred_fps) e renderiza no máx. 10 pássaros pra não esquentar
 a Pi — a simulação da população é barata (redes minúsculas em Python puro).
 """
 from __future__ import annotations
 
+import colorsys
+import random
 import time
 
 import pygame
@@ -30,7 +32,7 @@ from .flappy import BG, WHITE, DIM, BIRD, BIRD_EYE, PIPE, PIPE_DARK, GROUND
 
 # ---------- parâmetros do GA (leves pro Pi e estáveis entre gerações) ----------
 POP = 24            # tamanho da população (simulada; barata)
-RENDER = 5          # quantos pássaros aparecem por vez (o resto roda invisível)
+RENDER = 10         # quantos pássaros aparecem por vez (enxame colorido; o resto roda invisível)
 ELITE = 2           # melhores preservados intactos (não regridem)
 MUTATE = 0.06       # taxa de mutação LEVE (filhos perto do campeão)
 CROSS = 0.25        # crossover LEVE (raro; padrão é clonar + mutar)
@@ -58,6 +60,16 @@ class FlappyTrainScreen:
         self.gen = 1
         self.record = 0
         self.best_brain = None
+        # cor viva aleatória + leve deslocamento em X por pássaro (só visual —
+        # a física é toda em BIRD_X). Dá a cara de enxame e some no REINICIAR.
+        self._colors = [self._vivid_color() for _ in range(POP)]
+        self._xoff = [random.randint(-6, 6) for _ in range(POP)]
+
+    @staticmethod
+    def _vivid_color() -> tuple[int, int, int]:
+        h, s, v = random.random(), random.uniform(0.65, 1.0), random.uniform(0.85, 1.0)
+        r, g, b = colorsys.hsv_to_rgb(h, s, v)
+        return (int(r * 255), int(g * 255), int(b * 255))
 
     def enter(self) -> None: ...
     def exit(self) -> None: ...
@@ -189,14 +201,15 @@ class FlappyTrainScreen:
         best = shown[0] if shown else None
         for idx in reversed(shown):   # desenha o melhor por último (por cima)
             b = self.world.birds[idx]
+            x = BIRD_X + self._xoff[idx]
             y = int(b["y"])
+            color = self._colors[idx]
+            pygame.draw.rect(surface, color, (x - BIRD_R, y - BIRD_R, BIRD_R * 2, BIRD_R * 2))
+            pygame.draw.rect(surface, BIRD_EYE, (x + 1, y - 3, 2, 2))
             if idx == best:
-                pygame.draw.rect(surface, BIRD, (BIRD_X - BIRD_R, y - BIRD_R, BIRD_R * 2, BIRD_R * 2))
-                pygame.draw.rect(surface, BIRD_EYE, (BIRD_X + 1, y - 3, 2, 2))
-                pygame.draw.rect(surface, (230, 120, 40), (BIRD_X + BIRD_R, y, 3, 2))
-            else:
-                # "fantasmas" mais apagados pros outros 4
-                pygame.draw.rect(surface, DIM, (BIRD_X - BIRD_R, y - BIRD_R, BIRD_R * 2, BIRD_R * 2), 1)
+                # o líder (cuja rede aparece no painel): anel branco + biquinho
+                pygame.draw.rect(surface, WHITE, (x - BIRD_R - 1, y - BIRD_R - 1, BIRD_R * 2 + 2, BIRD_R * 2 + 2), 1)
+                pygame.draw.rect(surface, (230, 120, 40), (x + BIRD_R, y, 3, 2))
 
     def _draw_hud(self, surface) -> None:
         surface.blit(render_text(f"GER {self.gen}", 10, WHITE), (6, 24))

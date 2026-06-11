@@ -467,8 +467,8 @@ genético em tempo real** e mostra a **rede neural do melhor pássaro ao vivo**:
 - **Entradas visíveis:** `DIST` (distância ao próximo cano) e `ALT` (altura do
   pássaro relativa ao vão). Os nós acendem (verde/vermelho) pela ativação; a
   saída mostra `FLAP`.
-- Renderiza até **5 pássaros** por vez (o melhor destacado) e roda a **30 FPS**
-  pra não esquentar a Pi.
+- Renderiza até **10 pássaros** por vez, cada um numa **cor aleatória** (cara de
+  enxame; o melhor com anel branco) e roda a **30 FPS** pra não esquentar a Pi.
 - **SALVAR** valida os candidatos em vários mundos novos e grava o **mais
   robusto** (toast `robustez X/20`). **REINICIAR** zera o treino.
 - **Jogar contra:** com um cérebro salvo, o **Flappy** normal vira **versus** —
