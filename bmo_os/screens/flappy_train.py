@@ -41,7 +41,8 @@ CROSS = 0.25        # crossover LEVE (raro; padrão é clonar + mutar)
 # uma trava de segurança (~3 min a 30 FPS) caso um pássaro fique imortal.
 MAX_GEN_STEPS = 5400
 
-PANEL = pygame.Rect(246, 26, 150, 170)
+PANEL = pygame.Rect(246, 26, 150, 116)   # rede do melhor (mais baixa p/ caber o gráfico)
+GRAPH = pygame.Rect(246, 148, 150, 54)   # gráfico de recordes (pontuação por geração)
 
 
 class FlappyTrainScreen:
@@ -64,10 +65,13 @@ class FlappyTrainScreen:
         self.record = 0
         self.best_brain = None
         self._gen_steps = 0
-        # cor viva aleatória + leve deslocamento em X por pássaro (só visual —
-        # a física é toda em BIRD_X). Dá a cara de enxame e some no REINICIAR.
+        self._history = []      # pontuação de cada geração (gráfico de recordes)
+        # cor viva aleatória + deslocamento em X por pássaro (só visual — a física
+        # é toda em BIRD_X). Espalha bem na horizontal, mas viesado pra ESQUERDA
+        # (atrás do ponto de física): nunca nasce na borda nem em cima/depois do
+        # cano à frente. Some no REINICIAR.
         self._colors = [self._vivid_color() for _ in range(POP)]
-        self._xoff = [random.randint(-6, 6) for _ in range(POP)]
+        self._xoff = [random.randint(-42, 4) for _ in range(POP)]
 
     @staticmethod
     def _vivid_color() -> tuple[int, int, int]:
@@ -145,6 +149,8 @@ class FlappyTrainScreen:
         self._update_viz()
 
     def _next_generation(self) -> None:
+        self._history.append(self.world.score)      # registra a geração que acabou
+        self._history = self._history[-120:]
         fitnesses = [b["fitness"] for b in self.world.birds]
         self.brains, _gen_best = fai.evolve(self.brains, fitnesses, ELITE, MUTATE, CROSS)
         self._gen_steps = 0
@@ -186,6 +192,7 @@ class FlappyTrainScreen:
         pygame.draw.rect(surface, GROUND, (0, GROUND_Y, W, H - GROUND_Y))
         self._draw_birds(surface)
         self._draw_net(surface)
+        self._draw_records(surface)
         self._draw_hud(surface)
         self._draw_buttons(surface)
         if self._status and time.time() < self._status_until:
@@ -314,3 +321,27 @@ class FlappyTrainScreen:
         fill = (0, m, int(m * 0.45)) if a >= 0 else (m, 0, 0)
         pygame.draw.circle(surface, fill, (x, y), r)
         pygame.draw.circle(surface, WHITE, (x, y), r, 1)
+
+    # ---------- gráfico de recordes ----------
+
+    def _draw_records(self, surface) -> None:
+        bg = pygame.Surface((GRAPH.w, GRAPH.h))
+        bg.set_alpha(216)
+        bg.fill((4, 6, 16))
+        surface.blit(bg, GRAPH.topleft)
+        pygame.draw.rect(surface, DIM, GRAPH, 1)
+        surface.blit(render_text("RECORDES", 7, DIM, pixel=False), (GRAPH.left + 5, GRAPH.top + 3))
+        surface.blit(render_text(f"max {self.record}", 7, BIRD, pixel=False),
+                     (GRAPH.right - 44, GRAPH.top + 3))
+        gx, gy = GRAPH.left + 5, GRAPH.top + 14
+        gw, gh = GRAPH.w - 10, GRAPH.h - 18
+        hist = self._history
+        if len(hist) < 2:
+            msg = render_text("coletando...", 7, DIM, pixel=False)
+            surface.blit(msg, msg.get_rect(center=(GRAPH.centerx, gy + gh // 2)))
+            return
+        peak = max(max(hist), 1)
+        n = len(hist)
+        pts = [(gx + int(i * (gw - 1) / (n - 1)),
+                gy + gh - int(s / peak * (gh - 1))) for i, s in enumerate(hist)]
+        pygame.draw.lines(surface, BIRD, False, pts, 1)

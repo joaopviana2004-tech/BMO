@@ -471,7 +471,8 @@ genético em tempo real** e mostra a **rede neural do melhor pássaro ao vivo**:
   é o limitador natural (sem cap artificial — dá pra ver até onde chegam).
 - **Entradas visíveis:** `DIST` (distância ao próximo cano) e `ALT` (altura do
   pássaro relativa ao vão). Os nós acendem (verde/vermelho) pela ativação; a
-  saída mostra `FLAP`.
+  saída mostra `FLAP`. Abaixo do painel, um **gráfico de recordes** mostra a
+  pontuação de cada geração ao longo do treino.
 - Renderiza até **10 pássaros** por vez, cada um numa **cor aleatória** (cara de
   enxame; o melhor com anel branco) e roda a **30 FPS** pra não esquentar a Pi.
 - **SALVAR** valida os candidatos em vários mundos novos e grava o **mais
