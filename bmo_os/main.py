@@ -28,6 +28,7 @@ from bmo_os.screens.aitest import AITestScreen
 from bmo_os.screens.alert import AlertScreen
 from bmo_os.screens.bmo_face import BMOFaceScreen
 from bmo_os.screens.brain import BrainScreen
+from bmo_os.screens.confirm import ConfirmScreen
 from bmo_os.screens.devhub import DevHubScreen
 from bmo_os.screens.clock import ClockScreen
 from bmo_os.screens.flappy import FlappyScreen
@@ -365,9 +366,21 @@ def build_initial(app: App):
         return DevHubScreen(on_back=app.manager.pop, dev_hub=_dev_hub, github=_github)
 
     def make_sysinfo_screen() -> SysInfoScreen:
-        # tela SISTEMA com controle dos coolers + atalhos de atualizar/desligar
-        return SysInfoScreen(on_back=app.manager.pop, sysinfo=sysinfo, cooler=cooler,
-                             on_update=do_update, on_shutdown=do_shutdown)
+        # tela SISTEMA: telemetria + controle dos coolers (atalhos de atualizar/
+        # desligar ficam no grid de AJUSTES, não aqui)
+        return SysInfoScreen(on_back=app.manager.pop, sysinfo=sysinfo, cooler=cooler)
+
+    def confirm_shutdown() -> None:
+        # tile DESLIGAR do grid: um toque é destrutivo, então confirma antes
+        app.manager.push(ConfirmScreen(
+            title="DESLIGAR", message="Desligar o BMO agora?",
+            on_confirm=do_shutdown, on_cancel=app.manager.pop))
+
+    def confirm_update() -> None:
+        # tile ATUALIZAR do grid: baixa o origin/main e reinicia — confirma antes
+        app.manager.push(ConfirmScreen(
+            title="ATUALIZAR", message="Baixar a ultima versao e reiniciar?",
+            on_confirm=do_update, on_cancel=app.manager.pop))
 
     def make_home() -> HomeScreen:
         push = app.manager.push
@@ -396,6 +409,8 @@ def build_initial(app: App):
                 on_dev=lambda: push(make_devhub_screen()),
                 on_settings=lambda: push(make_settings()),
                 on_sysinfo=lambda: push(make_sysinfo_screen()),
+                on_shutdown=confirm_shutdown,
+                on_update=confirm_update,
             ),
         )
 

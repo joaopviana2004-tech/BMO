@@ -33,8 +33,6 @@ TEMP_HOT = 75
 # faixa do gráfico de temperatura
 GRAPH_MIN = 30
 GRAPH_MAX = 90
-# segura toque pra confirmar o desligamento (igual ao SETTINGS)
-SHUTDOWN_CONFIRM_S = 3.0
 
 
 def _load_color(pct):
@@ -60,22 +58,15 @@ def _temp_color(t):
 class SysInfoScreen:
     voice_announce = "Diagnóstico do sistema."   # BMO anuncia ao abrir (cacheado)
 
-    def __init__(self, *, on_back, sysinfo: SysInfoService, cooler=None,
-                 on_update=None, on_shutdown=None) -> None:
+    def __init__(self, *, on_back, sysinfo: SysInfoService, cooler=None) -> None:
         self.on_back = on_back
         self.sysinfo = sysinfo
         self.cooler = cooler            # CoolerService (GPIO 17/23); None = sem suporte
-        self.on_update = on_update      # main.do_update (cleanup + git reset + restart)
-        self.on_shutdown = on_shutdown  # main.do_shutdown (cleanup + shutdown -h now)
         self._t = 0.0
         self._fan_angle = 0.0           # giro do ícone do cooler quando ligado
-        self._buttons = ["cooler", "update", "shutdown"]  # barra de atalhos no rodapé
-        self._sel = 0
+        self._cooler_sel = False        # cursor (teclado/GPIO) sobre o botão do cooler
         self._status = ""
-        self._pending = None            # ação adiada p/ desenhar o status 1 frame antes
-        self._pending_at = 0.0
-        self._shutdown_confirm_until = 0.0
-        self._strip_y = 174
+        self._strip_y = 176
 
     def enter(self) -> None: ...
     def exit(self) -> None: ...
@@ -85,69 +76,35 @@ class SysInfoScreen:
         # gira o ícone só com o cooler efetivamente ligado (manual OU auto >60°C)
         if self.cooler is not None and self.cooler.on:
             self._fan_angle = (self._fan_angle + dt * 6.0) % (2 * math.pi)
-        # executa a ação adiada (restart/desligar) — o status já apareceu 1 frame
-        if self._pending and self._t >= self._pending_at:
-            action, self._pending = self._pending, None
-            if action == "update" and self.on_update:
-                self.on_update()        # não retorna (execv)
-            elif action == "shutdown" and self.on_shutdown:
-                self.on_shutdown()      # não retorna (shutdown)
-        # expira o pedido de confirmação do desligar
-        if (self._shutdown_confirm_until > 0 and self._t >= self._shutdown_confirm_until):
-            self._shutdown_confirm_until = 0.0
-            if self._status.startswith("Toque DESLIGAR"):
-                self._status = ""
 
     def handle_event(self, event: pygame.event.Event) -> None:
-        if event.type != bmo_input.ACTION_EVENT or self._pending is not None:
+        if event.type != bmo_input.ACTION_EVENT:
             return
         A = bmo_input.Action
         a = event.action
         if a == A.B:
             audio.play("back"); self.on_back()
-        elif a == A.LEFT:
-            self._sel = (self._sel - 1) % len(self._buttons); audio.play("tick")
-        elif a == A.RIGHT:
-            self._sel = (self._sel + 1) % len(self._buttons); audio.play("tick")
+        elif a in (A.LEFT, A.RIGHT, A.UP, A.DOWN):
+            self._cooler_sel = not self._cooler_sel; audio.play("tick")
         elif a == A.A:
-            self._activate(self._buttons[self._sel])
+            self._toggle_cooler()
         elif a == A.TAP and getattr(event, "pos", None):
             if self._back_btn().collidepoint(event.pos):
                 audio.play("back"); self.on_back(); return
-            for i, key in enumerate(self._buttons):
-                if self._button_rect(i).collidepoint(event.pos):
-                    self._sel = i
-                    self._activate(key)
-                    return
+            if self._cooler_btn().collidepoint(event.pos):
+                self._cooler_sel = True
+                self._toggle_cooler()
 
-    # ---------- atalhos (cooler / atualizar / desligar) ----------
+    # ---------- atalho do cooler ----------
 
-    def _activate(self, key: str) -> None:
-        if key == "cooler":
-            audio.play("select")
-            if self.cooler is None:
-                self._status = "Cooler indisponivel"
-            else:
-                new = self.cooler.toggle()
-                config.set_value("cooler_enabled", new)
-                self._status = "Cooler ligado" if new else "Cooler desligado"
-        elif key == "update":
-            audio.play("select")
-            if self.on_update is None:
-                self._status = "Atualizar indisponivel"
-            else:
-                self._status = "Atualizando..."
-                self._pending = "update"; self._pending_at = self._t + 0.3
-        elif key == "shutdown":
-            audio.play("select")
-            if self.on_shutdown is None:
-                self._status = "Desligar indisponivel"
-            elif self._t < self._shutdown_confirm_until:
-                self._status = "Desligando..."
-                self._pending = "shutdown"; self._pending_at = self._t + 0.3
-            else:
-                self._shutdown_confirm_until = self._t + SHUTDOWN_CONFIRM_S
-                self._status = "Toque DESLIGAR de novo"
+    def _toggle_cooler(self) -> None:
+        audio.play("select")
+        if self.cooler is None:
+            self._status = "Cooler indisponivel"
+            return
+        new = self.cooler.toggle()
+        config.set_value("cooler_enabled", new)
+        self._status = "Cooler ligado" if new else "Cooler desligado"
 
     def _cooler_state(self) -> str:
         if self.cooler is None:
@@ -161,12 +118,9 @@ class SysInfoScreen:
     def _back_btn(self) -> pygame.Rect:
         return pygame.Rect(SAFE_INSET, SAFE_INSET, 52, 16)
 
-    def _button_rect(self, i: int) -> pygame.Rect:
-        n = len(self._buttons)
-        margin, gap = 20, 10
-        total_w = LOGICAL_SIZE[0] - 2 * margin
-        bw = (total_w - (n - 1) * gap) // n
-        return pygame.Rect(margin + i * (bw + gap), self._strip_y, bw, 18)
+    def _cooler_btn(self) -> pygame.Rect:
+        bw = 150
+        return pygame.Rect(LOGICAL_SIZE[0] // 2 - bw // 2, self._strip_y, bw, 18)
 
     # ---------- draw ----------
 
@@ -213,12 +167,12 @@ class SysInfoScreen:
         # ----- gráfico de temperatura -----
         self._draw_graph(surface, 20, 116, LOGICAL_SIZE[0] - 40, 52)
 
-        # ----- barra de atalhos: COOLER / ATUALIZAR / DESLIGAR -----
-        self._draw_strip(surface)
+        # ----- atalho do cooler -----
+        self._draw_cooler_btn(surface)
         if self._status:
-            bright = "..." in self._status or "ligado" in self._status
+            bright = "ligado" in self._status
             img = render_text(self._status, 8, CRT_WHITE if bright else CRT_DIM, pixel=False)
-            surface.blit(img, img.get_rect(center=(LOGICAL_SIZE[0] // 2, 202)))
+            surface.blit(img, img.get_rect(center=(LOGICAL_SIZE[0] // 2, 204)))
 
         # ----- rodapé: tensão + throttle -----
         self._draw_footer(surface, snap)
@@ -245,27 +199,16 @@ class SysInfoScreen:
             pygame.draw.polygon(surface, color, [(cx, cy), tip, base], 1)
         pygame.draw.circle(surface, color, (cx, cy), 2)
 
-    def _draw_strip(self, surface) -> None:
-        for i, key in enumerate(self._buttons):
-            rect = self._button_rect(i)
-            selected = (i == self._sel)
-            if selected:
-                pygame.draw.rect(surface, CRT_WHITE, rect)
-                fg = CRT_BLACK
-            else:
-                pygame.draw.rect(surface, CRT_DIM, rect, 1)
-                fg = CRT_DIM
-            img = render_text(self._button_label(key), 8, fg, pixel=False)
-            surface.blit(img, img.get_rect(center=rect.center))
-
-    def _button_label(self, key: str) -> str:
-        if key == "cooler":
-            return "COOLER " + self._cooler_state()
-        if key == "update":
-            return "ATUALIZAR"
-        if key == "shutdown":
-            return "DESLIGAR?" if self._t < self._shutdown_confirm_until else "DESLIGAR"
-        return key.upper()
+    def _draw_cooler_btn(self, surface) -> None:
+        rect = self._cooler_btn()
+        if self._cooler_sel:
+            pygame.draw.rect(surface, CRT_WHITE, rect)
+            fg = CRT_BLACK
+        else:
+            pygame.draw.rect(surface, CRT_DIM, rect, 1)
+            fg = CRT_DIM
+        img = render_text("COOLER " + self._cooler_state(), 8, fg, pixel=False)
+        surface.blit(img, img.get_rect(center=rect.center))
 
     def _pct_txt(self, pct) -> str:
         return f"{pct:.0f}%" if pct is not None else "--"

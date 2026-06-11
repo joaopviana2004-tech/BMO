@@ -188,6 +188,24 @@ def _icon_aitest(surf: pygame.Surface, cx: int, cy: int) -> None:
     pygame.draw.arc(surf, CRT_DIM, pygame.Rect(cx + 10, cy - 12, 10, 18), -1.0, 1.0, 2)
 
 
+def _icon_power(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # símbolo de power: anel com abertura no topo + traço vertical
+    pygame.draw.circle(surf, CRT_WHITE, (cx, cy + 1), 14, 2)
+    pygame.draw.rect(surf, CRT_BLACK, (cx - 4, cy - 16, 8, 9))   # abre o anel no topo
+    pygame.draw.line(surf, CRT_WHITE, (cx, cy - 13), (cx, cy + 1), 2)
+
+
+def _icon_update(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # setas circulares (refresh): anel com dois cortes + pontas de seta
+    pygame.draw.circle(surf, CRT_WHITE, (cx, cy), 13, 2)
+    pygame.draw.rect(surf, CRT_BLACK, (cx + 8, cy - 4, 10, 8))   # corte direito
+    pygame.draw.rect(surf, CRT_BLACK, (cx - 18, cy - 4, 10, 8))  # corte esquerdo
+    pygame.draw.polygon(surf, CRT_WHITE, [
+        (cx + 8, cy - 8), (cx + 8, cy + 2), (cx + 15, cy - 3)])
+    pygame.draw.polygon(surf, CRT_WHITE, [
+        (cx - 8, cy + 8), (cx - 8, cy - 2), (cx - 15, cy + 3)])
+
+
 # ── ícones das categorias (hub) ───────────────────────────────────
 
 def _icon_cat_ia(surf: pygame.Surface, cx: int, cy: int) -> None:
@@ -242,6 +260,8 @@ def build_categories(
     on_dev: Callable[[], None],
     on_settings: Callable[[], None],
     on_sysinfo: Callable[[], None],
+    on_shutdown: Callable[[], None],
+    on_update: Callable[[], None],
 ) -> list[HubCategory]:
     """Monta as 4 categorias do hub a partir dos callbacks do main."""
     return [
@@ -265,6 +285,8 @@ def build_categories(
         HubCategory("AJUSTES", _icon_cat_settings, [
             HubItem("SETTINGS", _icon_settings, on_settings),
             HubItem("SISTEMA", _icon_sysinfo, on_sysinfo),
+            HubItem("DESLIGAR", _icon_power, on_shutdown),
+            HubItem("ATUALIZAR", _icon_update, on_update),
         ]),
     ]
 
