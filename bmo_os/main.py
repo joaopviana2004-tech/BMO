@@ -32,6 +32,7 @@ from bmo_os.screens.confirm import ConfirmScreen
 from bmo_os.screens.devhub import DevHubScreen
 from bmo_os.screens.clock import ClockScreen
 from bmo_os.screens.flappy import FlappyScreen
+from bmo_os.screens.flappy_train import FlappyTrainScreen
 from bmo_os.screens.games import (
     GamesScreen, draw_flappy_icon, draw_pong_icon, draw_snake_icon,
     draw_space_invaders_icon,
@@ -393,6 +394,7 @@ def build_initial(app: App):
                     AITestScreen(on_back=pop, voice=voice, camera=camera,
                                  sysinfo=sysinfo, chat=chat, button=ptt_button,
                                  on_respond=handle_ai_response)),
+                on_flappy_ai=lambda: push(FlappyTrainScreen(on_back=pop)),
                 on_sleep=lambda: push(
                     SleepScreen(on_back=pop, on_select_mode=select_ambient)),
                 on_suspend=open_suspend,
@@ -500,6 +502,8 @@ def build_initial(app: App):
                                                GalleryScreen(on_back=app.manager.pop, photos_dir=PHOTOS_DIR))))))
     voice.register_command(["flappy", "passarinho", "voar"],
                            _cmd(lambda: app.manager.push(FlappyScreen(on_back=app.manager.pop))))
+    voice.register_command(["treino", "treinar", "neuroevolucao", "flappy ia"],
+                           _cmd(lambda: app.manager.push(FlappyTrainScreen(on_back=app.manager.pop))))
     voice.register_command(["snake", "cobra", "cobrinha"],
                            _cmd(lambda: app.manager.push(SnakeScreen(on_back=app.manager.pop))))
     voice.register_command(["gravador", "gravar", "gravacao"],

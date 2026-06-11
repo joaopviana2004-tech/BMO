@@ -188,6 +188,21 @@ def _icon_aitest(surf: pygame.Surface, cx: int, cy: int) -> None:
     pygame.draw.arc(surf, CRT_DIM, pygame.Rect(cx + 10, cy - 12, 10, 18), -1.0, 1.0, 2)
 
 
+def _icon_flappy_ai(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # pássaro + nós de rede neural (treino por neuroevolução)
+    nodes = [(cx - 15, cy - 8), (cx - 15, cy + 8), (cx - 2, cy)]
+    for a in (0, 1):
+        pygame.draw.line(surf, CRT_DIM, nodes[a], nodes[2], 1)
+    for x, y in nodes:
+        pygame.draw.circle(surf, CRT_WHITE, (x, y), 2)
+    # passarinho à direita
+    bx, by = cx + 10, cy
+    pygame.draw.rect(surf, CRT_WHITE, (bx - 5, by - 5, 10, 10))
+    pygame.draw.rect(surf, CRT_BLACK, (bx + 1, by - 2, 2, 2))      # olho
+    pygame.draw.rect(surf, CRT_DIM, (bx + 5, by, 3, 2))           # bico
+    pygame.draw.line(surf, CRT_DIM, nodes[2], (bx - 5, by), 1)
+
+
 def _icon_power(surf: pygame.Surface, cx: int, cy: int) -> None:
     # símbolo de power: anel com abertura no topo + traço vertical
     pygame.draw.circle(surf, CRT_WHITE, (cx, cy + 1), 14, 2)
@@ -249,6 +264,7 @@ def build_categories(
     *,
     on_brain: Callable[[], None],
     on_aitest: Callable[[], None],
+    on_flappy_ai: Callable[[], None],
     on_sleep: Callable[[], None],
     on_suspend: Callable[[], None],
     on_tasks: Callable[[], None],
@@ -268,6 +284,7 @@ def build_categories(
         HubCategory("IA", _icon_cat_ia, [
             HubItem("CEREBRO", _icon_brain, on_brain),
             HubItem("TESTE IA", _icon_aitest, on_aitest),
+            HubItem("FLAPPY IA", _icon_flappy_ai, on_flappy_ai),
         ]),
         HubCategory("REPOUSO", _icon_cat_rest, [
             HubItem("SLEEP", _icon_sleep, on_sleep),
