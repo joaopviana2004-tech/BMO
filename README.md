@@ -25,7 +25,11 @@ escalada **2x** com nearest-neighbor pra preservar o look de pixel art.
 - **PONG** — bot vs bot rodando no fundo, scores discretos nos cantos.
 - **INVADERS** — nave do BMO vagueia sozinha pelo espaço, caça inimigos
   esporádicos que aparecem do topo. Starfield com parallax 3 camadas.
-- **VARIADO** — cicla aleatoriamente entre os 4 acima a cada 10-30s.
+- **CÉREBRO** — o grafo do Segundo Cérebro "respirando": minimapa força-dirigido
+  das notas do Obsidian (ver seção "Segundo Cérebro").
+- **DEV HUB** — painel de programação em modo descanso: stats grandes, gráfico
+  de commits 7d e feed rolando devagar (ver seção "Dev Hub").
+- **VARIADO** — cicla aleatoriamente entre as ambient acima a cada 10-30s.
 
 Mini-relógio HH:MM no topo das telas ambient (exceto clock que já tem o grandão).
 
@@ -33,8 +37,16 @@ Mini-relógio HH:MM no topo das telas ambient (exceto clock que já tem o grand�
 e agenda**: **segure** pra gravar e **solte** pra mandar pro BMO (igual ao
 push-to-talk físico), sem precisar do botão GPIO.
 
-**Home + ações** (carrossel P&B, auto-volta pro ambient após N segundos):
-- **SLEEP** — escolhe ambient mode com previews ao vivo dos 5 tiles
+**Home — hub de categorias** (**IA · REPOUSO · ESTUDOS · AJUSTES**; arrasta pro
+lado pra trocar de categoria, cada uma com sua grade de apps; auto-volta pro
+ambient após N segundos):
+- **CÉREBRO** *(IA)* — abre o grafo do Segundo Cérebro (ver seção própria)
+- **FLAPPY IA** *(IA)* — treino de Flappy por neuroevolução em tempo real, com a
+  rede neural do melhor pássaro visível (ver seção "Flappy IA")
+- **TESTE (IA)** — diagnóstico de IA (mic/STT/câmera/chat/visão; detalhado abaixo)
+- **GRAVAR** *(ESTUDOS)* — gravador offline-first "Sync & Destroy" (ver seção própria)
+- **DEV** *(ESTUDOS)* — Dev Hub: dashboard de programação (ver seção "Dev Hub")
+- **SLEEP** — escolhe ambient mode com previews ao vivo dos tiles
 - **GAMES** — grid estilo home de celular com:
   - **Space Invaders** — touch arrasta nave, auto-fire, 4 tipos de inimigos
     pixel-art coloridos, starfield, vidas, score, game over
@@ -52,7 +64,9 @@ push-to-talk físico), sem precisar do botão GPIO.
   Aviso automático (AlertScreen) quando um evento está chegando.
 - **FOCO** — timer pomodoro por tarefa (puxa as tarefas "Doing" do Todoist);
   acumula o tempo focado por tarefa. Estado preservado ao sair/voltar.
-- **SISTEMA** — telemetria da Pi (CPU, temperatura, memória); no PC mostra "--".
+- **SISTEMA** — telemetria da Pi (CPU, GPU, temperatura, memória, tensão; no PC
+  mostra "--") + **controle dos coolers** (ver seção "Refrigeração"): botão liga/
+  desliga com ícone girando quando ativo.
 - **PHOTO** — câmera fullscreen:
   - Preview HD 800x480 com hflip (modo selfie)
   - Botão SHOOT vermelho (estilo app de câmera)
@@ -64,8 +78,8 @@ push-to-talk físico), sem precisar do botão GPIO.
   Whisper/STT e do wake word, estado do botão físico de fala, preview da câmera,
   push-to-talk pra testar transcrição + conversa com o BMO (LLM), e botão
   **VER (VISÃO)** que manda a imagem da câmera pro modelo multimodal descrever
-- **SETTINGS** — menu por categorias (SOM / TELA / SISTEMA / IA), cada uma com
-  cyclers (gira com ←/→ ou tap) e ações:
+- **SETTINGS** — menu por categorias (SOM / TELA / SISTEMA / IA / CONTA), cada
+  uma com cyclers (gira com ←/→ ou tap) e ações:
   - **SOM:** Volume (efeitos)
   - **TELA:** Brilho (20-100% via dimming); Tema (auto/escuro/claro — *auto* =
     claro 6h-18h)
@@ -76,6 +90,10 @@ push-to-talk físico), sem precisar do botão GPIO.
     Modelo de **visão**; BMO me ouve (wake word); **Botão de fala** (liga/desliga
     o mic virtual nas telas); Microfone; Voz BMO (volume do TTS); BMO te vê (face
     tracking); **Gerar vozes** (gera o cache de fala faltante)
+  - **CONTA:** conta logada; **Conectar conta** (abre o login por QR sem wipe);
+    **Trocar usuário** (Wipe & Load — ver "Multiusuário e login pelo Drive")
+- O grid de **AJUSTES** ainda traz **DESLIGAR** e **ATUALIZAR** como tiles diretos
+  (com tela de confirmação), além de SETTINGS e SISTEMA.
 
 **Status bar** (canto superior direito de todas as telas CRT): sol/lua (auto
 pelo horário), nível de sinal (mock 4/4), bateria (mock 100%). Ícone de
@@ -138,28 +156,35 @@ bmo_os/
     widgets.py         # pygame.Color mutável pra tema, corners, scanlines, SAFE_INSET
     theme.py           # fontes pixel/consolas
     theme_state.py     # apply_theme + status bar + draw_mini_clock + sun/moon
-    config.py          # defaults + load .env + persistência bmo_config.json
+    config.py          # defaults + load .env + persistência bmo_config.json (por perfil)
+    session.py         # multiusuário: perfis locais + Wipe & Load (login/logout)
   screens/
     clock.py           # ambient: relógio P&B CRT
     bmo_face.py        # ambient: pet procedural (humor + carinho + camera-aware)
     pong.py            # PongScreen (jogo) + PongAmbientScreen (bot vs bot)
     space_invaders.py  # SpaceInvadersScreen (jogo) + SpaceInvadersAmbientScreen
-    flappy.py          # FlappyScreen (passarinho: toque/A bate asa)
+    flappy.py          # FlappyScreen (passarinho: toque/A) + modo versus contra a IA
+    flappy_train.py    # FlappyTrainScreen: treino por neuroevolução + viz da rede
     snake.py           # SnakeScreen (cobrinha: setas/botões ou toque)
-    shuffler.py        # ShufflingAmbientScreen (cicla as 4 ambient)
-    home.py            # carrossel SLEEP/GAMES/TASKS/AGENDA/FOCO/PHOTO/SISTEMA/TESTE/SETTINGS
-    sleep.py           # tiles dos 5 ambient modes
+    shuffler.py        # ShufflingAmbientScreen (cicla as ambient)
+    home.py            # hub de categorias (IA/REPOUSO/ESTUDOS/AJUSTES) em grade
+    sleep.py           # tiles dos ambient modes
     games.py           # grid estilo celular (Invaders + Pong + Flappy + Snake)
     tasks.py           # kanban Todoist 3 colunas (touch drag)
     agenda.py          # próximos eventos do Google Calendar
     pomodoro.py        # timer de foco por tarefa (FOCO)
     photo.py           # camera fullscreen + debug overlay + galeria btn
     gallery.py         # grid 3x2 de thumbs + viewer
-    sysinfo.py         # tela SISTEMA: CPU/temperatura/memória da Pi
+    brain.py           # tela CEREBRO: grafo do Segundo Cérebro (força-dirigido)
+    devhub.py          # tela DEV: dashboard GitHub (commits/CI/logs) menu + ambient
+    recorder.py        # tela GRAVAR: gravador offline-first (Sync & Destroy)
+    login.py           # tela LOGIN: QR + device flow do Google (multiusuário)
+    sysinfo.py         # tela SISTEMA: telemetria da Pi + controle dos coolers
     alert.py           # AlertScreen: aviso de evento próximo (por cima de tudo)
     aitest.py          # TESTE IA: mic/STT/câmera/botão + push-to-talk + chat + VISÃO
     mic_button.py      # MicButton: botão de mic virtual (overlay global, segura p/ gravar)
-    settings.py        # menu por categorias (SOM/TELA/SISTEMA/IA) + atualizar/desligar
+    settings.py        # menu por categorias (SOM/TELA/SISTEMA/IA/CONTA) + atualizar/desligar
+    confirm.py         # ConfirmScreen: confirmação sim/não (desligar/atualizar do grid)
     suspended.py       # tela SUSPENSO: display off + FPS baixo, toque acorda
     placeholder.py     # stub genérico (legado)
   services/
@@ -177,6 +202,15 @@ bmo_os/
     pet_state.py       # humor/energia/afeto/streak do pet (bmo_pet.json) — sem hardware
     pet_memory.py      # memória do usuário: nome + fatos (bmo_memory.json)
     pet_brain.py       # proatividade: BMO puxa conversa sozinho (cooldowns)
+    recorder.py        # gravador offline-first (WAV) p/ o Sync & Destroy
+    knowledge.py       # Segundo Cérebro: grafo das notas .md + tool de escrita (RAG)
+    drive_sync.py      # espelho do perfil no Drive (prefs + áudios + conhecimento)
+    google_auth.py     # OAuth Google (device flow + refresh) por perfil
+    pairing.py         # link na rede local: pareamento PC + chat remoto + POST /dev
+    dev_hub.py         # estado do Dev Hub (commits/CI/logs); github_dev alimenta
+    github_dev.py      # GitHub API -> Dev Hub (commits, CI, stats) em thread
+    flappy_ai.py       # neuroevolução do Flappy: rede + GA + salvar/carregar (jogo+treino)
+    cooler.py          # controle dos 2 coolers via GPIO (auto >60°C)
     gpio_button.py     # botão físico de push-to-talk (gpiozero)
   assets/
     fonts/             # PressStart2P.ttf (ver "Fontes pixel" abaixo)
@@ -371,6 +405,87 @@ XAI_API_KEY=xai-xxxx                    # Grok / xAI (console.x.ai)
 Sem a chave do provedor ativo o chat/visão fica indisponível (a tela TESTE
 mostra o erro). Sem mic/STT, o push-to-talk degrada e mostra "indisponivel".
 
+## Multiusuário e login pelo Drive
+
+Sem sessão ativa o BMO cai na tela **LOGIN**: um **QR Code** (Google *device
+flow*) + o código pra digitar à mão. Quem loga vira um **perfil** em
+`profiles/<sub>/` (identidade, tokens, `bmo_config.json` próprio). "USAR SEM
+CONTA" entra como **convidado** (local, sem sync).
+
+- **Preferências no Drive** (`drive_sync.py`): tema/volume/brilho de cada perfil
+  sobem (debounce ~10s a cada ajuste) e descem no boot — ligar em outro aparelho
+  já vem com as suas preferências.
+- **Wipe & Load:** "Trocar usuário" (SETTINGS → CONTA) faz o backup final no
+  Drive, **apaga a pasta do perfil** e reinicia — nenhum cache do usuário
+  anterior sobrevive. O processo novo boota na tela de LOGIN.
+- **Pareamento pelo PC** (`scripts/bimo_drive_login.py <ip>`): o QR só dá escopo
+  `drive.file`; pra o Drive **completo** (enxergar a vault do Obsidian sincada
+  pelo "Google Drive para Desktop"), pareie pelo PC pela rede local — o
+  `PairingServer` recebe os tokens e religa o sync.
+
+Sem `GOOGLE_CLIENT_ID/SECRET` no `.env`, o login fica indisponível e o BMO roda
+em modo local (convidado/legado) — tudo funciona, só não sincroniza.
+
+## Segundo Cérebro (grafo de conhecimento)
+
+A tela **CÉREBRO** é o "Oráculo Visual": um grafo força-dirigido (estilo
+Obsidian/matrix) das suas notas `.md`, que **respira** e se organiza sozinho.
+
+- **nó** = uma nota; **aresta** = um `[[wikilink]]`; **fantasma** = link pra nota
+  que ainda não existe (círculo vazado, apagado).
+- Sem botões: **tap** seleciona, **arrasta** um nó move (a física segue),
+  arrastar o vazio dá **pan**, **pinça** dá zoom, **2 toques** num nó abrem o
+  **split** (grafo à esquerda, a nota inteira à direita).
+- Fonte: as notas são espelhadas do **Drive** (`Bimo/Conhecimento` →
+  `knowledge/` do perfil, bidirecional). É a base do **RAG local** — o chat usa
+  essas notas como contexto e o agente pode **criar/editar notas** (tool
+  `notes_write`), que sobem pro Drive e o PC puxa pro Obsidian.
+
+## Dev Hub (dashboard de programação)
+
+A tela **DEV** acompanha seus projetos sem sair do BMO: **commits, CI e logs**
+puxados da **GitHub API** (`GITHUB_USER`/`GITHUB_TOKEN` no `.env`) + um *bridge*
+do PC (`POST /dev`). Tem **modo menu** (abas RESUMO / GIT / CI / LOG) e **modo
+ambient** (stats grandes, gráfico de commits 7d, feed rolando devagar) — vibe
+terminal ciano. Funciona como lock screen escolhível em SLEEP/SETTINGS.
+
+## Gravador (Sync & Destroy)
+
+A tela **GRAVAR** captura áudio **offline-first** (aulas/reuniões/insights):
+botão REC/STOP, timer e VU meter. Os `.wav` ficam no disco e **sobem sozinhos**
+quando a rede voltar; o Drive confere o `md5` e aí o **arquivo local é apagado**
+(memória do BMO sempre livre). A pasta é **do perfil** (some no wipe do logout).
+
+## Flappy IA (neuroevolução)
+
+A tela **FLAPPY IA** (categoria IA) treina um Flappy Bird por **algoritmo
+genético em tempo real** e mostra a **rede neural do melhor pássaro ao vivo**:
+
+- Uma população de 24 pássaros (rede `2→5→1`) joga junto sobre os mesmos canos;
+  quando todos morrem, o GA cria a próxima geração (elitismo + crossover/mutação
+  leves + injeção do campeão histórico, pra nunca regredir pra zero).
+- **Entradas visíveis:** `DIST` (distância ao próximo cano) e `ALT` (altura do
+  pássaro relativa ao vão). Os nós acendem (verde/vermelho) pela ativação; a
+  saída mostra `FLAP`.
+- Renderiza até **5 pássaros** por vez (o melhor destacado) e roda a **30 FPS**
+  pra não esquentar a Pi.
+- **SALVAR** valida os candidatos em vários mundos novos e grava o **mais
+  robusto** (toast `robustez X/20`). **REINICIAR** zera o treino.
+- **Jogar contra:** com um cérebro salvo, o **Flappy** normal vira **versus** —
+  um pássaro azul controlado pela rede joga ao seu lado (placar VOCÊ × BMO).
+- Modelo salvo em `flappy_ai.json` (gitignored).
+
+## Refrigeração (coolers)
+
+Dois coolers ligados aos **GPIO 17 (pino 11)** e **GPIO 23 (pino 16)** dão
+refrigeração ativa. Ligam por **OR**: o botão **COOLER** da tela SISTEMA
+(override manual) **ou** automaticamente quando a temperatura passa de **60 °C**
+(histerese desliga abaixo de 55 °C). O ícone de cooler **gira** enquanto ligado.
+
+> ⚠️ Cada GPIO deve chavear um **transistor/MOSFET (ou relé)** que liga o 5 V do
+> cooler — nunca o motor direto no pino. Pinos configuráveis com `COOLER_GPIO_1`
+> /`COOLER_GPIO_2`. Fora do Pi degrada (vira só visual).
+
 ## Pet virtual (humor, memória, carinho)
 
 O BMO não é só uma interface: ele tem **estado emocional, memória e iniciativa**.
@@ -471,6 +586,10 @@ canto superior esquerdo pra sair.
 
 ## Roadmap
 
+Histórico das atualizações que entraram de verdade — um pouco de cada uma, em
+ordem, **até o último item que adicionamos**. É um registro do que já existe (sem
+itens futuros): a cada feature nova, o roadmap ganha mais uma linha no fim.
+
 - [x] **V1** — relógio + home + sleep (3 telas base)
 - [x] **V1.1** — clima sem API key, clock P&B, home auto-return, settings com update
 - [x] **V1.2** — settings completo: brilho, tema (claro/escuro/auto), shutdown
@@ -479,20 +598,27 @@ canto superior esquerdo pra sair.
 - [x] **V1.5** — Pong + Space Invaders (jogos e telas idle bot vs bot)
 - [x] **V1.6** — Photo + Gallery (câmera fullscreen + thumbnails)
 - [x] **V1.7** — Face tracking via câmera (BMO te vê)
-- [x] **V1.8** — Status bar (sol/lua + sinal + bateria mock) + alerta de update
+- [x] **V1.8** — Status bar (sol/lua + sinal + bateria) + alerta de update
 - [x] **V1.9** — Shuffle ambient (cicla telas idle aleatoriamente)
-- [x] **V2.0** — IA: push-to-talk (GPIO) + STT (Whisper/Groq) + chat LLM
-  (OpenRouter) que abre telas e cria tarefas; tela TESTE IA; cleanup de hardware
-  no restart
-- [ ] **V2.1** — input GPIO completo (D-pad + A/B/MENU) quando os botões chegarem
-- [x] **V2.2** — TTS (voz falada do BMO): Edge TTS / voz Francisca pt-BR
-  (incorporado do lab `bmo_voz.py`), fala conversa + descrição de visão
-- [x] **V2.3** — Pet vivo: humor/energia/afeto/streak (`pet_state`), memória do
-  usuário (`pet_memory`), proatividade (`pet_brain`); voz com emoção; carinho
-  (cafuné/long-press) + animação de dormir na BMO Face
-- [x] **V2.4** — Mais jogos: Flappy + Snake (minimalistas, touch + botões)
-- [ ] **V2.5** — RetroArch launcher (subprocess) — Games vira lista de ROMs
-- [ ] **V2.6** — gestos de mão (MediaPipe Hands) pra controle sem toque
-- [ ] **V3** — IMX500 native inference (objeto/pose direto no chip da câmera)
-- [ ] **V3** — sensores reais (DHT22/BME280 via I2C) em vez/além do clima online
-- [ ] **V3** — wake word offline ("BMO me ouve" sem push-to-talk)
+- [x] **V2.0** — IA: push-to-talk (GPIO) + STT (Whisper/Groq) + chat LLM que abre
+  telas e cria tarefas; tela TESTE IA; cleanup de hardware no restart
+- [x] **V2.1** — TTS (voz falada): Edge TTS / Francisca pt-BR, fala conversa +
+  descrição de visão, com cache de frases (latência ~zero)
+- [x] **V2.2** — Pet vivo: humor/energia/afeto/streak, memória do usuário,
+  proatividade; voz com emoção; carinho (cafuné/long-press) na BMO Face
+- [x] **V2.3** — Mais jogos: Flappy + Snake (minimalistas, touch + botões)
+- [x] **V2.4** — **Login pelo Drive + multiusuário**: QR/OAuth (device flow),
+  perfis locais, Wipe & Load, sync do `bmo_config` no Drive, pareamento pelo PC
+  pra Drive completo
+- [x] **V2.5** — **Segundo Cérebro**: grafo de conhecimento das notas Obsidian
+  (tela CÉREBRO força-dirigida), espelho bidirecional com o Drive, base do RAG
+  local + tool de notas do agente
+- [x] **V2.6** — **Gravador** offline-first (aulas/reuniões): WAV local →
+  "Sync & Destroy" no Drive
+- [x] **V2.7** — **Dev Hub** (tela de programação): commits/CI/logs via GitHub —
+  modo menu e ambient + bridge do PC
+- [x] **V2.8** — **Refrigeração ativa**: 2 coolers via GPIO (auto >60 °C, ícone
+  girando na tela SISTEMA) + grid de AJUSTES (SETTINGS/SISTEMA/DESLIGAR/ATUALIZAR
+  com confirmação)
+- [x] **V2.9** — **Flappy IA**: treino por neuroevolução em tempo real — rede
+  neural do melhor pássaro visível ao vivo, salvar o campeão e jogar contra ele
