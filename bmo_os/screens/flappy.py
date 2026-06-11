@@ -69,9 +69,10 @@ class FlappyScreen:
             x += PIPE_SPACING
 
     def _make_pipe(self, x: float) -> dict:
-        gap_y = random.randint(CEIL_Y + GAP_MARGIN + PIPE_GAP // 2,
-                               GROUND_Y - GAP_MARGIN - PIPE_GAP // 2)
-        return {"x": float(x), "gap_y": gap_y, "scored": False}
+        gap = fai.gap_for(self.score)   # vão afunila conforme a pontuação cresce
+        gap_y = random.randint(CEIL_Y + GAP_MARGIN + gap // 2,
+                               GROUND_Y - GAP_MARGIN - gap // 2)
+        return {"x": float(x), "gap_y": gap_y, "gap": gap, "scored": False}
 
     def enter(self) -> None: ...
     def exit(self) -> None: ...
@@ -122,8 +123,9 @@ class FlappyScreen:
             self.vel = 0.0
 
         # move canos, pontua (jogador E adversário vivo) e recicla
+        speed = fai.speed_for(self.score)   # acelera conforme a pontuação cresce
         for p in self.pipes:
-            p["x"] -= PIPE_SPEED * dt
+            p["x"] -= speed * dt
             if not p["scored"] and p["x"] + PIPE_W < BIRD_X:
                 p["scored"] = True
                 self.score += 1
@@ -169,8 +171,9 @@ class FlappyScreen:
         for p in self.pipes:
             if p["x"] > bx1 or p["x"] + PIPE_W < bx0:
                 continue
-            gap_top = p["gap_y"] - PIPE_GAP // 2
-            gap_bot = p["gap_y"] + PIPE_GAP // 2
+            half = p.get("gap", PIPE_GAP) // 2
+            gap_top = p["gap_y"] - half
+            gap_bot = p["gap_y"] + half
             if by0 < gap_top or by1 > gap_bot:
                 return True
         return False
@@ -190,8 +193,9 @@ class FlappyScreen:
         # canos
         for p in self.pipes:
             x = int(p["x"])
-            gap_top = p["gap_y"] - PIPE_GAP // 2
-            gap_bot = p["gap_y"] + PIPE_GAP // 2
+            half = p.get("gap", PIPE_GAP) // 2
+            gap_top = p["gap_y"] - half
+            gap_bot = p["gap_y"] + half
             pygame.draw.rect(surface, PIPE, (x, 0, PIPE_W, gap_top))
             pygame.draw.rect(surface, PIPE, (x, gap_bot, PIPE_W, GROUND_Y - gap_bot))
             # "boca" do cano (detalhe mais escuro)

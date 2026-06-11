@@ -52,7 +52,8 @@ ambient após N segundos):
     pixel-art coloridos, starfield, vidas, score, game over
   - **Pong** — player (touch arrasta paddle Y) vs bot. Primeiro a 7 pontos
   - **Flappy** — passarinho minimalista: toque (ou A) bate asa contra a
-    gravidade pra passar pelos canos; +1 por cano, bateu = fim de jogo
+    gravidade pra passar pelos canos; +1 por cano, bateu = fim de jogo. **Fica
+    mais difícil** conforme avança: acelera e o vão afunila (ver "Flappy IA")
   - **Snake** — cobrinha em grade: vira por setas/botões **ou por toque**
     (na direção do toque relativo à cabeça); come, cresce e acelera
 - **TASKS** — kanban Todoist 3 colunas (TO-DO / DOING / DONE):
@@ -464,13 +465,17 @@ genético em tempo real** e mostra a **rede neural do melhor pássaro ao vivo**:
 - Uma população de 24 pássaros (rede `2→5→1`) joga junto sobre os mesmos canos;
   quando todos morrem, o GA cria a próxima geração (elitismo + crossover/mutação
   leves + injeção do campeão histórico, pra nunca regredir pra zero).
+- **Dificuldade progressiva:** a cada cano a velocidade sobe e o vão **afunila**
+  (de 76px até 38px — bem estreito, só pra profissionais). O treino é **sem teto
+  de pontos**: a geração só acaba quando todos morrem, e a dificuldade crescente
+  é o limitador natural (sem cap artificial — dá pra ver até onde chegam).
 - **Entradas visíveis:** `DIST` (distância ao próximo cano) e `ALT` (altura do
   pássaro relativa ao vão). Os nós acendem (verde/vermelho) pela ativação; a
   saída mostra `FLAP`.
 - Renderiza até **10 pássaros** por vez, cada um numa **cor aleatória** (cara de
   enxame; o melhor com anel branco) e roda a **30 FPS** pra não esquentar a Pi.
 - **SALVAR** valida os candidatos em vários mundos novos e grava o **mais
-  robusto** (toast `robustez X/20`). **REINICIAR** zera o treino.
+  robusto** (toast `robustez X/30`). **REINICIAR** zera o treino.
 - **Jogar contra:** com um cérebro salvo, o **Flappy** normal vira **versus** —
   um pássaro azul controlado pela rede joga ao seu lado (placar VOCÊ × BMO).
 - Modelo salvo em `flappy_ai.json` (gitignored).

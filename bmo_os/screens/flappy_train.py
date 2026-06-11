@@ -36,7 +36,10 @@ RENDER = 10         # quantos pássaros aparecem por vez (enxame colorido; o res
 ELITE = 2           # melhores preservados intactos (não regridem)
 MUTATE = 0.06       # taxa de mutação LEVE (filhos perto do campeão)
 CROSS = 0.25        # crossover LEVE (raro; padrão é clonar + mutar)
-MAX_GEN_SCORE = 30  # corta a geração quando o grupo passa N canos (mantém o ritmo)
+# SEM teto de pontos: a geração só acaba quando todos morrem — e a dificuldade
+# progressiva (acelera + afunila) garante que isso aconteça. MAX_GEN_STEPS é só
+# uma trava de segurança (~3 min a 30 FPS) caso um pássaro fique imortal.
+MAX_GEN_STEPS = 5400
 
 PANEL = pygame.Rect(246, 26, 150, 170)
 
@@ -60,6 +63,7 @@ class FlappyTrainScreen:
         self.gen = 1
         self.record = 0
         self.best_brain = None
+        self._gen_steps = 0
         # cor viva aleatória + leve deslocamento em X por pássaro (só visual —
         # a física é toda em BIRD_X). Dá a cara de enxame e some no REINICIAR.
         self._colors = [self._vivid_color() for _ in range(POP)]
@@ -113,7 +117,7 @@ class FlappyTrainScreen:
             brain, (mn, _tot) = fai.most_robust(cands)
             if brain is not None and fai.save_brain(brain, self.gen, self.record):
                 self.best_brain = brain.copy()
-                self._toast(f"Salvo! robustez {mn}/20")
+                self._toast(f"Salvo! robustez {mn}/30")
             else:
                 self._toast("Falha ao salvar")
 
@@ -125,8 +129,9 @@ class FlappyTrainScreen:
 
     def update(self, dt: float) -> None:
         dt = min(dt, 0.05)      # clamp anti-explosão da física em lag
-        if self.world.alive > 0 and self.world.score < MAX_GEN_SCORE:
+        if self.world.alive > 0 and self._gen_steps < MAX_GEN_STEPS:
             self.world.step(dt, self.brains)
+            self._gen_steps += 1
             # campeão de TODOS os tempos, rastreado AO VIVO: quando o grupo bate
             # o recorde, congela o cérebro do líder. É ele que o SALVAR grava
             # (não o melhor da última geração, que pode ter regredido).
@@ -142,6 +147,7 @@ class FlappyTrainScreen:
     def _next_generation(self) -> None:
         fitnesses = [b["fitness"] for b in self.world.birds]
         self.brains, _gen_best = fai.evolve(self.brains, fitnesses, ELITE, MUTATE, CROSS)
+        self._gen_steps = 0
         # injeta o campeão histórico de volta na população: garante que a
         # próxima geração NUNCA colapse (o melhor pássaro de todos segue vivo
         # competindo, mesmo se a última geração tiver regredido).
@@ -189,8 +195,9 @@ class FlappyTrainScreen:
     def _draw_pipes(self, surface) -> None:
         for p in self.world.pipes:
             x = int(p["x"])
-            gap_top = p["gap_y"] - PIPE_GAP // 2
-            gap_bot = p["gap_y"] + PIPE_GAP // 2
+            half = p.get("gap", PIPE_GAP) // 2
+            gap_top = p["gap_y"] - half
+            gap_bot = p["gap_y"] + half
             pygame.draw.rect(surface, PIPE, (x, 0, PIPE_W, gap_top))
             pygame.draw.rect(surface, PIPE, (x, gap_bot, PIPE_W, GROUND_Y - gap_bot))
             pygame.draw.rect(surface, PIPE_DARK, (x - 2, gap_top - 6, PIPE_W + 4, 6))
@@ -216,6 +223,7 @@ class FlappyTrainScreen:
         surface.blit(render_text(f"VIVOS {self.world.alive}/{POP}", 8, DIM, pixel=False), (6, 38))
         surface.blit(render_text(f"PTS {self.world.score}", 8, WHITE, pixel=False), (6, 48))
         surface.blit(render_text(f"REC {self.record}", 8, BIRD, pixel=False), (6, 58))
+        surface.blit(render_text(f"VAO {fai.gap_for(self.world.score)}px", 8, DIM, pixel=False), (6, 68))
 
     def _draw_buttons(self, surface) -> None:
         self._draw_back_btn(surface)

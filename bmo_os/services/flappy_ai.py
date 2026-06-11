@@ -29,10 +29,29 @@ MAX_FALL = 260.0
 BIRD_X = 84
 BIRD_R = 6
 PIPE_W = 26
-PIPE_GAP = 76
-PIPE_SPEED = 96.0
+PIPE_GAP = 76          # vão BASE (afunila com o tempo até MIN_GAP)
+PIPE_SPEED = 96.0      # velocidade BASE (acelera com o tempo até MAX_SPEED)
 PIPE_SPACING = 150
 GAP_MARGIN = 30
+
+# ---------- dificuldade progressiva (por canos passados) ----------
+# A cada cano: acelera um pouco e afunila o vão, até ficar bem estreito ("só pra
+# profissionais"). Vale igual no treino e no jogo (a física é a mesma).
+MIN_GAP = 38           # vão mínimo (px) — bem apertado
+MAX_SPEED = 210.0      # velocidade máxima (px/s)
+GAP_STEP = 1.0         # px a menos no vão por cano passado
+SPEED_STEP = 3.0       # px/s a mais por cano passado
+
+
+def gap_for(score: int) -> int:
+    """Vão (px) na dada pontuação — encolhe de PIPE_GAP até MIN_GAP."""
+    return max(MIN_GAP, int(PIPE_GAP - score * GAP_STEP))
+
+
+def speed_for(score: int) -> float:
+    """Velocidade (px/s) na dada pontuação — sobe de PIPE_SPEED até MAX_SPEED."""
+    return min(MAX_SPEED, PIPE_SPEED + score * SPEED_STEP)
+
 
 # ---------- rede neural ----------
 N_INPUTS = 2
@@ -121,21 +140,22 @@ class World:
         self.reset(n)
 
     def reset(self, n: int) -> None:
+        self.score = 0          # canos passados nesta geração (pelo grupo)
         self.birds = [{"y": H / 2, "vel": 0.0, "alive": True, "fitness": 0.0}
                       for _ in range(n)]
-        self.pipes = []
+        self.pipes = []         # _make_pipe lê self.score (já zerado acima)
         x = W + 40
         for _ in range(3):
             self.pipes.append(self._make_pipe(x))
             x += PIPE_SPACING
         self.alive = n
-        self.score = 0          # canos passados nesta geração (pelo grupo)
         self.t = 0.0
 
     def _make_pipe(self, x: float) -> dict:
-        gap_y = self.rng.randint(CEIL_Y + GAP_MARGIN + PIPE_GAP // 2,
-                                 GROUND_Y - GAP_MARGIN - PIPE_GAP // 2)
-        return {"x": float(x), "gap_y": gap_y, "scored": False}
+        gap = gap_for(self.score)   # afunila conforme a pontuação cresce
+        gap_y = self.rng.randint(CEIL_Y + GAP_MARGIN + gap // 2,
+                                 GROUND_Y - GAP_MARGIN - gap // 2)
+        return {"x": float(x), "gap_y": gap_y, "gap": gap, "scored": False}
 
     def next_pipe(self) -> dict | None:
         """Primeiro cano cuja borda direita ainda não passou do pássaro."""
@@ -160,8 +180,9 @@ class World:
                 b["alive"] = False
                 self.alive -= 1
         # move canos + pontua (bônus de aptidão pra quem ainda está vivo)
+        speed = speed_for(self.score)   # acelera conforme a pontuação cresce
         for q in self.pipes:
-            q["x"] -= PIPE_SPEED * dt
+            q["x"] -= speed * dt
             if not q["scored"] and q["x"] + PIPE_W < BIRD_X:
                 q["scored"] = True
                 self.score += 1
@@ -180,8 +201,9 @@ class World:
             return False
         if p["x"] > BIRD_X + BIRD_R or p["x"] + PIPE_W < BIRD_X - BIRD_R:
             return False
-        gap_top = p["gap_y"] - PIPE_GAP // 2
-        gap_bot = p["gap_y"] + PIPE_GAP // 2
+        half = p.get("gap", PIPE_GAP) // 2
+        gap_top = p["gap_y"] - half
+        gap_bot = p["gap_y"] + half
         return (b["y"] - BIRD_R) < gap_top or (b["y"] + BIRD_R) > gap_bot
 
     def top_alive(self, k: int) -> list[int]:
@@ -223,7 +245,7 @@ def evolve(brains: list, fitnesses: list, elite: int = 2,
 
 # ---------- validação de robustez (escolher um campeão que generaliza) ----------
 
-def evaluate(brain: Brain, seeds, max_pipes=20, max_steps=2500, dt=1 / 30.0):
+def evaluate(brain: Brain, seeds, max_pipes=30, max_steps=3000, dt=1 / 30.0):
     """Roda o cérebro SOZINHO em vários mundos (um por seed) e mede quão longe
     vai em cada um. Devolve (menor_pontuacao, soma). Um pássaro robusto passa
     em todos — um sortudo passa só num layout e morre no primeiro cano de outro.
