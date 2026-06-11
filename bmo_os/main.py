@@ -34,9 +34,10 @@ from bmo_os.screens.clock import ClockScreen
 from bmo_os.screens.flappy import FlappyScreen
 from bmo_os.screens.flappy_train import FlappyTrainScreen
 from bmo_os.screens.games import (
-    GamesScreen, draw_flappy_icon, draw_pong_icon, draw_snake_icon,
-    draw_space_invaders_icon,
+    GamesScreen, draw_flappy_icon, draw_haxball_icon, draw_pong_icon,
+    draw_snake_icon, draw_space_invaders_icon,
 )
+from bmo_os.screens.haxball import HaxballScreen
 from bmo_os.screens.snake import SnakeScreen
 from bmo_os.screens.home import HomeScreen, build_categories
 from bmo_os.screens.gallery import GalleryScreen
@@ -348,6 +349,13 @@ def build_initial(app: App):
                         SnakeScreen(on_back=app.manager.pop)
                     ),
                 },
+                {
+                    "label": "Haxball",
+                    "draw_icon": draw_haxball_icon,
+                    "launch": lambda: app.manager.push(
+                        HaxballScreen(on_back=app.manager.pop)
+                    ),
+                },
             ],
         )
 
@@ -506,6 +514,8 @@ def build_initial(app: App):
                            _cmd(lambda: app.manager.push(FlappyTrainScreen(on_back=app.manager.pop))))
     voice.register_command(["snake", "cobra", "cobrinha"],
                            _cmd(lambda: app.manager.push(SnakeScreen(on_back=app.manager.pop))))
+    voice.register_command(["haxball", "futebol", "bola", "gol"],
+                           _cmd(lambda: app.manager.push(HaxballScreen(on_back=app.manager.pop))))
     voice.register_command(["gravador", "gravar", "gravacao"],
                            _cmd(lambda: app.manager.push(make_recorder_screen())))
     voice.register_command(["cerebro", "conhecimento", "notas", "obsidian"],

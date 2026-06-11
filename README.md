@@ -56,6 +56,10 @@ ambient após N segundos):
     mais difícil** conforme avança: acelera e o vão afunila (ver "Flappy IA")
   - **Snake** — cobrinha em grade: vira por setas/botões **ou por toque**
     (na direção do toque relativo à cabeça); come, cresce e acelera
+  - **Haxball** — futebol de botão top-down (você x bot): arraste seu disco
+    (vermelho) pra empurrar a bola e fazer gol no gol da direita. Física de
+    discos (colisão elástica); chute no canto pra furar o goleiro. Primeiro a 5.
+    A física vive numa classe `HaxWorld` reaproveitável (treino de IA a seguir)
 - **TASKS** — kanban Todoist 3 colunas (TO-DO / DOING / DONE):
   - Toque + arrasta cards entre colunas
   - Botão SYNC força refresh
