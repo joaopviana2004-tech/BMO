@@ -56,6 +56,7 @@ DEFAULTS: dict = {
     "todoist_project": "BMO",       # nome do projeto que vira o board
     "gcal_ics_urls": "",            # URLs secretas iCal (env GCAL_ICS_URLS ganha) — "Rotulo=url,url2"
     "event_warning_min": 10,        # antecedência (min) do aviso de evento próximo (tela AGENDA)
+    "cooler_enabled": False,        # override manual dos coolers (GPIO 17/23) — auto >60°C sempre vale
     "voice_enabled": False,         # "BMO me Ouve" — wake word + comando de voz (Whisper)
     "mic_button_enabled": True,     # botão de mic virtual nas telas (descanso/foco/kanban/agenda)
     "mic_device": "",               # nome (ou trecho) do microfone de entrada; "" = padrão do sistema

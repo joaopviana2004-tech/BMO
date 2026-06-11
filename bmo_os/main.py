@@ -55,6 +55,7 @@ from bmo_os.services import audio
 from bmo_os.services import google_auth
 from bmo_os.services.camera import CameraService
 from bmo_os.services.chat import ChatService
+from bmo_os.services.cooler import CoolerService
 from bmo_os.services.dev_hub import DevHubService
 from bmo_os.services.github_dev import GitHubPoller
 from bmo_os.services.drive_sync import DriveSync
@@ -173,6 +174,10 @@ def build_initial(app: App):
     alerter = EventAlerter()
     # Telemetria de hardware (tela SISTEMA). No PC mostra "--".
     sysinfo = SysInfoService()
+    # Coolers (2x) — refrigeração ativa via GPIO 17 (pino 11) e GPIO 23 (pino 16).
+    # Liga no atalho da tela SISTEMA e sozinho acima de 60°C (lê a temp do sysinfo).
+    cooler = CoolerService(get_temp=lambda: sysinfo.get().temp_c)
+    cooler.set_enabled(bool(config.get("cooler_enabled")))
     # Pomodoro é cacheado: o tempo de foco por tarefa (e o estado do timer)
     # sobrevive ao abrir/fechar a tela.
     pomodoro = PomodoroScreen(on_back=app.manager.pop, todoist=todoist)
@@ -234,6 +239,10 @@ def build_initial(app: App):
             pass
         try:
             camera.stop()
+        except Exception:
+            pass
+        try:
+            cooler.close()   # desliga os fans e libera os pinos GPIO 17/23
         except Exception:
             pass
         try:
@@ -355,6 +364,11 @@ def build_initial(app: App):
     def make_devhub_screen() -> DevHubScreen:
         return DevHubScreen(on_back=app.manager.pop, dev_hub=_dev_hub, github=_github)
 
+    def make_sysinfo_screen() -> SysInfoScreen:
+        # tela SISTEMA com controle dos coolers + atalhos de atualizar/desligar
+        return SysInfoScreen(on_back=app.manager.pop, sysinfo=sysinfo, cooler=cooler,
+                             on_update=do_update, on_shutdown=do_shutdown)
+
     def make_home() -> HomeScreen:
         push = app.manager.push
         pop = app.manager.pop
@@ -381,7 +395,7 @@ def build_initial(app: App):
                 )),
                 on_dev=lambda: push(make_devhub_screen()),
                 on_settings=lambda: push(make_settings()),
-                on_sysinfo=lambda: push(SysInfoScreen(on_back=pop, sysinfo=sysinfo)),
+                on_sysinfo=lambda: push(make_sysinfo_screen()),
             ),
         )
 
@@ -463,7 +477,7 @@ def build_initial(app: App):
     voice.register_command(["tarefa", "tarefas", "kanban", "board"],
                            _cmd(lambda: app.manager.push(TasksScreen(on_back=app.manager.pop, todoist=todoist))))
     voice.register_command(["sistema", "hardware", "temperatura", "cpu"],
-                           _cmd(lambda: app.manager.push(SysInfoScreen(on_back=app.manager.pop, sysinfo=sysinfo))))
+                           _cmd(lambda: app.manager.push(make_sysinfo_screen())))
     voice.register_command(["foto", "fotos", "camera"],
                            _cmd(lambda: app.manager.push(
                                PhotoScreen(on_back=app.manager.pop, camera=camera,
@@ -501,13 +515,28 @@ def build_initial(app: App):
         pygame.quit()
         os.execv(sys.executable, [sys.executable, *sys.argv])
 
+    def do_shutdown() -> None:
+        """Desliga a Raspberry. Libera o hardware antes (ver cleanup_hardware)."""
+        try:
+            cleanup_hardware()
+        except Exception:
+            pass
+        pygame.quit()
+        if sys.platform == "win32":
+            os.system("shutdown /s /t 0")
+        else:
+            rc = os.system("sudo -n shutdown -h now")
+            if rc != 0:
+                os.system("shutdown -h now")
+        sys.exit(0)
+
     # ---- LLM pode abrir telas / agir: chave (do JSON do chat) -> ação ----
     # As chaves espelham SCREENS_DOC em services/chat.py.
     screen_actions = {
         "agenda": lambda: app.manager.push(AgendaScreen(on_back=app.manager.pop, calendar=calendar)),
         "tarefas": lambda: app.manager.push(TasksScreen(on_back=app.manager.pop, todoist=todoist)),
         "foco": lambda: app.manager.push(pomodoro),
-        "sistema": lambda: app.manager.push(SysInfoScreen(on_back=app.manager.pop, sysinfo=sysinfo)),
+        "sistema": lambda: app.manager.push(make_sysinfo_screen()),
         "foto": lambda: app.manager.push(
             PhotoScreen(on_back=app.manager.pop, camera=camera,
                         on_open_gallery=lambda: app.manager.push(
