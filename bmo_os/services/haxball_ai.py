@@ -294,11 +294,14 @@ HIDDEN = [32, 24, 16]  # 3 camadas ocultas (rede maior = mais "inteligência")
 
 
 def goal_potential(x, y, goal_top, goal_bot):
-    """Potencial (0..1) de uma posição da bola pro ataque ao gol ESQUERDO: alto no
-    VÃO do gol, caindo com a distância — forma um FUNIL que puxa a bola pro gol.
+    """Potencial (0..1) da bola pro ataque ao gol ESQUERDO. Funil ESTREITO: cai
+    ao CUBO com a distância à BOCA do gol — quase plano no meio-campo e íngreme
+    só PERTO do gol. Assim a recompensa é por ir na DIREÇÃO DO GOL inimigo
+    (a boca), não por simplesmente estar na metade adversária.
     É a 'matriz de pontuação' do campo (recompensa + heatmap de fundo)."""
     cy = _clamp(y, goal_top, goal_bot)
-    return 1.0 - _clamp(math.hypot(x - FIELD_L, y - cy) / _MAXD, 0.0, 1.0)
+    t = _clamp(math.hypot(x - FIELD_L, y - cy) / _MAXD, 0.0, 1.0)
+    return (1.0 - t) ** 3
 
 
 class Brain:
@@ -368,22 +371,27 @@ def brain_action(brain: Brain, world: HaxWorld, side: str, mem=None):
 
 
 def crossover(a: Brain, b: Brain) -> Brain:
+    """Recombina dois pais por gene, ENVIESADO pro pai 'a' (o mais apto): ~65% dos
+    pesos vêm de 'a'. Mantém a maior parte de uma política coerente (passo MENOR)
+    em vez de picotar 50/50 e quebrar o que já funciona."""
     nb = a.copy()
     for i in range(len(nb.weights)):
-        mw = np.random.rand(*nb.weights[i].shape) < 0.5
+        mw = np.random.rand(*nb.weights[i].shape) < 0.65
         nb.weights[i] = np.where(mw, a.weights[i], b.weights[i])
-        mb = np.random.rand(*nb.biases[i].shape) < 0.5
+        mb = np.random.rand(*nb.biases[i].shape) < 0.65
         nb.biases[i] = np.where(mb, a.biases[i], b.biases[i])
     return nb
 
 
 def phase_params(goals: int):
-    """Mutação adaptativa (ideia do repo): caótica até marcar, refina depois."""
+    """Mutação adaptativa (ideia do repo): caótica até marcar, refina depois. O
+    passo de REFINO é pequeno (0.05/0.08) de propósito — passo grande perturba
+    demais a rede já treinada e a estratégia boa 'some' de uma geração pra outra."""
     if goals <= 0:
-        return 0.28, 0.45
-    if goals < 6:
-        return 0.15, 0.25
-    return 0.07, 0.12
+        return 0.25, 0.40
+    if goals < 8:
+        return 0.12, 0.20
+    return 0.05, 0.08
 
 
 def evolve(brains, fits, elite=2, rate=0.15, scale=0.25, cross_rate=0.25):
@@ -394,10 +402,15 @@ def evolve(brains, fits, elite=2, rate=0.15, scale=0.25, cross_rate=0.25):
     ranked = [brains[i] for i in order]
     best = ranked[0].copy()
     nxt = [ranked[i].copy() for i in range(min(elite, n))]
-    pool = ranked[:max(2, n // 2)]
+    k = max(2, n // 2)
+    pool = ranked[:k]                  # já ordenado: índice MENOR = mais apto
     while len(nxt) < n:
-        pa = random.choice(pool)
-        child = crossover(pa, random.choice(pool)) if random.random() < cross_rate else pa.copy()
+        if random.random() < cross_rate:
+            i1, i2 = random.randrange(k), random.randrange(k)
+            pa, pb = pool[min(i1, i2)], pool[max(i1, i2)]   # pa = o mais apto dos dois
+            child = crossover(pa, pb)     # herda mais do pai mais apto (passo menor)
+        else:
+            child = random.choice(pool).copy()
         child.mutate(rate, scale)
         nxt.append(child)
     return nxt, best
@@ -409,14 +422,27 @@ def evolve(brains, fits, elite=2, rate=0.15, scale=0.25, cross_rate=0.25):
 # ataca E defende, e usar isso como semente da co-evolução. Aí os agentes já
 # nascem competentes (vão na bola) e o GA refina rápido.
 
-def heuristic_action(world, side):
+# Personas do sparring (dummy do treino): (distância p/ entrar em DEFESA, peso de
+# BLOQUEIO = quão fundo senta no próprio gol). 'balanced' == comportamento padrão
+# (usado também no jogo e na imitação). 'offensive' compromete pra frente (deixa o
+# gol mais aberto, pressiona a bola); 'defensive' recua cedo e senta na linha.
+_POSTURES = {
+    "balanced":  (120.0, 0.50),
+    "offensive": (75.0, 0.35),
+    "defensive": (185.0, 0.70),
+}
+
+
+def heuristic_action(world, side, posture="balanced"):
     """Jogador completo (referência pra imitar), CONTÍNUO (fácil de imitar):
     ataca misturando suavemente "ir pra trás da bola" -> "conduzir a bola pro gol
     adversário"; defende quando a bola ameaça o próprio gol e o adversário chega
-    antes. Devolve (ax, ay) unitário (frame real)."""
+    antes. `posture` varia a postura do sparring (ver _POSTURES). Devolve
+    (ax, ay) unitário (frame real)."""
     me = world.b if side == "b" else world.a
     opp = world.a if side == "b" else world.b
     ball = world.ball
+    def_dist, block_w = _POSTURES.get(posture, _POSTURES["balanced"])
     egx = FIELD_L if side == "b" else FIELD_R
     own_goal = (FIELD_R if side == "b" else FIELD_L, CY)
     # mira no CANTO LIVRE do gol (longe do goleiro adversário) — não no centro,
@@ -438,9 +464,9 @@ def heuristic_action(world, side):
     d_me = math.hypot(ball.x - me.x, ball.y - me.y)
     d_opp = math.hypot(ball.x - opp.x, ball.y - opp.y)
     d_ball_own = math.hypot(ball.x - own_goal[0], ball.y - own_goal[1])
-    if d_ball_own < 120 and d_opp < d_me:
-        gx = own_goal[0] * 0.5 + ball.x * 0.5
-        gy = own_goal[1] * 0.35 + ball.y * 0.65
+    if d_ball_own < def_dist and d_opp < d_me:
+        gx = own_goal[0] * block_w + ball.x * (1.0 - block_w)
+        gy = own_goal[1] * (block_w * 0.7) + ball.y * (1.0 - block_w * 0.7)
         ax, ay = gx - me.x, gy - me.y
     # CHUTE: perto da bola E do lado de ataque (o impulso vai pro gol adversário)
     dball = math.hypot(ball.x - me.x, ball.y - me.y)

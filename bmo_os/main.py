@@ -404,7 +404,8 @@ def build_initial(app: App):
                                  sysinfo=sysinfo, chat=chat, button=ptt_button,
                                  on_respond=handle_ai_response)),
                 on_flappy_ai=lambda: push(FlappyTrainScreen(on_back=pop)),
-                on_haxball_ai=lambda: push(HaxballTrainScreen(on_back=pop)),
+                on_haxball_ai=lambda: push(HaxballTrainScreen(
+                    on_back=pop, get_sync=lambda: _drive_sync.get("svc"))),
                 on_sleep=lambda: push(
                     SleepScreen(on_back=pop, on_select_mode=select_ambient)),
                 on_suspend=open_suspend,
@@ -519,7 +520,9 @@ def build_initial(app: App):
     voice.register_command(["haxball", "futebol", "bola", "gol"],
                            _cmd(lambda: app.manager.push(HaxballScreen(on_back=app.manager.pop))))
     voice.register_command(["treina time", "treino haxball", "treina futebol"],
-                           _cmd(lambda: app.manager.push(HaxballTrainScreen(on_back=app.manager.pop))))
+                           _cmd(lambda: app.manager.push(HaxballTrainScreen(
+                               on_back=app.manager.pop,
+                               get_sync=lambda: _drive_sync.get("svc")))))
     voice.register_command(["gravador", "gravar", "gravacao"],
                            _cmd(lambda: app.manager.push(make_recorder_screen())))
     voice.register_command(["cerebro", "conhecimento", "notas", "obsidian"],

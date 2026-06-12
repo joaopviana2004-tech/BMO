@@ -19,6 +19,7 @@ ganha de graça). Roda a 30 FPS com 2 passos de física por frame.
 from __future__ import annotations
 
 import random
+import threading
 import time
 
 import pygame
@@ -56,6 +57,13 @@ REDC = (232, 84, 72)       # heurístico (esquerda)
 BLUEC = (92, 152, 240)     # IA (direita)
 BALLC = (245, 245, 245)
 
+# ---------- dummy (sparring) dinâmico ----------
+# personas que se REVEZAM por geração (generaliza: a IA enfrenta os 3 estilos);
+# cada uma com um leve multiplicador de velocidade pra dar "cara" própria.
+DUMMIES = ("balanced", "offensive", "defensive")
+_DUMMY_SPD = {"balanced": 1.0, "offensive": 1.08, "defensive": 0.95}
+_SHORT = {"balanced": "bal", "offensive": "ofe", "defensive": "def"}
+
 _IMITATOR = None
 
 
@@ -72,15 +80,17 @@ def _seed_pop(base):
         b = base.copy()
         b.mutate(0.25, 0.25)
         pop.append(b)
-    return pop
+    pop[ELITE] = base.copy()   # campeão compete num slot FIXO já na 1ª geração
+    return pop                 # (hall-of-fame: comparamos fits[ELITE] no fim)
 
 
 class HaxballTrainScreen:
     voice_announce = "Treinando o time."
     preferred_fps = 30
 
-    def __init__(self, on_back) -> None:
+    def __init__(self, on_back, get_sync=None) -> None:
         self.on_back = on_back
+        self._get_sync = get_sync        # () -> DriveSync ativo (ou None): backup do modelo
         self._buttons = ["reiniciar", "salvar"]
         self._sel = 0
         self._status = ""
@@ -91,16 +101,22 @@ class HaxballTrainScreen:
 
     def _init_population(self, from_saved: bool) -> None:
         base = None
+        resumed = False
         if from_saved:
             saved, meta = hai.load_brain()
             if saved is not None:
                 base = saved
+                resumed = True
                 self._loaded_from = "salvo (gen %s)" % (meta.get("generation", "?") if meta else "?")
         if base is None:
             base = _get_imitator()
             self._loaded_from = "imitador"
+        # retomada de um campeão JÁ treinado: começa no passo de REFINO (não na
+        # exploração caótica) — senão a 1ª geração 'sacode' um modelo já bom.
+        self._resumed = resumed
         self.pop = _seed_pop(base)           # população da DIREITA (a IA)
         self.champion = base.copy()          # melhor da direita (o SALVAR grava)
+        self._champ_fit = float("-inf")      # fitness do campeão (hall-of-fame)
         self.gen = 1
         self.total_goals = 0                 # gols da IA (drives o currículo + fase)
         self.conceded = 0                    # gols do heurístico
@@ -111,6 +127,7 @@ class HaxballTrainScreen:
         # CURRÍCULO: o oponente começa fraco (quase dummy) e fica mais forte
         # conforme a IA domina — um sparring que acompanha o nível dela.
         self._opp_strength = 0.30
+        self._dummy = DUMMIES[0]             # persona do sparring (reveza por geração)
         self._new_generation()
 
     def _goal_h(self) -> int:
@@ -121,6 +138,9 @@ class HaxballTrainScreen:
 
     def _new_generation(self) -> None:
         gh = self._goal_h()
+        # reveza a persona do sparring a cada geração (a IA enfrenta os 3 estilos
+        # ao longo do treino -> generaliza em vez de decorar um só oponente)
+        self._dummy = DUMMIES[(self.gen - 1) % len(DUMMIES)]
         self.courts = []
         for i in range(POP):
             w = hai.HaxWorld(goal_h=gh)
@@ -145,18 +165,32 @@ class HaxballTrainScreen:
         self.conceded += conc
         self.own_goals += self._gen_own
         self.right_wins = wins
-        # currículo adaptativo: pelo SALDO de gols da geração. Se a IA domina (até
-        # via flukes do oponente fraco), fortalece o oponente -> ele para de
-        # presentear e a IA precisa marcar de verdade. Se apanha, alivia.
-        if goals > conc + 12:
+        # currículo adaptativo. REGRA do usuário: se a geração já acumulou MUITO
+        # gol (>=2 por quadra), a IA enviesou nas manhas do dummy -> acelera ele
+        # bem mais. Senão, sobe/desce devagar pelo SALDO de gols da geração.
+        if goals >= 2 * POP:
+            self._opp_strength = min(1.0, self._opp_strength + 0.10)
+        elif goals > conc + 12:
             self._opp_strength = min(1.0, self._opp_strength + 0.05)
         elif goals < conc + 2:
             self._opp_strength = max(0.30, self._opp_strength - 0.03)
-        self.best_fit = max(fits) if fits else 0.0
+        # HALL-OF-FAME: o campeão reinante competiu no slot ELITE sob as MESMAS
+        # condições desta geração (mesma persona/força/gol). A física é
+        # determinística, então a comparação é exata: só cede o posto se um
+        # desafiante o SUPERAR aqui -> nunca "perdemos o melhor" entre gerações.
+        best_i = max(range(POP), key=lambda i: fits[i])
+        self.best_fit = fits[best_i]
+        if fits[best_i] > fits[ELITE]:
+            self.champion = self.pop[best_i].copy()
+            self._champ_fit = fits[best_i]
+        else:
+            self._champ_fit = fits[ELITE]         # campeão resistiu; mantém o posto
         self.history.append(self.best_fit)     # curva de fitness (controle de bola) por geração
         self.history = self.history[-120:]
-        self.champion = self.pop[max(range(POP), key=lambda i: fits[i])].copy()
-        rate, scale = hai.phase_params(self.total_goals)
+        # passo de mutação: se RETOMAMOS um campeão treinado, já entra em refino
+        # (+30 'gols virtuais') em vez de exploração — preserva o que foi aprendido.
+        phase_goals = self.total_goals + (30 if self._resumed else 0)
+        rate, scale = hai.phase_params(phase_goals)
         self.pop, _ = hai.evolve(self.pop, fits, ELITE, rate, scale, 0.25)
         self.pop[ELITE] = self.champion.copy()    # campeão sempre compete (anti-regressão)
         self.gen += 1
@@ -196,9 +230,29 @@ class HaxballTrainScreen:
             audio.play("select")
             wr = self.right_wins / POP
             if hai.save_brain(self.champion, self.gen, wr):
+                self._backup_to_drive()
                 self._toast("Campeao salvo! (jogar contra)")
             else:
                 self._toast("Falha ao salvar")
+
+    def _backup_to_drive(self) -> None:
+        """Sobe o modelo salvo pro Google Drive (Bimo/Modelos/) num thread de
+        fundo — 'bem seguro'. Sem rede/sem perfil logado, no-op silencioso."""
+        if self._get_sync is None:
+            return
+        svc = self._get_sync()
+        if svc is None or not hasattr(svc, "push_model"):
+            return
+        path = hai.save_path()
+
+        def _job() -> None:
+            try:
+                ok = svc.push_model(path)
+            except Exception:
+                ok = False
+            self._toast("Modelo no Drive (backup)" if ok else "Drive: sem rede")
+
+        threading.Thread(target=_job, daemon=True).start()
 
     def _toast(self, msg: str) -> None:
         self._status = msg
@@ -216,12 +270,14 @@ class HaxballTrainScreen:
                 break
 
     def _step_courts(self, dt: float) -> None:
+        # força do dummy = currículo x "cara" da persona (ofensiva acelera um
+        # pouco, defensiva alivia); teto 1.1 (pode ficar até mais rápido que a IA)
+        s = min(1.1, self._opp_strength * _DUMMY_SPD[self._dummy])
         for c in self.courts:
             w = c["w"]
-            al = hai.heuristic_action(w, "a")                  # esquerda = heurístico (ax,ay,chute)
+            al = hai.heuristic_action(w, "a", self._dummy)     # esquerda = sparring (persona)
             # IA (direita): ação + memória de curto prazo realimentada
             ax_b, ay_b, kick_b, c["mem"] = hai.brain_action(self.pop[c["ri"]], w, "b", c["mem"])
-            s = self._opp_strength       # oponente na força do CURRÍCULO
             goal = w.step(dt, al[0], al[1], ax_b, ay_b, al[2], kick_b,
                           a_accel=PLR_ACCEL * s, a_maxv=PLR_MAXV * s,
                           b_accel=PLR_ACCEL, b_maxv=PLR_MAXV)
@@ -362,7 +418,8 @@ class HaxballTrainScreen:
             ("sofridos: %d" % self.conceded, REDC),
             ("gol contra: %d" % self.own_goals, DIM),
             ("vit %d/%d  gol %dpx" % (self.right_wins, POP, self._goal_h()), WHITE),
-            ("fit %.0f  oponente %d%%" % (self.best_fit, int(self._opp_strength * 100)), WHITE),
+            ("fit %.0f  %s %d%%" % (self.best_fit, _SHORT[self._dummy],
+                                    int(self._opp_strength * 100)), WHITE),
         ]
         for i, (txt, col) in enumerate(lines):
             surface.blit(render_text(txt, 7, col, pixel=False), (x, y + i * 10))
