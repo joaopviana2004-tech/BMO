@@ -56,10 +56,10 @@ ambient após N segundos):
     mais difícil** conforme avança: acelera e o vão afunila (ver "Flappy IA")
   - **Snake** — cobrinha em grade: vira por setas/botões **ou por toque**
     (na direção do toque relativo à cabeça); come, cresce e acelera
-  - **Haxball** — futebol de botão top-down (você x bot): arraste seu disco
-    (vermelho) pra empurrar a bola e fazer gol no gol da direita. Física de
-    discos (colisão elástica); chute no canto pra furar o goleiro. Primeiro a 5.
-    A física vive numa classe `HaxWorld` reaproveitável (treino de IA a seguir)
+  - **Haxball** — futebol de botão top-down: arraste seu disco (vermelho) e
+    encoste na bola pelo lado de ataque pra dar um **chute** (impulso) no gol da
+    direita. Adversário azul = a **IA que você treinou** (tela HAXBALL IA) ou um
+    jogador heurístico forte. Primeiro a 5. Física compartilhada com o treino.
 - **TASKS** — kanban Todoist 3 colunas (TO-DO / DOING / DONE):
   - Toque + arrasta cards entre colunas
   - Botão SYNC força refresh
@@ -518,14 +518,20 @@ cada uma com um agente ESQUERDA contra um DIREITA + o **placar nas bordas**.
   toque/movimento — é farmável "campando" na quina.)
 - **SALVAR** grava os campeões (direita + esquerda); **REINICIAR** recomeça do
   zero. Ao abrir, **continua do último salvo** (sem perder trabalho). **30 FPS**.
+- **Chute:** encostar na bola estando do lado de ataque dá um **impulso forte**
+  (auto-chute, com cooldown) — é assim que se finaliza e fura o goleiro. Vale no
+  treino E no jogo; o lado de ataque é checado pra nunca chutar pro próprio gol.
+- **SALVAR** grava os campeões (direita + esquerda); **REINICIAR** recomeça do
+  zero. Ao abrir, **continua do último salvo** (sem perder trabalho). **30 FPS**.
 - **Jogar contra:** no Haxball normal, o adversário azul é a **IA salva** (se
   houver) ou o **jogador heurístico** (forte: ataca + defende). Modelo em
   `haxball_ai.json` (gitignored).
 
-> Nota honesta: treinar um agente que **vence** outro igual no 1v1 do zero é um
-> problema de RL difícil (dois iguais grudam na bola e empatam). Aqui o foco é o
-> visual + um adversário forte (o heurístico) já no jogo; as redes melhoram o
-> controle de bola por cima, com o melhor sendo salvo.
+> Nota: a IA treina contra o heurístico (oponente fixo forte) e, com o chute,
+> marca de verdade (dezenas de gols por geração) — o placar GIGANTE de cada
+> quadra conta ao vivo. Dois jogadores IGUAIS ainda tendem a empatar (a defesa
+> fecha), então o melhor da direita (que bate o heurístico) é o que o SALVAR
+> guarda pra você enfrentar.
 
 ## Refrigeração (coolers)
 

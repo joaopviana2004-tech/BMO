@@ -219,12 +219,14 @@ class HaxballTrainScreen:
             c["fb"] += (c["pdb"] - db) * 0.04                  # progresso da bola ao gol esq
             c["pdb"] = db
             if goal == "B":                # gol no gol ESQUERDO (a IA ataca aqui)
+                w.score_b += 1             # CONTA no placar da quadra (azul/IA)
                 if (w.t - w.t_touch_b) < 0.6:   # IA tocou recente -> criou o gol (até desvio do goleiro conta)
                     c["fb"] += 20.0
                 else:
                     c["fb"] -= 10.0; self._gen_own += 1   # fluke do heurístico sozinho (sem brinde)
                 w.kickoff(); c["pdb"] = _ball_left_goal(w)
             elif goal == "A":              # gol no gol DIREITO (a IA sofreu)
+                w.score_a += 1             # CONTA no placar da quadra (vermelho/heurístico)
                 if w.t_touch_b > w.t_touch_a:   # IA tocou por ÚLTIMO -> empurrou pro PRÓPRIO gol
                     c["fb"] -= 20.0; self._gen_own += 1   # GOL CONTRA -> penalidade pesada
                 else:

@@ -42,6 +42,10 @@ BOT_ACCEL, BOT_MAXV = 600.0, 92.0    # bot scriptado fraco (jogo casual)
 WALL_REST = 0.7
 DISC_REST = 0.55
 WIN_SCORE = 5                        # gols pra vencer no jogo
+# ---------- chute ----------
+KICK_RANGE = PLR_R + BALL_R + 5      # 18: alcance pra chutar a bola
+KICK_POWER = 340.0                   # impulso do chute (a bola voa, fura o goleiro)
+KICK_COOLDOWN = 0.35                 # segundos entre chutes
 
 
 def _clamp(v, lo, hi):
@@ -81,6 +85,7 @@ class HaxWorld:
         self.touch_b = False
         self.t = 0.0                      # tempo da partida
         self.t_touch_a = self.t_touch_b = -999.0   # quando cada lado tocou a bola
+        self.kick_cd_a = self.kick_cd_b = 0.0      # cooldown do chute por lado
 
     def random_reset(self, rng) -> None:
         """Saque ALEATÓRIO (só pro TREINO): bola e jogadores em posições/velocidades
@@ -99,6 +104,8 @@ class HaxWorld:
              b_accel=BOT_ACCEL, b_maxv=BOT_MAXV):
         self.touch_a = False
         self.touch_b = False
+        self.kick_cd_a = max(0.0, self.kick_cd_a - dt)
+        self.kick_cd_b = max(0.0, self.kick_cd_b - dt)
         self._control(self.a, ax_a, ay_a, a_accel, a_maxv, dt)
         self._control(self.b, ax_b, ay_b, b_accel, b_maxv, dt)
         for d in (self.a, self.b, self.ball):
@@ -111,10 +118,33 @@ class HaxWorld:
         if self._collide(self.b, self.ball):
             self.touch_b = True; self.last_touch = "b"; self.t_touch_b = self.t
         self._collide(self.a, self.b)
+        self._auto_kick(self.a, "a")          # chute automático (só pro lado de ataque)
+        self._auto_kick(self.b, "b")
+        self._clamp_speed(self.ball, BALL_MAXV)
         self._walls(self.a, ball=False)
         self._walls(self.b, ball=False)
         self.t += dt
         return self._walls(self.ball, ball=True)
+
+    def _auto_kick(self, player, side):
+        """Chuta a bola (impulso forte) quando o disco está perto E do lado de
+        ATAQUE dela — assim o chute vai pro gol adversário, nunca pro próprio."""
+        cd = self.kick_cd_a if side == "a" else self.kick_cd_b
+        if cd > 0:
+            return
+        dx, dy = self.ball.x - player.x, self.ball.y - player.y
+        d = math.hypot(dx, dy)
+        if d > KICK_RANGE or d < 1e-6:
+            return
+        if (side == "a" and dx <= 0) or (side == "b" and dx >= 0):
+            return            # bola não está do lado de ataque -> não chuta (evita gol contra)
+        self.ball.vx += dx / d * KICK_POWER
+        self.ball.vy += dy / d * KICK_POWER
+        self.last_touch = side
+        if side == "a":
+            self.kick_cd_a = KICK_COOLDOWN; self.touch_a = True; self.t_touch_a = self.t
+        else:
+            self.kick_cd_b = KICK_COOLDOWN; self.touch_b = True; self.t_touch_b = self.t
 
     # ---------- observação (entradas da rede) ----------
 
