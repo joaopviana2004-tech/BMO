@@ -203,6 +203,17 @@ def _icon_flappy_ai(surf: pygame.Surface, cx: int, cy: int) -> None:
     pygame.draw.line(surf, CRT_DIM, nodes[2], (bx - 5, by), 1)
 
 
+def _icon_haxball_ai(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # mini campo + nós de rede (treino de IA do haxball)
+    pygame.draw.rect(surf, CRT_WHITE, (cx - 16, cy - 11, 32, 22), 1)
+    pygame.draw.line(surf, CRT_DIM, (cx, cy - 11), (cx, cy + 11), 1)
+    pygame.draw.circle(surf, (232, 84, 72), (cx - 9, cy), 2)   # disco esq
+    pygame.draw.circle(surf, (92, 152, 240), (cx + 9, cy), 2)  # disco dir
+    pygame.draw.circle(surf, CRT_WHITE, (cx, cy), 2)           # bola
+    for dy in (-6, 0, 6):                                       # nós (rede)
+        pygame.draw.circle(surf, CRT_DIM, (cx + 13, cy + dy), 1)
+
+
 def _icon_power(surf: pygame.Surface, cx: int, cy: int) -> None:
     # símbolo de power: anel com abertura no topo + traço vertical
     pygame.draw.circle(surf, CRT_WHITE, (cx, cy + 1), 14, 2)
@@ -265,6 +276,7 @@ def build_categories(
     on_brain: Callable[[], None],
     on_aitest: Callable[[], None],
     on_flappy_ai: Callable[[], None],
+    on_haxball_ai: Callable[[], None],
     on_sleep: Callable[[], None],
     on_suspend: Callable[[], None],
     on_tasks: Callable[[], None],
@@ -285,6 +297,7 @@ def build_categories(
             HubItem("CEREBRO", _icon_brain, on_brain),
             HubItem("TESTE IA", _icon_aitest, on_aitest),
             HubItem("FLAPPY IA", _icon_flappy_ai, on_flappy_ai),
+            HubItem("HAXBALL IA", _icon_haxball_ai, on_haxball_ai),
         ]),
         HubCategory("REPOUSO", _icon_cat_rest, [
             HubItem("SLEEP", _icon_sleep, on_sleep),

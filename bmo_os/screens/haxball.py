@@ -1,44 +1,31 @@
-"""Haxball — futebol de botão top-down (você x bot).
+"""Haxball — futebol de botão top-down (você x bot / IA treinada).
 
-Você é o disco VERMELHO (esquerda); o bot é o AZUL (direita). Arraste seu disco
-com o dedo: ele acelera na direção do toque e empurra a bola só de encostar
-(física de colisão elástica, tipo air hockey / futebol de botão). Faça gol no
-gol adversário (à direita). Primeiro a 5 vence.
+Você é o disco VERMELHO (esquerda); o adversário é o AZUL (direita). Arraste seu
+disco com o dedo: ele acelera na direção do toque e empurra a bola só de encostar
+(colisão elástica, tipo air hockey). Faça gol no gol adversário (à direita).
+Primeiro a 5 vence.
 
-A física vive numa classe `HaxWorld` SEM pygame — pensada pra ser reaproveitada
-pela tela de treino de IA (dois jogadores controlados por redes neurais).
+A física vive em `services/haxball_ai.py` (`HaxWorld`) — a mesma do treino de IA.
+Se existir um cérebro salvo pela tela de TREINO, o adversário azul passa a ser
+controlado por ELE (você joga contra a IA que treinou); senão, um bot scriptado.
 """
 from __future__ import annotations
 
 import math
-import random
 
 import pygame
 
 from ..core import input as bmo_input
 from ..core.theme import LOGICAL_SIZE, render_text
 from ..services import audio
+from ..services import haxball_ai as hai
+from ..services.haxball_ai import (
+    FIELD_L, FIELD_T, FIELD_W, FIELD_H, CX, CY, GOAL_H, GOAL_TOP, GOAL_BOT,
+    PLR_R, PLR_ACCEL, PLR_MAXV, WIN_SCORE,
+)
 
 W, H = LOGICAL_SIZE
-
-# ---------- campo ----------
-FIELD = pygame.Rect(12, 26, 376, 200)        # área de jogo (right=388, bottom=226)
-CX, CY = FIELD.centerx, FIELD.centery
-GOAL_H = 60
-GOAL_TOP = CY - GOAL_H // 2
-GOAL_BOT = CY + GOAL_H // 2
-LEFT_GOAL = (FIELD.left, CY)
-RIGHT_GOAL = (FIELD.right, CY)
-
-# ---------- física ----------
-BALL_R, BALL_MASS, BALL_FRIC, BALL_MAXV = 4.0, 1.0, 0.4, 420.0
-PLR_R, PLR_MASS, PLR_FRIC, PLR_MAXV = 9.0, 4.0, 5.0, 122.0
-PLR_ACCEL = 920.0
-BOT_ACCEL, BOT_MAXV = 600.0, 92.0            # bot nitidamente mais lento (dá pra ganhar);
-                                             # é placeholder até o treino de IA o substituir
-WALL_REST = 0.7                              # quique nas paredes
-DISC_REST = 0.55                             # quique disco-disco
-WIN_SCORE = 5
+FIELD = pygame.Rect(FIELD_L, FIELD_T, FIELD_W, FIELD_H)
 
 # ---------- paleta ----------
 BG = (8, 14, 10)
@@ -47,116 +34,9 @@ LINE = (96, 156, 116)
 WHITE = (240, 240, 240)
 DIM = (110, 120, 130)
 RED = (232, 84, 72)        # jogador (esquerda)
-BLUE = (92, 152, 240)      # bot (direita)
+BLUE = (92, 152, 240)      # adversário (direita)
 BALL_C = (245, 245, 245)
 NET = (34, 84, 54)
-
-
-class Disc:
-    __slots__ = ("x", "y", "vx", "vy", "r", "inv_mass", "fric")
-
-    def __init__(self, x, y, r, mass, fric):
-        self.x = float(x); self.y = float(y)
-        self.vx = 0.0; self.vy = 0.0
-        self.r = r
-        self.inv_mass = 0.0 if mass <= 0 else 1.0 / mass
-        self.fric = fric
-
-
-class HaxWorld:
-    """Física do haxball: bola + 2 discos (a=esquerda, b=direita). `step()` recebe
-    a aceleração desejada de cada jogador (ax, ay em [-1,1]) e devolve 'A'/'B'/None
-    se saiu gol. Sem pygame — reaproveitável no treino de IA."""
-
-    def __init__(self) -> None:
-        self.score_a = 0
-        self.score_b = 0
-        self.kickoff()
-
-    def kickoff(self) -> None:
-        self.ball = Disc(CX, CY, BALL_R, BALL_MASS, BALL_FRIC)
-        self.a = Disc(FIELD.left + 48, CY, PLR_R, PLR_MASS, PLR_FRIC)
-        self.b = Disc(FIELD.right - 48, CY, PLR_R, PLR_MASS, PLR_FRIC)
-
-    def step(self, dt, ax_a, ay_a, ax_b, ay_b,
-             a_accel=PLR_ACCEL, a_maxv=PLR_MAXV,
-             b_accel=BOT_ACCEL, b_maxv=BOT_MAXV):
-        self._control(self.a, ax_a, ay_a, a_accel, a_maxv, dt)
-        self._control(self.b, ax_b, ay_b, b_accel, b_maxv, dt)
-        for d in (self.a, self.b, self.ball):
-            f = max(0.0, 1.0 - d.fric * dt)
-            d.vx *= f; d.vy *= f
-            d.x += d.vx * dt; d.y += d.vy * dt
-        self._clamp_speed(self.ball, BALL_MAXV)   # evita a bola atravessar discos/paredes
-        self._collide(self.a, self.ball)
-        self._collide(self.b, self.ball)
-        self._collide(self.a, self.b)
-        self._walls(self.a, ball=False)
-        self._walls(self.b, ball=False)
-        return self._walls(self.ball, ball=True)
-
-    @staticmethod
-    def _control(d, ax, ay, accel, maxv, dt):
-        d.vx += ax * accel * dt
-        d.vy += ay * accel * dt
-        HaxWorld._clamp_speed(d, maxv)
-
-    @staticmethod
-    def _clamp_speed(d, maxv):
-        sp = math.hypot(d.vx, d.vy)
-        if sp > maxv:
-            k = maxv / sp
-            d.vx *= k; d.vy *= k
-
-    @staticmethod
-    def _collide(a, b):
-        dx = b.x - a.x; dy = b.y - a.y
-        dist = math.hypot(dx, dy)
-        rsum = a.r + b.r
-        if dist >= rsum:
-            return
-        inv = a.inv_mass + b.inv_mass
-        if inv == 0:
-            return
-        if dist < 1e-6:
-            dx, dy, dist = 1.0, 0.0, 1.0
-        nx, ny = dx / dist, dy / dist
-        # separa (corrige a sobreposição, proporcional ao inverso da massa)
-        overlap = rsum - dist
-        a.x -= nx * overlap * (a.inv_mass / inv)
-        a.y -= ny * overlap * (a.inv_mass / inv)
-        b.x += nx * overlap * (b.inv_mass / inv)
-        b.y += ny * overlap * (b.inv_mass / inv)
-        # impulso elástico (só se estão se aproximando)
-        vn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny
-        if vn < 0:
-            j = -(1.0 + DISC_REST) * vn / inv
-            a.vx -= j * nx * a.inv_mass; a.vy -= j * ny * a.inv_mass
-            b.vx += j * nx * b.inv_mass; b.vy += j * ny * b.inv_mass
-
-    @staticmethod
-    def _walls(d, ball):
-        # topo / base — sempre sólidos
-        if d.y - d.r < FIELD.top:
-            d.y = FIELD.top + d.r; d.vy = abs(d.vy) * WALL_REST
-        elif d.y + d.r > FIELD.bottom:
-            d.y = FIELD.bottom - d.r; d.vy = -abs(d.vy) * WALL_REST
-        in_goal = ball and GOAL_TOP < d.y < GOAL_BOT
-        # esquerda
-        if d.x - d.r < FIELD.left:
-            if in_goal:
-                if d.x < FIELD.left - 2:
-                    return "B"        # bola no gol da esquerda -> ponto do AZUL
-            else:
-                d.x = FIELD.left + d.r; d.vx = abs(d.vx) * WALL_REST
-        # direita
-        if d.x + d.r > FIELD.right:
-            if in_goal:
-                if d.x > FIELD.right + 2:
-                    return "A"        # bola no gol da direita -> ponto do VERMELHO
-            else:
-                d.x = FIELD.right - d.r; d.vx = -abs(d.vx) * WALL_REST
-        return None
 
 
 class HaxballScreen:
@@ -164,10 +44,16 @@ class HaxballScreen:
 
     def __init__(self, on_back) -> None:
         self.on_back = on_back
+        # "jogar contra": se há um cérebro salvo (tela de TREINO), o azul é a IA
+        # treinada, em força total. Senão, o bot scriptado (mais fraco).
+        self.brain, _meta = hai.load_brain()
+        self._vs_ai = self.brain is not None
+        self._b_accel = PLR_ACCEL if self._vs_ai else hai.BOT_ACCEL
+        self._b_maxv = PLR_MAXV if self._vs_ai else hai.BOT_MAXV
         self._reset_match()
 
     def _reset_match(self) -> None:
-        self.world = HaxWorld()
+        self.world = hai.HaxWorld()
         self.state = "ready"           # ready -> playing -> goal -> over
         self._t = 0.0
         self._resume_at = 0.0
@@ -226,8 +112,9 @@ class HaxballScreen:
         if self.state != "playing":
             return
         ax_a, ay_a = self._player_input()
-        ax_b, ay_b = self._bot_input()
-        goal = self.world.step(dt, ax_a, ay_a, ax_b, ay_b)
+        ax_b, ay_b = self._opp_input()
+        goal = self.world.step(dt, ax_a, ay_a, ax_b, ay_b,
+                               b_accel=self._b_accel, b_maxv=self._b_maxv)
         if goal == "A":
             self.world.score_a += 1; self._on_goal("VERMELHO")
         elif goal == "B":
@@ -237,8 +124,7 @@ class HaxballScreen:
 
     def _anti_stall(self, dt: float) -> None:
         """Se a bola fica quase parada por um tempo (encravada num canto ou
-        prensada entre os discos), empurra ela de volta pro CENTRO do campo —
-        solta de qualquer canto, sem favorecer ninguém."""
+        prensada entre os discos), empurra ela de volta pro CENTRO do campo."""
         ball = self.world.ball
         if math.hypot(ball.vx, ball.vy) < 16:
             self._stall += dt
@@ -253,9 +139,10 @@ class HaxballScreen:
 
     def _on_goal(self, who: str) -> None:
         audio.play("point")
+        opp_name = "IA" if self._vs_ai else "BOT"
         if self.world.score_a >= WIN_SCORE or self.world.score_b >= WIN_SCORE:
             self.state = "over"
-            self._msg = "VOCE VENCEU!" if self.world.score_a > self.world.score_b else "BOT VENCEU!"
+            self._msg = "VOCE VENCEU!" if self.world.score_a > self.world.score_b else f"{opp_name} VENCEU!"
         else:
             self.state = "goal"
             self._msg = f"GOL {who}!"
@@ -278,26 +165,12 @@ class HaxballScreen:
                 return dx / d, dy / d
         return 0.0, 0.0
 
-    def _bot_input(self):
-        b = self.world.b; ball = self.world.ball
-        if ball.x < CX - 24:
-            # bola no campo do jogador: recua e fica de guarda na boca do gol
-            tx = FIELD.right - 42
-            ty = max(GOAL_TOP + 4, min(GOAL_BOT - 4, ball.y))
-        else:
-            # bola no seu campo: pressiona o lado direito da bola pra empurrá-la
-            # pro gol da ESQUERDA (um tico além do contato).
-            dgx, dgy = ball.x - LEFT_GOAL[0], ball.y - LEFT_GOAL[1]
-            dg = math.hypot(dgx, dgy) or 1.0
-            tx = ball.x + dgx / dg * (PLR_R + BALL_R - 2)
-            ty = ball.y + dgy / dg * (PLR_R + BALL_R - 2)
-        tx = max(FIELD.left + PLR_R, min(FIELD.right - PLR_R, tx))
-        ty = max(FIELD.top + PLR_R, min(FIELD.bottom - PLR_R, ty))
-        dx, dy = tx - b.x, ty - b.y
-        d = math.hypot(dx, dy)
-        if d > 2:
-            return dx / d, dy / d
-        return 0.0, 0.0
+    def _opp_input(self):
+        # adversário azul: a IA treinada (se houver) ou o jogador heurístico
+        # (ataca+defende; bem mais esperto que o bot defensivo antigo)
+        if self.brain is not None:
+            return hai.brain_action(self.brain, self.world, "b")
+        return hai.heuristic_action(self.world, "b")
 
     # ---------- draw ----------
 
@@ -331,7 +204,8 @@ class HaxballScreen:
         self._draw_back_btn(surface)
         # mensagens de estado
         if self.state == "ready":
-            self._center(surface, "TOQUE PRA COMECAR", "arraste seu disco (vermelho)")
+            hint = "voce x IA treinada" if self._vs_ai else "arraste seu disco (vermelho)"
+            self._center(surface, "TOQUE PRA COMECAR", hint)
         elif self.state == "goal":
             self._center(surface, self._msg, "")
         elif self.state == "over":

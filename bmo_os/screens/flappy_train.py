@@ -56,9 +56,9 @@ class FlappyTrainScreen:
         self._status = ""
         self._status_until = 0.0
         self._viz = None        # {"inputs","hid","out","brain"} do melhor pássaro
-        self._init_population()
+        self._init_population(from_saved=True)   # continua do último salvo, se houver
 
-    def _init_population(self) -> None:
+    def _init_population(self, from_saved: bool = False) -> None:
         # cor viva + deslocamento em X por pássaro. O xoff é a POSIÇÃO REAL do
         # pássaro (passa pro World): visão e colisão usam o mesmo x do desenho,
         # então nada atravessa cano. Espalha bem na horizontal mas viesado pra
@@ -66,11 +66,21 @@ class FlappyTrainScreen:
         # cano. Some no REINICIAR.
         self._colors = [self._vivid_color() for _ in range(POP)]
         self._xoff = [random.randint(-42, 4) for _ in range(POP)]
-        self.brains = [fai.Brain() for _ in range(POP)]
+        # ao ABRIR (from_saved): continua do último campeão salvo, sem perder
+        # trabalho. REINICIAR começa do zero (aleatório).
+        loaded, meta = fai.load_brain() if from_saved else (None, None)
+        if loaded is not None:
+            self.brains = [loaded.copy() for _ in range(POP)]
+            for b in self.brains[1:]:
+                b.mutate(0.15, 0.25)     # diversidade (mantém 1 cópia exata do campeão)
+            self.best_brain = loaded
+            self.record = int(meta.get("record", 0)) if meta else 0
+        else:
+            self.brains = [fai.Brain() for _ in range(POP)]
+            self.best_brain = None
+            self.record = 0
         self.world = fai.World(POP, xoffs=self._xoff)
         self.gen = 1
-        self.record = 0
-        self.best_brain = None
         self._gen_steps = 0
         self._history = []      # pontuação de cada geração (gráfico de recordes)
 
@@ -110,8 +120,8 @@ class FlappyTrainScreen:
     def _activate(self, key: str) -> None:
         if key == "reiniciar":
             audio.play("select")
-            self._init_population()
-            self._toast("Treino reiniciado")
+            self._init_population(from_saved=False)
+            self._toast("Treino reiniciado (do zero)")
         elif key == "salvar":
             audio.play("select")
             # valida os candidatos em vários mundos novos e grava o MAIS ROBUSTO

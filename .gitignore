@@ -199,6 +199,9 @@ bmo_memory.json
 # Melhor cérebro do treino de Flappy (neuroevolução) — modelo treinado local
 flappy_ai.json
 
+# Campeão do treino de Haxball (neuroevolução) — modelo treinado local
+haxball_ai.json
+
 # Tokens OAuth do Google Calendar (refresh tokens) — NUNCA commitar
 gcal_tokens.json
 

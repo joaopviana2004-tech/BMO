@@ -170,6 +170,8 @@ bmo_os/
     space_invaders.py  # SpaceInvadersScreen (jogo) + SpaceInvadersAmbientScreen
     flappy.py          # FlappyScreen (passarinho: toque/A) + modo versus contra a IA
     flappy_train.py    # FlappyTrainScreen: treino por neuroevolução + viz da rede
+    haxball.py         # HaxballScreen: futebol de botão (você x IA/heurístico)
+    haxball_train.py   # HaxballTrainScreen: co-evolução (grid 3x3) + rede + stats
     snake.py           # SnakeScreen (cobrinha: setas/botões ou toque)
     shuffler.py        # ShufflingAmbientScreen (cicla as ambient)
     home.py            # hub de categorias (IA/REPOUSO/ESTUDOS/AJUSTES) em grade
@@ -215,6 +217,7 @@ bmo_os/
     dev_hub.py         # estado do Dev Hub (commits/CI/logs); github_dev alimenta
     github_dev.py      # GitHub API -> Dev Hub (commits, CI, stats) em thread
     flappy_ai.py       # neuroevolução do Flappy: rede + GA + salvar/carregar (jogo+treino)
+    haxball_ai.py      # haxball: física + rede(numpy) + GA + imitação + heurístico
     cooler.py          # controle dos 2 coolers via GPIO (auto >60°C)
     gpio_button.py     # botão físico de push-to-talk (gpiozero)
   assets/
@@ -483,7 +486,38 @@ genético em tempo real** e mostra a **rede neural do melhor pássaro ao vivo**:
   robusto** (toast `robustez X/30`). **REINICIAR** zera o treino.
 - **Jogar contra:** com um cérebro salvo, o **Flappy** normal vira **versus** —
   um pássaro azul controlado pela rede joga ao seu lado (placar VOCÊ × BMO).
+- **Continua de onde parou:** ao abrir a tela, o último campeão salvo é
+  carregado e o treino segue a partir dele (REINICIAR começa do zero).
 - Modelo salvo em `flappy_ai.json` (gitignored).
+
+## Haxball IA (neuroevolução / co-evolução)
+
+A tela **HAXBALL IA** (categoria IA) treina jogadores de Haxball e te deixa
+**assistir ao vivo**: um **grid 3×3 de mini-quadras**, em cada uma um agente
+ESQUERDA contra um DIREITA (redes `8→10→2`, saída = aceleração ax/ay).
+
+- A **quadra fica VERDE** quando o lado direito está ganhando e **VERMELHA**
+  quando o esquerdo ganha. Painel à direita: a **rede neural** do melhor agente
+  da direita (ao vivo) + **estatísticas** (geração, gols, vitórias, fitness).
+- **Frame canônico:** o lado direito é espelhado no X, então a rede aprende UMA
+  política simétrica (serve pros dois lados) — metade da dificuldade.
+- **Bootstrap por imitação:** como agentes aleatórios não engajam a bola (saturam
+  e derivam pro canto), as populações nascem **seedadas** de um imitador
+  pré-treinado (backprop) de um **jogador heurístico** que ataca e defende. A
+  co-evolução refina por cima; um **currículo de gol que encolhe** (largo → 60px)
+  ajuda os gols a aparecerem.
+- **Recompensa** = progresso da BOLA rumo ao gol adversário + gols (de propósito
+  **não** premia toque/movimento — isso é farmável "campando" na quina do gol).
+- **SALVAR** grava o campeão da direita; **REINICIAR** recomeça do zero. Ao abrir,
+  **continua do último salvo** (sem perder trabalho). Roda a **30 FPS**.
+- **Jogar contra:** no Haxball normal, o adversário azul é a **IA salva** (se
+  houver) ou o **jogador heurístico** (forte: ataca + defende). Modelo em
+  `haxball_ai.json` (gitignored).
+
+> Nota honesta: treinar um agente que **vence** outro igual no 1v1 do zero é um
+> problema de RL difícil (dois iguais grudam na bola e empatam). Aqui o foco é o
+> visual + um adversário forte (o heurístico) já no jogo; as redes melhoram o
+> controle de bola por cima, com o melhor sendo salvo.
 
 ## Refrigeração (coolers)
 
@@ -632,3 +666,6 @@ itens futuros): a cada feature nova, o roadmap ganha mais uma linha no fim.
   com confirmação)
 - [x] **V2.9** — **Flappy IA**: treino por neuroevolução em tempo real — rede
   neural do melhor pássaro visível ao vivo, salvar o campeão e jogar contra ele
+- [x] **V3.0** — **Haxball** (futebol de botão top-down) + **Haxball IA**:
+  co-evolução em grid 3×3 (verde/vermelho), rede + stats, bootstrap por imitação
+  de um heurístico, salvar/continuar o treino e jogar contra o adversário
