@@ -18,7 +18,6 @@ ganha de graça). Roda a 30 FPS com 2 passos de física por frame.
 """
 from __future__ import annotations
 
-import math
 import random
 import time
 
@@ -29,7 +28,7 @@ from ..core.theme import LOGICAL_SIZE, render_text
 from ..services import audio
 from ..services import haxball_ai as hai
 from ..services.haxball_ai import (
-    FIELD_L, FIELD_T, FIELD_W, FIELD_H, CX, CY, PLR_ACCEL, PLR_MAXV,
+    FIELD_L, FIELD_T, FIELD_W, FIELD_H, CX, PLR_ACCEL, PLR_MAXV,
 )
 
 W, H = LOGICAL_SIZE
@@ -76,11 +75,6 @@ def _seed_pop(base):
     return pop
 
 
-def _ball_left_goal(world):
-    """Distância da bola ao gol ESQUERDO (onde a IA da direita ataca)."""
-    return math.hypot(world.ball.x - FIELD_L, world.ball.y - CY)
-
-
 class HaxballTrainScreen:
     voice_announce = "Treinando o time."
     preferred_fps = 30
@@ -92,6 +86,7 @@ class HaxballTrainScreen:
         self._status = ""
         self._status_until = 0.0
         self._loaded_from = "imitador"
+        self._heatmaps = {}              # funil de potencial por largura de gol (cache)
         self._init_population(from_saved=True)
 
     def _init_population(self, from_saved: bool) -> None:
@@ -129,7 +124,11 @@ class HaxballTrainScreen:
         self.courts = []
         for i in range(POP):
             w = hai.HaxWorld(goal_h=gh)
-            self.courts.append({"w": w, "ri": i, "fb": 0.0, "pdb": _ball_left_goal(w)})
+            self.courts.append({
+                "w": w, "ri": i, "fb": 0.0,
+                "ppot": hai.goal_potential(w.ball.x, w.ball.y, w.goal_top, w.goal_bot),
+                "mem": [0.0] * hai.MEM,          # memória de curto prazo da IA
+            })
         self._t_gen = 0.0
         self._gen_own = 0
 
@@ -220,29 +219,32 @@ class HaxballTrainScreen:
         for c in self.courts:
             w = c["w"]
             al = hai.heuristic_action(w, "a")                  # esquerda = heurístico (ax,ay,chute)
-            ar = hai.brain_action(self.pop[c["ri"]], w, "b")   # direita = IA (ax,ay,chute)
-            # oponente na força do CURRÍCULO (fraco -> forte conforme a IA evolui)
-            s = self._opp_strength
-            goal = w.step(dt, al[0], al[1], ar[0], ar[1], al[2], ar[2],
+            # IA (direita): ação + memória de curto prazo realimentada
+            ax_b, ay_b, kick_b, c["mem"] = hai.brain_action(self.pop[c["ri"]], w, "b", c["mem"])
+            s = self._opp_strength       # oponente na força do CURRÍCULO
+            goal = w.step(dt, al[0], al[1], ax_b, ay_b, al[2], kick_b,
                           a_accel=PLR_ACCEL * s, a_maxv=PLR_MAXV * s,
                           b_accel=PLR_ACCEL, b_maxv=PLR_MAXV)
-            db = _ball_left_goal(w)
-            c["fb"] += (c["pdb"] - db) * 0.04                  # progresso da bola ao gol esq
-            c["pdb"] = db
+            # recompensa = SUBIDA do POTENCIAL (funil ao gol) — a matriz de pontuação
+            pot = hai.goal_potential(w.ball.x, w.ball.y, w.goal_top, w.goal_bot)
+            c["fb"] += (pot - c["ppot"]) * 25.0
+            c["ppot"] = pot
             if goal == "B":                # gol no gol ESQUERDO (a IA ataca aqui)
                 w.score_b += 1             # CONTA no placar da quadra (azul/IA)
                 if (w.t - w.t_touch_b) < 0.6:   # IA tocou recente -> criou o gol (até desvio do goleiro conta)
                     c["fb"] += 20.0
                 else:
                     c["fb"] -= 10.0; self._gen_own += 1   # fluke do heurístico sozinho (sem brinde)
-                w.kickoff(); c["pdb"] = _ball_left_goal(w)
+                w.kickoff(); c["mem"] = [0.0] * hai.MEM
+                c["ppot"] = hai.goal_potential(w.ball.x, w.ball.y, w.goal_top, w.goal_bot)
             elif goal == "A":              # gol no gol DIREITO (a IA sofreu)
                 w.score_a += 1             # CONTA no placar da quadra (vermelho/heurístico)
                 if w.t_touch_b > w.t_touch_a:   # IA tocou por ÚLTIMO -> empurrou pro PRÓPRIO gol
                     c["fb"] -= 20.0; self._gen_own += 1   # GOL CONTRA -> penalidade pesada
                 else:
                     c["fb"] -= 8.0         # heurístico marcou de verdade
-                w.kickoff(); c["pdb"] = _ball_left_goal(w)
+                w.kickoff(); c["mem"] = [0.0] * hai.MEM
+                c["ppot"] = hai.goal_potential(w.ball.x, w.ball.y, w.goal_top, w.goal_bot)
 
     # ---------- layout ----------
 
@@ -273,7 +275,12 @@ class HaxballTrainScreen:
         adv = w.score_b - w.score_a
         if adv == 0:
             adv = 1 if w.ball.x < CX else -1     # empate: quem está pressionando
-        pygame.draw.rect(surface, GREEN_T if adv > 0 else RED_T, cell)
+        # FUNDO = matriz de pontuação (funil): mais claro perto do gol esquerdo,
+        # mostrando pra IA o "caminho" da bola ao gol que ela ataca.
+        surface.blit(self._ensure_heatmap(w.goal_top, w.goal_bot), cell)
+        tint = pygame.Surface((cell.w, cell.h))   # tom de quem está ganhando por cima
+        tint.set_alpha(70); tint.fill(GREEN_T if adv > 0 else RED_T)
+        surface.blit(tint, cell)
         pygame.draw.rect(surface, (40, 46, 50), cell, 1)
         # placar GIGANTE translúcido (atrás dos jogadores)
         self._big_score(surface, cell, str(w.score_a), REDC, cell.x + cell.w * 0.28)
@@ -290,6 +297,31 @@ class HaxballTrainScreen:
         self._dot(surface, cell, w.a, REDC, 2)
         self._dot(surface, cell, w.b, BLUEC, 2)
         self._dot(surface, cell, w.ball, BALLC, 1)
+
+    def _ensure_heatmap(self, goal_top, goal_bot):
+        """Constrói (e cacheia) o funil de potencial pro gol ESQUERDO como uma
+        imagem do tamanho da quadra. Verde escuro = longe; verde claro = boca do
+        gol — é a 'matriz de pontuação' que guia a IA igual a um funil."""
+        key = (int(goal_top), int(goal_bot))
+        cached = self._heatmaps.get(key)
+        if cached is not None:
+            return cached
+        GW, GH = 40, 21
+        small = pygame.Surface((GW, GH))
+        cells = []
+        for gx in range(GW):
+            for gy in range(GH):
+                fx = FIELD_L + (gx + 0.5) / GW * FIELD_W
+                fy = FIELD_T + (gy + 0.5) / GH * FIELD_H
+                cells.append((gx, gy, hai.goal_potential(fx, fy, goal_top, goal_bot)))
+        lo = min(v for _, _, v in cells); hi = max(v for _, _, v in cells)
+        rng = (hi - lo) or 1.0
+        for gx, gy, v in cells:
+            t = (v - lo) / rng                  # 0 longe -> 1 na boca do gol esq
+            small.set_at((gx, gy), (int(10 + 8 * t), int(26 + 78 * t), int(18 + 16 * t)))
+        img = pygame.transform.scale(small, (CW, CH))
+        self._heatmaps[key] = img
+        return img
 
     @staticmethod
     def _big_score(surface, cell, text, color, cx) -> None:

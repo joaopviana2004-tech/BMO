@@ -505,9 +505,13 @@ cada uma com um agente ESQUERDA contra um DIREITA + o **placar nas bordas**.
   → distância + direção (cos, sin); + velocidade da bola, do oponente e a minha.
   Polar "casa" com a ação (mover numa direção) e dá consciência explícita do gol.
   (Raycasts foram descartados: o ambiente é simples/totalmente observável, então
-  raios só repetiriam info e atrasariam o aprendizado.) Rede `18→32→24→16→3`
-  (3 camadas ocultas, tanh): saídas = ax, ay e **chutar** (3ª saída — a rede
-  decide quando finalizar).
+  raios só repetiriam info e atrasariam o aprendizado.)
+- **Memória de curto prazo (recorrência):** além das 18 observações, a rede recebe
+  de volta **4 neurônios de memória** que ela própria escreveu no passo anterior —
+  um "estado interno" que deixa ela lembrar pra onde a bola ia, se já estava num
+  contra-ataque, etc. (não é puramente reativa). Rede `22→32→24→16→7` (3 camadas
+  ocultas, tanh): entrada = 18 obs + 4 memória; saídas = ax, ay, **chutar** (3ª
+  saída) + as **4 memórias novas**.
 - **Currículo adaptativo (sparring):** o oponente começa fraco (~30%, quase um
   *dummy*) e fica **mais forte conforme a IA domina** (sobe pelo saldo de gols,
   recua se a IA apanha) — acompanha o nível dela, como um treinador. É o "jogar
@@ -518,12 +522,16 @@ cada uma com um agente ESQUERDA contra um DIREITA + o **placar nas bordas**.
   populações nascem **seedadas** de um imitador pré-treinado (backprop) de um
   **jogador heurístico** que ataca e defende. A co-evolução refina por cima; um
   **currículo de gol que encolhe** (largo → 60px) ajuda os gols a aparecerem.
-- **Recompensa** = progresso da BOLA rumo ao gol adversário + gols. **Gol contra**
-  (o defensor empurra pra própria meta) leva **penalidade pesada nos dois** e
-  ninguém ganha de graça — assim quase não aparece. (De propósito **não** premia
-  toque/movimento — é farmável "campando" na quina.)
-- **SALVAR** grava os campeões (direita + esquerda); **REINICIAR** recomeça do
-  zero. Ao abrir, **continua do último salvo** (sem perder trabalho). **30 FPS**.
+- **Matriz de pontuação (funil) no fundo da quadra:** cada quadra tem um **mapa de
+  calor** desenhado atrás dos jogadores — verde escuro longe do gol, verde claro na
+  **boca do gol** (um *funil*). É o **potencial** `goal_potential(x,y)`: a recompensa
+  da IA é a **subida desse potencial** quadro a quadro (`Δpotencial × 25`), então
+  levar a bola "morro acima" pelo funil rumo ao gol já pontua — isso a ensina a se
+  mover **junto com a bola, cada vez mais perto do gol**, mesmo antes de marcar.
+- **Recompensa** = subida do potencial (funil) + gols. **Gol contra** (o defensor
+  empurra pra própria meta) leva **penalidade pesada nos dois** e ninguém ganha de
+  graça — assim quase não aparece. (De propósito **não** premia toque/movimento
+  cru — seria farmável "campando" na quina.)
 - **Chute (3ª saída):** a rede DECIDE quando chutar (a 3ª saída > 0). Quando o
   agente quer chutar e o disco está perto da bola pelo lado de ataque, sai um
   **impulso forte** (cooldown) — é assim que se finaliza e fura o goleiro. O lado

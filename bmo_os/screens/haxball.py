@@ -50,10 +50,12 @@ class HaxballScreen:
         self._vs_ai = self.brain is not None
         self._b_accel = PLR_ACCEL if self._vs_ai else hai.BOT_ACCEL
         self._b_maxv = PLR_MAXV if self._vs_ai else hai.BOT_MAXV
+        self._opp_mem = [0.0] * hai.MEM   # memória de curto prazo da IA
         self._reset_match()
 
     def _reset_match(self) -> None:
         self.world = hai.HaxWorld()
+        self._opp_mem = [0.0] * hai.MEM   # zera a memória da IA
         self.state = "ready"           # ready -> playing -> goal -> over
         self._t = 0.0
         self._resume_at = 0.0
@@ -108,6 +110,7 @@ class HaxballScreen:
         self._t += dt
         if self.state == "goal" and self._t >= self._resume_at:
             self.world.kickoff()
+            self._opp_mem = [0.0] * hai.MEM
             self.state = "playing"
         if self.state != "playing":
             return
@@ -170,7 +173,9 @@ class HaxballScreen:
         # adversário azul: a IA treinada (se houver) ou o jogador heurístico
         # (ataca+defende; bem mais esperto que o bot defensivo antigo)
         if self.brain is not None:
-            return hai.brain_action(self.brain, self.world, "b")
+            ax, ay, kick, self._opp_mem = hai.brain_action(
+                self.brain, self.world, "b", self._opp_mem)
+            return ax, ay, kick
         return hai.heuristic_action(self.world, "b")
 
     # ---------- draw ----------

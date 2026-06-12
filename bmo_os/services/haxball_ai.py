@@ -286,9 +286,19 @@ def bot_action(world: HaxWorld, side: str):
 
 # ========================= rede neural =========================
 
-N_IN = 18              # polar + gols + velocidades (frame canônico)
-N_OUT = 3              # ax, ay, CHUTE (3ª saída: a rede decide quando chutar)
+N_OBS = 18             # observações (polar + gols + velocidades, frame canônico)
+MEM = 4                # MEMÓRIA de curto prazo: neurônios recorrentes (realimentados)
+N_IN = N_OBS + MEM     # entrada = observação + memória do passo anterior
+N_OUT = 3 + MEM        # saída = ax, ay, chute + nova memória
 HIDDEN = [32, 24, 16]  # 3 camadas ocultas (rede maior = mais "inteligência")
+
+
+def goal_potential(x, y, goal_top, goal_bot):
+    """Potencial (0..1) de uma posição da bola pro ataque ao gol ESQUERDO: alto no
+    VÃO do gol, caindo com a distância — forma um FUNIL que puxa a bola pro gol.
+    É a 'matriz de pontuação' do campo (recompensa + heatmap de fundo)."""
+    cy = _clamp(y, goal_top, goal_bot)
+    return 1.0 - _clamp(math.hypot(x - FIELD_L, y - cy) / _MAXD, 0.0, 1.0)
 
 
 class Brain:
@@ -343,14 +353,18 @@ class Brain:
         return nb
 
 
-def brain_action(brain: Brain, world: HaxWorld, side: str):
-    """Ação real (ax, ay, kick) de um cérebro pra um lado. A rede pensa no frame
-    canônico (ataca +x); pro lado 'b' des-espelha o eixo X. A 3ª saída > 0 = chuta."""
-    out = brain.forward(world.observe(side))
+def brain_action(brain: Brain, world: HaxWorld, side: str, mem=None):
+    """Ação (ax, ay, kick, nova_memoria). A entrada é observação + memória do passo
+    anterior (recorrência = memória de curto prazo). Frame canônico (des-espelha o
+    ax pro lado 'b'); 3ª saída > 0 = chuta; o resto da saída é a memória nova."""
+    if mem is None:
+        mem = [0.0] * MEM
+    out = brain.forward(list(world.observe(side)) + list(mem))
     ax, ay, kick = float(out[0]), float(out[1]), float(out[2])
     if side == "b":
         ax = -ax
-    return ax, ay, kick > 0.0
+    new_mem = [float(v) for v in out[3:3 + MEM]]
+    return ax, ay, kick > 0.0, new_mem
 
 
 def crossover(a: Brain, b: Brain) -> Brain:
@@ -455,11 +469,11 @@ def _gen_dataset(rng, n):
     for k in range(n):
         w = _random_state(rng)
         side = "b" if rng.rand() < 0.5 else "a"
-        X[k] = w.observe(side)
+        X[k, :N_OBS] = w.observe(side)        # memória (resto da entrada) fica 0
         tx, ty, kick = heuristic_action(w, side)
         if side == "b":   # canoniza o alvo (a rede pensa no frame +x)
             tx = -tx
-        Y[k] = (tx, ty, 1.0 if kick else -1.0)   # 3ª saída: chutar (+1) ou não (-1)
+        Y[k, 0], Y[k, 1], Y[k, 2] = tx, ty, (1.0 if kick else -1.0)  # ação; memória=0
     return X, Y
 
 
