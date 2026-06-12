@@ -113,6 +113,9 @@ class HaxballTrainScreen:
         self.best_fit = 0.0
         self.right_wins = 0                  # quadras com a IA na frente (última ger.)
         self.history = []                    # % de vitórias da IA por geração
+        # CURRÍCULO: o oponente começa fraco (quase dummy) e fica mais forte
+        # conforme a IA domina — um sparring que acompanha o nível dela.
+        self._opp_strength = 0.30
         self._new_generation()
 
     def _goal_h(self) -> int:
@@ -143,6 +146,13 @@ class HaxballTrainScreen:
         self.conceded += conc
         self.own_goals += self._gen_own
         self.right_wins = wins
+        # currículo adaptativo: pelo SALDO de gols da geração. Se a IA domina (até
+        # via flukes do oponente fraco), fortalece o oponente -> ele para de
+        # presentear e a IA precisa marcar de verdade. Se apanha, alivia.
+        if goals > conc + 12:
+            self._opp_strength = min(1.0, self._opp_strength + 0.05)
+        elif goals < conc + 2:
+            self._opp_strength = max(0.30, self._opp_strength - 0.03)
         self.best_fit = max(fits) if fits else 0.0
         self.history.append(self.best_fit)     # curva de fitness (controle de bola) por geração
         self.history = self.history[-120:]
@@ -211,9 +221,10 @@ class HaxballTrainScreen:
             w = c["w"]
             al = hai.heuristic_action(w, "a")                  # esquerda = heurístico (ax,ay,chute)
             ar = hai.brain_action(self.pop[c["ri"]], w, "b")   # direita = IA (ax,ay,chute)
-            # heurístico mais LENTO (60%): dá pra IA furar a defesa e marcar -> aprender
+            # oponente na força do CURRÍCULO (fraco -> forte conforme a IA evolui)
+            s = self._opp_strength
             goal = w.step(dt, al[0], al[1], ar[0], ar[1], al[2], ar[2],
-                          a_accel=PLR_ACCEL * 0.6, a_maxv=PLR_MAXV * 0.6,
+                          a_accel=PLR_ACCEL * s, a_maxv=PLR_MAXV * s,
                           b_accel=PLR_ACCEL, b_maxv=PLR_MAXV)
             db = _ball_left_goal(w)
             c["fb"] += (c["pdb"] - db) * 0.04                  # progresso da bola ao gol esq
@@ -319,7 +330,7 @@ class HaxballTrainScreen:
             ("sofridos: %d" % self.conceded, REDC),
             ("gol contra: %d" % self.own_goals, DIM),
             ("vit %d/%d  gol %dpx" % (self.right_wins, POP, self._goal_h()), WHITE),
-            ("fit %.0f" % self.best_fit, WHITE),
+            ("fit %.0f  oponente %d%%" % (self.best_fit, int(self._opp_strength * 100)), WHITE),
         ]
         for i, (txt, col) in enumerate(lines):
             surface.blit(render_text(txt, 7, col, pixel=False), (x, y + i * 10))

@@ -288,7 +288,7 @@ def bot_action(world: HaxWorld, side: str):
 
 N_IN = 18              # polar + gols + velocidades (frame canônico)
 N_OUT = 3              # ax, ay, CHUTE (3ª saída: a rede decide quando chutar)
-HIDDEN = [20, 12]      # 2 camadas ocultas: capacidade pra aprender bastante
+HIDDEN = [32, 24, 16]  # 3 camadas ocultas (rede maior = mais "inteligência")
 
 
 class Brain:

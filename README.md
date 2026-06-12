@@ -505,8 +505,13 @@ cada uma com um agente ESQUERDA contra um DIREITA + o **placar nas bordas**.
   → distância + direção (cos, sin); + velocidade da bola, do oponente e a minha.
   Polar "casa" com a ação (mover numa direção) e dá consciência explícita do gol.
   (Raycasts foram descartados: o ambiente é simples/totalmente observável, então
-  raios só repetiriam info e atrasariam o aprendizado.) Rede `18→20→12→3` (tanh):
-  saídas = ax, ay e **chutar** (3ª saída — a rede decide quando finalizar).
+  raios só repetiriam info e atrasariam o aprendizado.) Rede `18→32→24→16→3`
+  (3 camadas ocultas, tanh): saídas = ax, ay e **chutar** (3ª saída — a rede
+  decide quando finalizar).
+- **Currículo adaptativo (sparring):** o oponente começa fraco (~30%, quase um
+  *dummy*) e fica **mais forte conforme a IA domina** (sobe pelo saldo de gols,
+  recua se a IA apanha) — acompanha o nível dela, como um treinador. É o "jogar
+  contra um dummy e ir escalando" levando a IA a aprender jogadas de verdade.
 - **Frame canônico:** o lado direito é espelhado no X, então a rede aprende UMA
   política simétrica (serve pros dois lados) — metade da dificuldade.
 - **Bootstrap por imitação:** como agentes aleatórios não engajam a bola, as
