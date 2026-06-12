@@ -493,23 +493,31 @@ genético em tempo real** e mostra a **rede neural do melhor pássaro ao vivo**:
 ## Haxball IA (neuroevolução / co-evolução)
 
 A tela **HAXBALL IA** (categoria IA) treina jogadores de Haxball e te deixa
-**assistir ao vivo**: um **grid 3×3 de mini-quadras**, em cada uma um agente
-ESQUERDA contra um DIREITA (redes `8→10→2`, saída = aceleração ax/ay).
+**assistir ao vivo**: um **grid 3×4 de 12 mini-quadras na proporção do campo**
+(paisagem, igual ao jogo — o agente treina no mesmo "environment" que enfrenta),
+cada uma com um agente ESQUERDA contra um DIREITA + o **placar nas bordas**.
 
 - A **quadra fica VERDE** quando o lado direito está ganhando e **VERMELHA**
   quando o esquerdo ganha. Painel à direita: a **rede neural** do melhor agente
-  da direita (ao vivo) + **estatísticas** (geração, gols, vitórias, fitness).
+  da direita (ao vivo) + **estatísticas** (geração, gols, gols contra, vitórias,
+  largura do gol, fitness).
+- **Inputs POLARES + gols (18):** pra bola, oponente, gol-adversário e gol-próprio
+  → distância + direção (cos, sin); + velocidade da bola, do oponente e a minha.
+  Polar "casa" com a ação (mover numa direção) e dá consciência explícita do gol.
+  (Raycasts foram descartados: o ambiente é simples/totalmente observável, então
+  raios só repetiriam info e atrasariam o aprendizado.) Rede `18→20→12→2` (tanh).
 - **Frame canônico:** o lado direito é espelhado no X, então a rede aprende UMA
   política simétrica (serve pros dois lados) — metade da dificuldade.
-- **Bootstrap por imitação:** como agentes aleatórios não engajam a bola (saturam
-  e derivam pro canto), as populações nascem **seedadas** de um imitador
-  pré-treinado (backprop) de um **jogador heurístico** que ataca e defende. A
-  co-evolução refina por cima; um **currículo de gol que encolhe** (largo → 60px)
-  ajuda os gols a aparecerem.
-- **Recompensa** = progresso da BOLA rumo ao gol adversário + gols (de propósito
-  **não** premia toque/movimento — isso é farmável "campando" na quina do gol).
-- **SALVAR** grava o campeão da direita; **REINICIAR** recomeça do zero. Ao abrir,
-  **continua do último salvo** (sem perder trabalho). Roda a **30 FPS**.
+- **Bootstrap por imitação:** como agentes aleatórios não engajam a bola, as
+  populações nascem **seedadas** de um imitador pré-treinado (backprop) de um
+  **jogador heurístico** que ataca e defende. A co-evolução refina por cima; um
+  **currículo de gol que encolhe** (largo → 60px) ajuda os gols a aparecerem.
+- **Recompensa** = progresso da BOLA rumo ao gol adversário + gols. **Gol contra**
+  (o defensor empurra pra própria meta) leva **penalidade pesada nos dois** e
+  ninguém ganha de graça — assim quase não aparece. (De propósito **não** premia
+  toque/movimento — é farmável "campando" na quina.)
+- **SALVAR** grava os campeões (direita + esquerda); **REINICIAR** recomeça do
+  zero. Ao abrir, **continua do último salvo** (sem perder trabalho). **30 FPS**.
 - **Jogar contra:** no Haxball normal, o adversário azul é a **IA salva** (se
   houver) ou o **jogador heurístico** (forte: ataca + defende). Modelo em
   `haxball_ai.json` (gitignored).

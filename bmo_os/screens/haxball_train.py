@@ -35,15 +35,16 @@ from ..services.haxball_ai import (
 W, H = LOGICAL_SIZE
 
 # ---------- GA / layout ----------
-COLS, ROWS = 3, 3
-POP = COLS * ROWS          # 9 por lado (todas as quadras visíveis)
+COLS, ROWS = 3, 4
+POP = COLS * ROWS          # 12 por lado (todas as quadras visíveis)
 MATCH_TIME = 7.0           # segundos de simulação por geração
 SUBSTEPS = 2               # passos de física por frame (treina ~2x mais rápido)
 ELITE = 2
-GAP = 4
-CW = (270 - 2 * GAP) // COLS
-CH = (212 - 2 * GAP) // ROWS
-PANEL = pygame.Rect(278, 18, 118, 212)
+GAP = 3
+COURT_X0, COURT_Y0 = 2, 17
+CW = (300 - 2 * GAP) // COLS              # ~98
+CH = int(CW * FIELD_H / FIELD_W)          # ~52 — MESMA proporção do campo/BMO (paisagem)
+PANEL = pygame.Rect(302, 17, 96, 240 - 17 - 4)
 
 # ---------- paleta ----------
 BG = (10, 12, 16)
@@ -95,20 +96,27 @@ class HaxballTrainScreen:
         self._init_population(from_saved=True)
 
     def _init_population(self, from_saved: bool) -> None:
-        base = None
+        base_r = base_l = None
         if from_saved:
             saved, meta = hai.load_brain()
             if saved is not None:
-                base = saved
+                base_r = saved
                 self._loaded_from = "salvo (gen %s)" % (meta.get("generation", "?") if meta else "?")
-        if base is None:
-            base = _get_imitator()
+                if meta and meta.get("brain_l"):
+                    try:
+                        base_l = hai.Brain.from_dict(meta["brain_l"])
+                    except Exception:
+                        base_l = None
+        if base_r is None:
+            base_r = _get_imitator()
             self._loaded_from = "imitador"
-        self.pop_l = _seed_pop(base)
-        self.pop_r = _seed_pop(base)
+        if base_l is None:
+            base_l = base_r                # frame canônico: o da direita serve pros 2 lados
+        self.pop_l = _seed_pop(base_l)
+        self.pop_r = _seed_pop(base_r)
         # campeões SEPARADOS por lado — divergem (assimetria) pra sair gol
-        self.champion_l = base.copy()
-        self.champion_r = base.copy()      # é o que o SALVAR grava (adversário)
+        self.champion_l = base_l.copy()
+        self.champion_r = base_r.copy()    # é o que o SALVAR grava (adversário)
         self.gen = 1
         self.total_goals = 0               # gols acumulados (fase de mutação + currículo)
         self.best_fit = 0.0
@@ -134,6 +142,7 @@ class HaxballTrainScreen:
                 "pda": _ball_goal_dist(w, "a"), "pdb": _ball_goal_dist(w, "b"),
             })
         self._t_gen = 0.0
+        self._own_goals = 0    # gols contra nesta geração (deve ficar ~0 c/ a penalidade)
 
     def _end_generation(self) -> None:
         fit_l = [0.0] * POP
@@ -197,7 +206,7 @@ class HaxballTrainScreen:
         elif key == "salvar":
             audio.play("select")
             wr = self.right_wins / POP
-            if hai.save_brain(self.champion_r, self.gen, wr):
+            if hai.save_brain(self.champion_r, self.gen, wr, brain_l=self.champion_l):
                 self._toast("Campeao salvo! (jogar contra)")
             else:
                 self._toast("Falha ao salvar")
@@ -229,11 +238,18 @@ class HaxballTrainScreen:
             c["fa"] += (c["pda"] - da) * 0.04
             c["fb"] += (c["pdb"] - db) * 0.04
             c["pda"], c["pdb"] = da, db
-            if goal == "A":
-                c["fa"] += 20.0; c["fb"] -= 10.0; w.kickoff()
-                c["pda"], c["pdb"] = _ball_goal_dist(w, "a"), _ball_goal_dist(w, "b")
-            elif goal == "B":
-                c["fb"] += 20.0; c["fa"] -= 10.0; w.kickoff()
+            if goal:
+                # GOL CONTRA = quem fez gol não foi quem encostou por último na
+                # direção certa: o defensor empurrou pra PRÓPRIA meta. Pune os
+                # DOIS pesado (e ninguém ganha de graça) — assim quase não aparece.
+                scorer = "a" if goal == "A" else "b"
+                if w.last_touch == scorer:
+                    c["fa" if scorer == "a" else "fb"] += 20.0   # gol legítimo
+                    c["fb" if scorer == "a" else "fa"] -= 8.0    # o outro sofreu
+                else:
+                    c["fa"] -= 15.0; c["fb"] -= 15.0             # gol contra: pune os 2
+                    self._own_goals += 1
+                w.kickoff()
                 c["pda"], c["pdb"] = _ball_goal_dist(w, "a"), _ball_goal_dist(w, "b")
 
     # ---------- layout ----------
@@ -247,7 +263,7 @@ class HaxballTrainScreen:
 
     def _cell(self, i: int) -> pygame.Rect:
         r, c = i // COLS, i % COLS
-        return pygame.Rect(4 + c * (CW + GAP), 18 + r * (CH + GAP), CW, CH)
+        return pygame.Rect(COURT_X0 + c * (CW + GAP), COURT_Y0 + r * (CH + GAP), CW, CH)
 
     # ---------- draw ----------
 
@@ -278,6 +294,10 @@ class HaxballTrainScreen:
         self._dot(surface, cell, w.b, BLUEC, 2)
         self._dot(surface, cell, w.a, REDC, 2)
         self._dot(surface, cell, w.ball, BALLC, 1)
+        # placar nas bordas: esquerda (vermelho) e direita (azul)
+        surface.blit(render_text(str(w.score_a), 7, REDC, pixel=False), (cell.x + 2, cell.y))
+        sb = render_text(str(w.score_b), 7, BLUEC, pixel=False)
+        surface.blit(sb, sb.get_rect(topright=(cell.right - 2, cell.y)))
 
     @staticmethod
     def _dot(surface, cell, d, color, r) -> None:
@@ -316,8 +336,8 @@ class HaxballTrainScreen:
         lines = [
             ("REDE DO MELHOR (dir)", DIM),
             ("seed: %s" % self._loaded_from, DIM),
-            ("gols total: %d  gol %dpx" % (self.total_goals, self._goal_h()), WHITE),
-            ("vit. direita: %d/%d" % (self.right_wins, POP), BLUEC),
+            ("gols %d  contra %d" % (self.total_goals, self._own_goals), WHITE),
+            ("vit.dir %d/%d  gol %dpx" % (self.right_wins, POP, self._goal_h()), BLUEC),
             ("melhor fit: %.0f" % self.best_fit, WHITE),
         ]
         # a 1a linha é título da rede (desenha acima do gráfico); resto aqui

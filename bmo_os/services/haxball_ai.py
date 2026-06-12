@@ -33,6 +33,7 @@ CX, CY = FIELD_L + FIELD_W // 2, FIELD_T + FIELD_H // 2   # 200, 126
 GOAL_H = 60
 GOAL_TOP = CY - GOAL_H // 2          # 96
 GOAL_BOT = CY + GOAL_H // 2          # 156
+_MAXD = math.hypot(FIELD_W, FIELD_H)  # diagonal do campo (normaliza distâncias)
 
 BALL_R, BALL_MASS, BALL_FRIC, BALL_MAXV = 4.0, 1.0, 0.4, 420.0
 PLR_R, PLR_MASS, PLR_FRIC, PLR_MAXV = 9.0, 4.0, 5.0, 122.0
@@ -79,6 +80,18 @@ class HaxWorld:
         self.touch_a = False
         self.touch_b = False
 
+    def random_reset(self, rng) -> None:
+        """Saque ALEATÓRIO (só pro TREINO): bola e jogadores em posições/velocidades
+        variadas (cada um mais no seu lado). Cria chances de gol e faz o agente
+        generalizar — em vez de sempre o mesmo saque do centro (que empata)."""
+        u = rng.uniform
+        self.ball.x, self.ball.y = u(FIELD_L + 20, FIELD_R - 20), u(FIELD_T + 14, FIELD_B - 14)
+        self.ball.vx, self.ball.vy = u(-150, 150), u(-150, 150)
+        self.a.x, self.a.y = u(FIELD_L + 14, CX), u(FIELD_T + 14, FIELD_B - 14)
+        self.b.x, self.b.y = u(CX, FIELD_R - 14), u(FIELD_T + 14, FIELD_B - 14)
+        self.a.vx = self.a.vy = self.b.vx = self.b.vy = 0.0
+        self.touch_a = self.touch_b = False
+
     def step(self, dt, ax_a, ay_a, ax_b, ay_b,
              a_accel=PLR_ACCEL, a_maxv=PLR_MAXV,
              b_accel=BOT_ACCEL, b_maxv=BOT_MAXV):
@@ -103,26 +116,40 @@ class HaxWorld:
     # ---------- observação (entradas da rede) ----------
 
     def observe(self, side):
-        """Entradas no FRAME CANÔNICO: o lado direito ('b') é espelhado no eixo X
-        pra que TODO agente "ataque pra +x" na sua própria visão. Assim a rede
-        aprende uma única política (simétrica) — metade da dificuldade. A ação de
-        saída é des-espelhada por brain_action() pro lado 'b'."""
+        """Entradas POLARES no FRAME CANÔNICO (o lado 'b' é espelhado no X pra todo
+        agente "atacar pra +x"; a saída é des-espelhada por brain_action). Pra cada
+        coisa relevante: distância + DIREÇÃO (cos, sin) — casa com a ação (mover
+        numa direção) e dá consciência explícita do GOL. 18 features:
+          bola: polar(3) + velocidade(2); oponente: polar(3) + velocidade(2);
+          gol adversário: polar(3); próprio gol: polar(3); minha velocidade(2)."""
         me = self.b if side == "b" else self.a
         opp = self.a if side == "b" else self.b
         ball = self.ball
         mir = side == "b"
         mx = (lambda x: FIELD_L + FIELD_R - x) if mir else (lambda x: x)
-        mvx = (lambda v: -v) if mir else (lambda v: v)
-        mex, bx, ox = mx(me.x), mx(ball.x), mx(opp.x)
+        mv = (lambda v: -v) if mir else (lambda v: v)
+        mex, mey = mx(me.x), me.y
+        c = _clamp
+
+        def pol(tx, ty):
+            dx, dy = tx - mex, ty - mey
+            d = math.hypot(dx, dy)
+            if d < 1e-6:
+                return (0.0, 1.0, 0.0)
+            return (c(d / _MAXD, 0.0, 1.0), dx / d, dy / d)   # dist, cos, sin
+
+        bp = pol(mx(ball.x), ball.y)
+        op = pol(mx(opp.x), opp.y)
+        eg = pol(FIELD_R, CY)        # gol adversário (canônico = lado +x)
+        og = pol(FIELD_L, CY)        # próprio gol (canônico = lado -x)
         return [
-            (mex - FIELD_L) / FIELD_W,
-            (me.y - FIELD_T) / FIELD_H,
-            _clamp((bx - mex) / FIELD_W, -1.0, 1.0),
-            _clamp((ball.y - me.y) / FIELD_H, -1.0, 1.0),
-            _clamp(mvx(ball.vx) / BALL_MAXV, -1.0, 1.0),
-            _clamp(ball.vy / BALL_MAXV, -1.0, 1.0),
-            _clamp((ox - mex) / FIELD_W, -1.0, 1.0),
-            _clamp((opp.y - me.y) / FIELD_H, -1.0, 1.0),
+            bp[0], bp[1], bp[2],
+            c(mv(ball.vx) / BALL_MAXV, -1.0, 1.0), c(ball.vy / BALL_MAXV, -1.0, 1.0),
+            op[0], op[1], op[2],
+            c(mv(opp.vx) / PLR_MAXV, -1.0, 1.0), c(opp.vy / PLR_MAXV, -1.0, 1.0),
+            eg[0], eg[1], eg[2],
+            og[0], og[1], og[2],
+            c(mv(me.vx) / PLR_MAXV, -1.0, 1.0), c(me.vy / PLR_MAXV, -1.0, 1.0),
         ]
 
     # ---------- helpers de física ----------
@@ -222,9 +249,9 @@ def bot_action(world: HaxWorld, side: str):
 
 # ========================= rede neural =========================
 
-N_IN = 8               # frame canônico (sem side_sign; o espelho cuida do lado)
+N_IN = 18              # polar + gols + velocidades (frame canônico)
 N_OUT = 2
-HIDDEN = [10]          # 1 camada oculta: evolui rápido e satura menos
+HIDDEN = [20, 12]      # 2 camadas ocultas: capacidade pra aprender bastante
 
 
 class Brain:
@@ -372,6 +399,9 @@ def _random_state(rng):
     w.ball.vx, w.ball.vy = fr(-220, 220), fr(-220, 220)
     w.a.x, w.a.y = fr(FIELD_L + 10, FIELD_R - 10), fr(FIELD_T + 10, FIELD_B - 10)
     w.b.x, w.b.y = fr(FIELD_L + 10, FIELD_R - 10), fr(FIELD_T + 10, FIELD_B - 10)
+    # velocidades aleatórias também (pra exercitar os inputs de velocidade)
+    w.a.vx, w.a.vy = fr(-PLR_MAXV, PLR_MAXV), fr(-PLR_MAXV, PLR_MAXV)
+    w.b.vx, w.b.vy = fr(-PLR_MAXV, PLR_MAXV), fr(-PLR_MAXV, PLR_MAXV)
     return w
 
 
@@ -388,11 +418,11 @@ def _gen_dataset(rng, n):
     return X, Y
 
 
-def pretrain_imitator(epochs=600, batch=256, lr=0.08, momentum=0.9, seed=0):
+def pretrain_imitator(epochs=900, batch=256, lr=0.08, momentum=0.9, seed=0):
     """Treina (backprop + momentum) um Brain pra imitar heuristic_action. Um
     dataset fixo grande + minibatches; devolve o Brain imitador."""
     rng = np.random.RandomState(seed)
-    Xall, Yall = _gen_dataset(rng, 6000)
+    Xall, Yall = _gen_dataset(rng, 8000)
     brain = Brain()
     vW = [np.zeros_like(w) for w in brain.weights]
     vB = [np.zeros_like(b) for b in brain.biases]
@@ -424,10 +454,14 @@ def save_path():
     return config.REPO_ROOT / "haxball_ai.json"
 
 
-def save_brain(brain: Brain, generation=0, winrate=0.0) -> bool:
+def save_brain(brain: Brain, generation=0, winrate=0.0, brain_l=None) -> bool:
+    """Grava o campeão DIREITA ('brain' — o adversário do jogo). Opcionalmente
+    grava o campeão ESQUERDA ('brain_l') pra o treino continuar os DOIS lados."""
     try:
         data = {"brain": brain.to_dict(), "generation": generation,
                 "winrate": round(float(winrate), 3)}
+        if brain_l is not None:
+            data["brain_l"] = brain_l.to_dict()
         save_path().write_text(json.dumps(data), encoding="utf-8")
         return True
     except Exception:
@@ -437,6 +471,9 @@ def save_brain(brain: Brain, generation=0, winrate=0.0) -> bool:
 def load_brain():
     try:
         d = json.loads(save_path().read_text(encoding="utf-8"))
-        return Brain.from_dict(d["brain"]), d
+        brain = Brain.from_dict(d["brain"])
+        if brain.sizes[0] != N_IN or brain.sizes[-1] != N_OUT:
+            return None, None      # arquitetura mudou -> ignora (recomeça limpo)
+        return brain, d
     except Exception:
         return None, None
