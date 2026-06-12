@@ -111,9 +111,9 @@ class HaxballScreen:
             self.state = "playing"
         if self.state != "playing":
             return
-        ax_a, ay_a = self._player_input()
-        ax_b, ay_b = self._opp_input()
-        goal = self.world.step(dt, ax_a, ay_a, ax_b, ay_b,
+        ax_a, ay_a, kick_a = self._player_input()
+        ax_b, ay_b, kick_b = self._opp_input()
+        goal = self.world.step(dt, ax_a, ay_a, ax_b, ay_b, kick_a, kick_b,
                                b_accel=self._b_accel, b_maxv=self._b_maxv)
         if goal == "A":
             self.world.score_a += 1; self._on_goal("VERMELHO")
@@ -149,21 +149,22 @@ class HaxballScreen:
             self._resume_at = self._t + 1.3
 
     def _player_input(self):
-        # teclado (dev): setas movem o disco vermelho
+        # devolve (ax, ay, chute). Enquanto você controla (arrasta/teclas), o
+        # chute fica ligado: encostar na bola pelo lado de ataque já finaliza.
         keys = pygame.key.get_pressed()
         kx = keys[pygame.K_RIGHT] - keys[pygame.K_LEFT]
         ky = keys[pygame.K_DOWN] - keys[pygame.K_UP]
         if kx or ky:
             n = math.hypot(kx, ky) or 1.0
-            return kx / n, ky / n
-        # toque: acelera na direção do dedo
+            return kx / n, ky / n, True
         if self._dragging and self._target is not None:
             a = self.world.a
             dx = self._target[0] - a.x; dy = self._target[1] - a.y
             d = math.hypot(dx, dy)
             if d > 3:
-                return dx / d, dy / d
-        return 0.0, 0.0
+                return dx / d, dy / d, True
+            return 0.0, 0.0, True
+        return 0.0, 0.0, False
 
     def _opp_input(self):
         # adversário azul: a IA treinada (se houver) ou o jogador heurístico

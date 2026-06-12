@@ -99,7 +99,7 @@ class HaxWorld:
         self.a.vx = self.a.vy = self.b.vx = self.b.vy = 0.0
         self.touch_a = self.touch_b = False
 
-    def step(self, dt, ax_a, ay_a, ax_b, ay_b,
+    def step(self, dt, ax_a, ay_a, ax_b, ay_b, kick_a=False, kick_b=False,
              a_accel=PLR_ACCEL, a_maxv=PLR_MAXV,
              b_accel=BOT_ACCEL, b_maxv=BOT_MAXV):
         self.touch_a = False
@@ -118,17 +118,20 @@ class HaxWorld:
         if self._collide(self.b, self.ball):
             self.touch_b = True; self.last_touch = "b"; self.t_touch_b = self.t
         self._collide(self.a, self.b)
-        self._auto_kick(self.a, "a")          # chute automático (só pro lado de ataque)
-        self._auto_kick(self.b, "b")
+        self._try_kick(self.a, "a", kick_a)   # chuta SE a rede/jogador pediu
+        self._try_kick(self.b, "b", kick_b)
         self._clamp_speed(self.ball, BALL_MAXV)
         self._walls(self.a, ball=False)
         self._walls(self.b, ball=False)
         self.t += dt
         return self._walls(self.ball, ball=True)
 
-    def _auto_kick(self, player, side):
-        """Chuta a bola (impulso forte) quando o disco está perto E do lado de
-        ATAQUE dela — assim o chute vai pro gol adversário, nunca pro próprio."""
+    def _try_kick(self, player, side, want):
+        """Chuta a bola (impulso forte) se `want` (3ª saída da rede / jogador) E o
+        disco está perto E do lado de ATAQUE dela — assim o chute vai pro gol
+        adversário, nunca pro próprio."""
+        if not want:
+            return
         cd = self.kick_cd_a if side == "a" else self.kick_cd_b
         if cd > 0:
             return
@@ -275,15 +278,16 @@ def bot_action(world: HaxWorld, side: str):
     ty = _clamp(ty, FIELD_T + PLR_R, FIELD_B - PLR_R)
     dx, dy = tx - me.x, ty - me.y
     d = math.hypot(dx, dy)
+    kick = math.hypot(ball.x - me.x, ball.y - me.y) < (KICK_RANGE + 2)
     if d > 2:
-        return dx / d, dy / d
-    return 0.0, 0.0
+        return dx / d, dy / d, kick
+    return 0.0, 0.0, kick
 
 
 # ========================= rede neural =========================
 
 N_IN = 18              # polar + gols + velocidades (frame canônico)
-N_OUT = 2
+N_OUT = 3              # ax, ay, CHUTE (3ª saída: a rede decide quando chutar)
 HIDDEN = [20, 12]      # 2 camadas ocultas: capacidade pra aprender bastante
 
 
@@ -309,7 +313,7 @@ class Brain:
         for W, b in zip(self.weights, self.biases):
             a = np.tanh(a @ W + b)
             self.last.append(a[0])
-        return float(a[0, 0]), float(a[0, 1])
+        return a[0]                  # vetor de N_OUT saídas (ax, ay, chute)
 
     def mutate(self, rate, scale):
         for i in range(len(self.weights)):
@@ -340,12 +344,13 @@ class Brain:
 
 
 def brain_action(brain: Brain, world: HaxWorld, side: str):
-    """Ação real (ax, ay) de um cérebro pra um lado. A rede pensa no frame
-    canônico (ataca +x); pro lado 'b' des-espelha o eixo X da saída."""
-    ax, ay = brain.forward(world.observe(side))
+    """Ação real (ax, ay, kick) de um cérebro pra um lado. A rede pensa no frame
+    canônico (ataca +x); pro lado 'b' des-espelha o eixo X. A 3ª saída > 0 = chuta."""
+    out = brain.forward(world.observe(side))
+    ax, ay, kick = float(out[0]), float(out[1]), float(out[2])
     if side == "b":
         ax = -ax
-    return ax, ay
+    return ax, ay, kick > 0.0
 
 
 def crossover(a: Brain, b: Brain) -> Brain:
@@ -423,8 +428,12 @@ def heuristic_action(world, side):
         gx = own_goal[0] * 0.5 + ball.x * 0.5
         gy = own_goal[1] * 0.35 + ball.y * 0.65
         ax, ay = gx - me.x, gy - me.y
+    # CHUTE: perto da bola E do lado de ataque (o impulso vai pro gol adversário)
+    dball = math.hypot(ball.x - me.x, ball.y - me.y)
+    attack_x = 1.0 if side == "a" else -1.0
+    kick = dball < (KICK_RANGE + 2) and (ball.x - me.x) * attack_x > 0
     n = math.hypot(ax, ay) or 1.0
-    return ax / n, ay / n
+    return ax / n, ay / n, kick
 
 
 def _random_state(rng):
@@ -447,10 +456,10 @@ def _gen_dataset(rng, n):
         w = _random_state(rng)
         side = "b" if rng.rand() < 0.5 else "a"
         X[k] = w.observe(side)
-        tx, ty = heuristic_action(w, side)
+        tx, ty, kick = heuristic_action(w, side)
         if side == "b":   # canoniza o alvo (a rede pensa no frame +x)
             tx = -tx
-        Y[k] = (tx, ty)
+        Y[k] = (tx, ty, 1.0 if kick else -1.0)   # 3ª saída: chutar (+1) ou não (-1)
     return X, Y
 
 

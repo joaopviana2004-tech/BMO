@@ -505,7 +505,8 @@ cada uma com um agente ESQUERDA contra um DIREITA + o **placar nas bordas**.
   → distância + direção (cos, sin); + velocidade da bola, do oponente e a minha.
   Polar "casa" com a ação (mover numa direção) e dá consciência explícita do gol.
   (Raycasts foram descartados: o ambiente é simples/totalmente observável, então
-  raios só repetiriam info e atrasariam o aprendizado.) Rede `18→20→12→2` (tanh).
+  raios só repetiriam info e atrasariam o aprendizado.) Rede `18→20→12→3` (tanh):
+  saídas = ax, ay e **chutar** (3ª saída — a rede decide quando finalizar).
 - **Frame canônico:** o lado direito é espelhado no X, então a rede aprende UMA
   política simétrica (serve pros dois lados) — metade da dificuldade.
 - **Bootstrap por imitação:** como agentes aleatórios não engajam a bola, as
@@ -518,9 +519,11 @@ cada uma com um agente ESQUERDA contra um DIREITA + o **placar nas bordas**.
   toque/movimento — é farmável "campando" na quina.)
 - **SALVAR** grava os campeões (direita + esquerda); **REINICIAR** recomeça do
   zero. Ao abrir, **continua do último salvo** (sem perder trabalho). **30 FPS**.
-- **Chute:** encostar na bola estando do lado de ataque dá um **impulso forte**
-  (auto-chute, com cooldown) — é assim que se finaliza e fura o goleiro. Vale no
-  treino E no jogo; o lado de ataque é checado pra nunca chutar pro próprio gol.
+- **Chute (3ª saída):** a rede DECIDE quando chutar (a 3ª saída > 0). Quando o
+  agente quer chutar e o disco está perto da bola pelo lado de ataque, sai um
+  **impulso forte** (cooldown) — é assim que se finaliza e fura o goleiro. O lado
+  de ataque é checado pra nunca chutar pro próprio gol. No jogo, você chuta
+  encostando na bola enquanto controla.
 - **SALVAR** grava os campeões (direita + esquerda); **REINICIAR** recomeça do
   zero. Ao abrir, **continua do último salvo** (sem perder trabalho). **30 FPS**.
 - **Jogar contra:** no Haxball normal, o adversário azul é a **IA salva** (se

@@ -209,10 +209,10 @@ class HaxballTrainScreen:
     def _step_courts(self, dt: float) -> None:
         for c in self.courts:
             w = c["w"]
-            al = hai.heuristic_action(w, "a")                  # esquerda = heurístico (sparring)
-            ar = hai.brain_action(self.pop[c["ri"]], w, "b")   # direita = IA (força total)
+            al = hai.heuristic_action(w, "a")                  # esquerda = heurístico (ax,ay,chute)
+            ar = hai.brain_action(self.pop[c["ri"]], w, "b")   # direita = IA (ax,ay,chute)
             # heurístico mais LENTO (60%): dá pra IA furar a defesa e marcar -> aprender
-            goal = w.step(dt, al[0], al[1], ar[0], ar[1],
+            goal = w.step(dt, al[0], al[1], ar[0], ar[1], al[2], ar[2],
                           a_accel=PLR_ACCEL * 0.6, a_maxv=PLR_MAXV * 0.6,
                           b_accel=PLR_ACCEL, b_maxv=PLR_MAXV)
             db = _ball_left_goal(w)
