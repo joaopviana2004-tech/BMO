@@ -1,19 +1,20 @@
-"""Treino de IA do Haxball — co-evolução em tempo real (você assiste).
+"""Treino de IA do Haxball — em tempo real (você assiste).
 
-Grid 3x3 de mini-quadras: em cada uma um agente ESQUERDA joga contra um DIREITA
-(redes neurais). A quadra fica VERDE quando o lado DIREITO está ganhando e
-VERMELHA quando o ESQUERDO ganha. Painel à direita: a rede neural do melhor
-agente da direita + estatísticas (geração, gols, vitórias, melhor fitness).
+Grid 3×4 de 12 mini-quadras NA PROPORÇÃO DO CAMPO (paisagem, igual ao jogo): em
+cada uma um agente DIREITA (rede neural, azul) enfrenta o jogador HEURÍSTICO
+(vermelho, sparring forte). A quadra fica VERDE quando o lado direito (a IA que
+você treina) está ganhando e VERMELHA quando o heurístico ganha. O placar aparece
+GIGANTE e translúcido atrás dos jogadores. Painel à direita: os NÓS da rede do
+melhor agente (ao vivo) + estatísticas + gráfico de vitórias.
 
-Bootstrap: as populações nascem SEEDADAS — do último campeão SALVO (continua o
-treino de onde parou) ou, se não houver, de um imitador pré-treinado de um
-jogador heurístico (assim os agentes já engajam a bola desde o início, em vez de
-ficar parados). A co-evolução refina por cima; o melhor da DIREITA é o que o
-SALVAR grava pra você "jogar contra" no Haxball normal.
+Treino vs-HEURÍSTICO (em vez de self-play): o oponente é FIXO e forte, então o
+fitness é ABSOLUTO (quanto a IA bate o heurístico) — não regride como a
+co-evolução. As redes nascem seedadas de um imitador do heurístico; um currículo
+de gol que encolhe (largo → 60px) faz os gols aparecerem. O melhor da direita é
+salvo pra você "jogar contra".
 
-Recompensa: progresso da BOLA rumo ao gol adversário + gols (sem premiar toque
-ou andar — isso é farmável ficando na quina, como o repo de referência sofria).
-Roda a 30 FPS com 2 passos de física por frame pra não esquentar a Pi.
+Recompensa = progresso da bola ao gol + gols; GOL CONTRA pune pesado (e ninguém
+ganha de graça). Roda a 30 FPS com 2 passos de física por frame.
 """
 from __future__ import annotations
 
@@ -28,36 +29,34 @@ from ..core.theme import LOGICAL_SIZE, render_text
 from ..services import audio
 from ..services import haxball_ai as hai
 from ..services.haxball_ai import (
-    FIELD_L, FIELD_T, FIELD_W, FIELD_H, FIELD_R, FIELD_B, CX, CY,
-    GOAL_TOP, GOAL_BOT, PLR_ACCEL, PLR_MAXV,
+    FIELD_L, FIELD_T, FIELD_W, FIELD_H, CX, CY, PLR_ACCEL, PLR_MAXV,
 )
 
 W, H = LOGICAL_SIZE
 
 # ---------- GA / layout ----------
 COLS, ROWS = 3, 4
-POP = COLS * ROWS          # 12 por lado (todas as quadras visíveis)
-MATCH_TIME = 7.0           # segundos de simulação por geração
+POP = COLS * ROWS          # 12 redes (direita), todas visíveis
+MATCH_TIME = 12.0          # segundos de simulação por geração (partidas mais longas)
 SUBSTEPS = 2               # passos de física por frame (treina ~2x mais rápido)
 ELITE = 2
 GAP = 3
 COURT_X0, COURT_Y0 = 2, 17
 CW = (300 - 2 * GAP) // COLS              # ~98
-CH = int(CW * FIELD_H / FIELD_W)          # ~52 — MESMA proporção do campo/BMO (paisagem)
+CH = int(CW * FIELD_H / FIELD_W)          # ~52 — MESMA proporção do campo (paisagem)
 PANEL = pygame.Rect(302, 17, 96, 240 - 17 - 4)
 
 # ---------- paleta ----------
 BG = (10, 12, 16)
-GREEN_T = (18, 52, 28)     # direita ganhando
-RED_T = (54, 22, 22)       # esquerda ganhando
+GREEN_T = (18, 52, 28)     # direita (IA) ganhando
+RED_T = (54, 22, 22)       # heurístico ganhando
 LINE = (70, 90, 76)
 WHITE = (238, 238, 238)
 DIM = (120, 128, 138)
-REDC = (232, 84, 72)
-BLUEC = (92, 152, 240)
+REDC = (232, 84, 72)       # heurístico (esquerda)
+BLUEC = (92, 152, 240)     # IA (direita)
 BALLC = (245, 245, 245)
 
-# imitador pré-treinado uma vez por sessão (semente padrão)
 _IMITATOR = None
 
 
@@ -72,14 +71,14 @@ def _seed_pop(base):
     pop = [base.copy()]
     for _ in range(POP - 1):
         b = base.copy()
-        b.mutate(0.25, 0.25)     # diversidade (mantém 1 cópia exata)
+        b.mutate(0.25, 0.25)
         pop.append(b)
     return pop
 
 
-def _ball_goal_dist(world, side):
-    gx = FIELD_L if side == "b" else FIELD_R
-    return math.hypot(world.ball.x - gx, world.ball.y - CY)
+def _ball_left_goal(world):
+    """Distância da bola ao gol ESQUERDO (onde a IA da direita ataca)."""
+    return math.hypot(world.ball.x - FIELD_L, world.ball.y - CY)
 
 
 class HaxballTrainScreen:
@@ -96,80 +95,61 @@ class HaxballTrainScreen:
         self._init_population(from_saved=True)
 
     def _init_population(self, from_saved: bool) -> None:
-        base_r = base_l = None
+        base = None
         if from_saved:
             saved, meta = hai.load_brain()
             if saved is not None:
-                base_r = saved
+                base = saved
                 self._loaded_from = "salvo (gen %s)" % (meta.get("generation", "?") if meta else "?")
-                if meta and meta.get("brain_l"):
-                    try:
-                        base_l = hai.Brain.from_dict(meta["brain_l"])
-                    except Exception:
-                        base_l = None
-        if base_r is None:
-            base_r = _get_imitator()
+        if base is None:
+            base = _get_imitator()
             self._loaded_from = "imitador"
-        if base_l is None:
-            base_l = base_r                # frame canônico: o da direita serve pros 2 lados
-        self.pop_l = _seed_pop(base_l)
-        self.pop_r = _seed_pop(base_r)
-        # campeões SEPARADOS por lado — divergem (assimetria) pra sair gol
-        self.champion_l = base_l.copy()
-        self.champion_r = base_r.copy()    # é o que o SALVAR grava (adversário)
+        self.pop = _seed_pop(base)           # população da DIREITA (a IA)
+        self.champion = base.copy()          # melhor da direita (o SALVAR grava)
         self.gen = 1
-        self.total_goals = 0               # gols acumulados (fase de mutação + currículo)
+        self.total_goals = 0                 # gols da IA (drives o currículo + fase)
+        self.conceded = 0                    # gols do heurístico
+        self.own_goals = 0
         self.best_fit = 0.0
-        self.right_wins = 0                # quadras da última ger. com direita na frente
-        self.history = []                  # % de vitórias da direita por geração
+        self.right_wins = 0                  # quadras com a IA na frente (última ger.)
+        self.history = []                    # % de vitórias da IA por geração
         self._new_generation()
 
     def _goal_h(self) -> int:
-        # currículo: gol largo no começo (gols acontecem) -> estreita até 60 real
-        return max(60, 140 - self.total_goals // 2)
+        # gol levemente mais largo que o real (menos flukes de gol-contra que o 130)
+        return max(60, 84 - self.total_goals // 3)
 
     # ---------- geração ----------
 
     def _new_generation(self) -> None:
-        perm = list(range(POP))
-        random.shuffle(perm)
-        self.courts = []
         gh = self._goal_h()
+        self.courts = []
         for i in range(POP):
             w = hai.HaxWorld(goal_h=gh)
-            self.courts.append({
-                "w": w, "li": i, "ri": perm[i], "fa": 0.0, "fb": 0.0,
-                "pda": _ball_goal_dist(w, "a"), "pdb": _ball_goal_dist(w, "b"),
-            })
+            self.courts.append({"w": w, "ri": i, "fb": 0.0, "pdb": _ball_left_goal(w)})
         self._t_gen = 0.0
-        self._own_goals = 0    # gols contra nesta geração (deve ficar ~0 c/ a penalidade)
+        self._gen_own = 0
 
     def _end_generation(self) -> None:
-        fit_l = [0.0] * POP
-        fit_r = [0.0] * POP
-        goals = 0
-        wins = 0
+        fits = [0.0] * POP
+        goals = conc = wins = 0
         for c in self.courts:
-            fit_l[c["li"]] += c["fa"]
-            fit_r[c["ri"]] += c["fb"]
-            goals += c["w"].score_a + c["w"].score_b
+            fits[c["ri"]] += c["fb"]
+            goals += c["w"].score_b
+            conc += c["w"].score_a
             if c["w"].score_b > c["w"].score_a:
                 wins += 1
         self.total_goals += goals
+        self.conceded += conc
+        self.own_goals += self._gen_own
         self.right_wins = wins
-        self.best_fit = max(fit_r) if fit_r else 0.0
-        self.history.append(wins / POP)
+        self.best_fit = max(fits) if fits else 0.0
+        self.history.append(self.best_fit)     # curva de fitness (controle de bola) por geração
         self.history = self.history[-120:]
-        # campeões SEPARADOS (o melhor de cada lado nesta geração)
-        self.champion_l = self.pop_l[max(range(POP), key=lambda i: fit_l[i])].copy()
-        self.champion_r = self.pop_r[max(range(POP), key=lambda i: fit_r[i])].copy()
-        # evolui (mutação adaptativa por fase, igual ideia do repo)
+        self.champion = self.pop[max(range(POP), key=lambda i: fits[i])].copy()
         rate, scale = hai.phase_params(self.total_goals)
-        self.pop_l, _ = hai.evolve(self.pop_l, fit_l, ELITE, rate, scale, 0.25)
-        self.pop_r, _ = hai.evolve(self.pop_r, fit_r, ELITE, rate, scale, 0.25)
-        # injeta cada campeão na SUA pop (deixa os lados divergirem -> assimetria)
-        self.pop_l[ELITE] = self.champion_l.copy()
-        self.pop_r[ELITE] = self.champion_r.copy()
+        self.pop, _ = hai.evolve(self.pop, fits, ELITE, rate, scale, 0.25)
+        self.pop[ELITE] = self.champion.copy()    # campeão sempre compete (anti-regressão)
         self.gen += 1
         self._new_generation()
 
@@ -206,7 +186,7 @@ class HaxballTrainScreen:
         elif key == "salvar":
             audio.play("select")
             wr = self.right_wins / POP
-            if hai.save_brain(self.champion_r, self.gen, wr, brain_l=self.champion_l):
+            if hai.save_brain(self.champion, self.gen, wr):
                 self._toast("Campeao salvo! (jogar contra)")
             else:
                 self._toast("Falha ao salvar")
@@ -229,28 +209,27 @@ class HaxballTrainScreen:
     def _step_courts(self, dt: float) -> None:
         for c in self.courts:
             w = c["w"]
-            al = hai.brain_action(self.pop_l[c["li"]], w, "a")
-            ar = hai.brain_action(self.pop_r[c["ri"]], w, "b")
+            al = hai.heuristic_action(w, "a")                  # esquerda = heurístico (sparring)
+            ar = hai.brain_action(self.pop[c["ri"]], w, "b")   # direita = IA (força total)
+            # heurístico mais LENTO (60%): dá pra IA furar a defesa e marcar -> aprender
             goal = w.step(dt, al[0], al[1], ar[0], ar[1],
+                          a_accel=PLR_ACCEL * 0.6, a_maxv=PLR_MAXV * 0.6,
                           b_accel=PLR_ACCEL, b_maxv=PLR_MAXV)
-            da, db = _ball_goal_dist(w, "a"), _ball_goal_dist(w, "b")
-            # recompensa = progresso da BOLA rumo ao gol adversário (potencial)
-            c["fa"] += (c["pda"] - da) * 0.04
-            c["fb"] += (c["pdb"] - db) * 0.04
-            c["pda"], c["pdb"] = da, db
-            if goal:
-                # GOL CONTRA = quem fez gol não foi quem encostou por último na
-                # direção certa: o defensor empurrou pra PRÓPRIA meta. Pune os
-                # DOIS pesado (e ninguém ganha de graça) — assim quase não aparece.
-                scorer = "a" if goal == "A" else "b"
-                if w.last_touch == scorer:
-                    c["fa" if scorer == "a" else "fb"] += 20.0   # gol legítimo
-                    c["fb" if scorer == "a" else "fa"] -= 8.0    # o outro sofreu
+            db = _ball_left_goal(w)
+            c["fb"] += (c["pdb"] - db) * 0.04                  # progresso da bola ao gol esq
+            c["pdb"] = db
+            if goal == "B":                # gol no gol ESQUERDO (a IA ataca aqui)
+                if (w.t - w.t_touch_b) < 0.6:   # IA tocou recente -> criou o gol (até desvio do goleiro conta)
+                    c["fb"] += 20.0
                 else:
-                    c["fa"] -= 15.0; c["fb"] -= 15.0             # gol contra: pune os 2
-                    self._own_goals += 1
-                w.kickoff()
-                c["pda"], c["pdb"] = _ball_goal_dist(w, "a"), _ball_goal_dist(w, "b")
+                    c["fb"] -= 10.0; self._gen_own += 1   # fluke do heurístico sozinho (sem brinde)
+                w.kickoff(); c["pdb"] = _ball_left_goal(w)
+            elif goal == "A":              # gol no gol DIREITO (a IA sofreu)
+                if w.t_touch_b > w.t_touch_a:   # IA tocou por ÚLTIMO -> empurrou pro PRÓPRIO gol
+                    c["fb"] -= 20.0; self._gen_own += 1   # GOL CONTRA -> penalidade pesada
+                else:
+                    c["fb"] -= 8.0         # heurístico marcou de verdade
+                w.kickoff(); c["pdb"] = _ball_left_goal(w)
 
     # ---------- layout ----------
 
@@ -275,7 +254,7 @@ class HaxballTrainScreen:
         self._draw_top(surface)
         if self._status and time.time() < self._status_until:
             img = render_text(self._status, 8, WHITE, pixel=False)
-            surface.blit(img, img.get_rect(midbottom=(140, H - 1)))
+            surface.blit(img, img.get_rect(midbottom=(150, H - 1)))
 
     def _draw_court(self, surface, cell, w) -> None:
         adv = w.score_b - w.score_a
@@ -283,21 +262,27 @@ class HaxballTrainScreen:
             adv = 1 if w.ball.x < CX else -1     # empate: quem está pressionando
         pygame.draw.rect(surface, GREEN_T if adv > 0 else RED_T, cell)
         pygame.draw.rect(surface, (40, 46, 50), cell, 1)
+        # placar GIGANTE translúcido (atrás dos jogadores)
+        self._big_score(surface, cell, str(w.score_a), REDC, cell.x + cell.w * 0.28)
+        self._big_score(surface, cell, str(w.score_b), BLUEC, cell.x + cell.w * 0.72)
+        # linha do meio + bocas do gol
         midx = cell.x + cell.w // 2
         pygame.draw.line(surface, LINE, (midx, cell.y), (midx, cell.bottom), 1)
-        # bocas do gol (segmentos claros nas laterais) — usa a boca da quadra (currículo)
         sy = cell.h / FIELD_H
         gy0 = int(cell.y + (w.goal_top - FIELD_T) * sy)
         gy1 = int(cell.y + (w.goal_bot - FIELD_T) * sy)
         pygame.draw.line(surface, WHITE, (cell.left, gy0), (cell.left, gy1), 1)
         pygame.draw.line(surface, WHITE, (cell.right - 1, gy0), (cell.right - 1, gy1), 1)
-        self._dot(surface, cell, w.b, BLUEC, 2)
+        # jogadores POR CIMA do placar
         self._dot(surface, cell, w.a, REDC, 2)
+        self._dot(surface, cell, w.b, BLUEC, 2)
         self._dot(surface, cell, w.ball, BALLC, 1)
-        # placar nas bordas: esquerda (vermelho) e direita (azul)
-        surface.blit(render_text(str(w.score_a), 7, REDC, pixel=False), (cell.x + 2, cell.y))
-        sb = render_text(str(w.score_b), 7, BLUEC, pixel=False)
-        surface.blit(sb, sb.get_rect(topright=(cell.right - 2, cell.y)))
+
+    @staticmethod
+    def _big_score(surface, cell, text, color, cx) -> None:
+        img = render_text(text, 30, color)      # número grande (fonte pixel)
+        img.set_alpha(90)                        # translúcido
+        surface.blit(img, img.get_rect(center=(int(cx), cell.centery)))
 
     @staticmethod
     def _dot(surface, cell, d, color, r) -> None:
@@ -306,87 +291,63 @@ class HaxballTrainScreen:
         pygame.draw.circle(surface, color, (px, py), r)
 
     def _draw_top(self, surface) -> None:
-        # HOME
         rect = self._back_btn()
         pygame.draw.rect(surface, BG, rect); pygame.draw.rect(surface, WHITE, rect, 1)
-        surface.blit(render_text("HOME", 7, WHITE, pixel=False),
-                     (rect.left + 4, rect.top + 3))
-        # título
+        surface.blit(render_text("HOME", 7, WHITE, pixel=False), (rect.left + 4, rect.top + 3))
         t = render_text("HAXBALL IA  GER %d" % self.gen, 8, DIM, pixel=False)
         surface.blit(t, t.get_rect(midtop=(150, 3)))
-        # botões
         for key in self._buttons:
             r = self._btn_rect(key); sel = self._buttons[self._sel] == key
             if sel:
                 pygame.draw.rect(surface, WHITE, r); fg = BG
             else:
                 pygame.draw.rect(surface, DIM, r, 1); fg = DIM
-            surface.blit(render_text(key.upper(), 7, fg, pixel=False),
-                         render_text(key.upper(), 7, fg, pixel=False).get_rect(center=r.center))
+            img = render_text(key.upper(), 7, fg, pixel=False)
+            surface.blit(img, img.get_rect(center=r.center))
 
     def _draw_panel(self, surface) -> None:
         pygame.draw.rect(surface, (6, 8, 12), PANEL)
         pygame.draw.rect(surface, (40, 46, 50), PANEL, 1)
-        # rede do campeão (metade de cima)
-        net_h = 118
+        net_h = 110
         self._draw_net(surface, pygame.Rect(PANEL.x, PANEL.y, PANEL.w, net_h))
-        # estatísticas (metade de baixo)
         x = PANEL.x + 5
         y = PANEL.y + net_h + 2
         lines = [
-            ("REDE DO MELHOR (dir)", DIM),
-            ("seed: %s" % self._loaded_from, DIM),
-            ("gols %d  contra %d" % (self.total_goals, self._own_goals), WHITE),
-            ("vit.dir %d/%d  gol %dpx" % (self.right_wins, POP, self._goal_h()), BLUEC),
-            ("melhor fit: %.0f" % self.best_fit, WHITE),
+            ("gols IA: %d" % self.total_goals, BLUEC),
+            ("sofridos: %d" % self.conceded, REDC),
+            ("gol contra: %d" % self.own_goals, DIM),
+            ("vit %d/%d  gol %dpx" % (self.right_wins, POP, self._goal_h()), WHITE),
+            ("fit %.0f" % self.best_fit, WHITE),
         ]
-        # a 1a linha é título da rede (desenha acima do gráfico); resto aqui
-        for i, (txt, col) in enumerate(lines[1:]):
-            surface.blit(render_text(txt, 7, col, pixel=False), (x, y + i * 11))
-        self._draw_winbar(surface, pygame.Rect(x, y + 48, PANEL.w - 10, 18))
+        for i, (txt, col) in enumerate(lines):
+            surface.blit(render_text(txt, 7, col, pixel=False), (x, y + i * 10))
+        self._draw_graph(surface, pygame.Rect(x, y + 54, PANEL.w - 10, 22))
 
-    def _draw_winbar(self, surface, box) -> None:
+    def _draw_graph(self, surface, box) -> None:
+        surface.blit(render_text("fitness/ger", 6, DIM, pixel=False), (box.x, box.y - 8))
         pygame.draw.rect(surface, (40, 46, 50), box, 1)
-        surface.blit(render_text("vitorias direita/ger", 6, DIM, pixel=False),
-                     (box.x, box.y - 8))
         if len(self.history) < 2:
             return
+        peak = max(max(self.history), 1.0)
         n = len(self.history)
         pts = [(box.x + 1 + int(i * (box.w - 3) / (n - 1)),
-                box.bottom - 1 - int(v * (box.h - 3))) for i, v in enumerate(self.history)]
+                box.bottom - 1 - int(max(0.0, v) / peak * (box.h - 3))) for i, v in enumerate(self.history)]
         pygame.draw.lines(surface, BLUEC, False, pts, 1)
 
     def _draw_net(self, surface, box) -> None:
-        surface.blit(render_text("REDE DO MELHOR", 7, DIM, pixel=False), (box.x + 4, box.y + 2))
-        # melhor agente DIREITA jogando AGORA (ativações frescas deste frame)
+        surface.blit(render_text("REDE (nos)", 7, DIM, pixel=False), (box.x + 4, box.y + 2))
         bc = max(self.courts, key=lambda c: c["fb"]) if self.courts else None
-        brain = self.pop_r[bc["ri"]] if bc else self.champion_r
+        brain = self.pop[bc["ri"]] if bc else self.champion
         acts = getattr(brain, "last", None)
         sizes = brain.sizes
         cols = len(sizes)
-        xs = [box.x + 14 + int(i * (box.w - 28) / (cols - 1)) for i in range(cols)]
+        xs = [box.x + 12 + int(i * (box.w - 24) / (cols - 1)) for i in range(cols)]
         top, bot = box.y + 14, box.bottom - 6
-        ys = []
+        # SÓ OS NÓS (sem arestas), brilho pela ativação
         for li, sz in enumerate(sizes):
-            if sz == 1:
-                ys.append([(top + bot) // 2])
-            else:
-                step = (bot - top) / (sz - 1)
-                ys.append([int(top + k * step) for k in range(sz)])
-        # arestas (cor pelo sinal do peso)
-        for li in range(cols - 1):
-            Wm = brain.weights[li]
-            for a in range(sizes[li]):
-                for b in range(sizes[li + 1]):
-                    wv = Wm[a][b]
-                    col = (40, 150, 70) if wv >= 0 else (160, 50, 50)
-                    pygame.draw.line(surface, col, (xs[li], ys[li][a]), (xs[li + 1], ys[li + 1][b]), 1)
-        # nós (brilho pela ativação, se houver)
-        for li in range(cols):
-            for k in range(sizes[li]):
-                act = 0.0
-                if acts is not None and li < len(acts) and k < len(acts[li]):
-                    act = float(acts[li][k])
-                m = int(60 + min(1.0, abs(act)) * 195)
+            ys = [(top + bot) // 2] if sz == 1 else [int(top + k * (bot - top) / (sz - 1)) for k in range(sz)]
+            for k, y in enumerate(ys):
+                act = float(acts[li][k]) if (acts is not None and li < len(acts) and k < len(acts[li])) else 0.0
+                m = int(55 + min(1.0, abs(act)) * 200)
                 fill = (0, m, int(m * 0.4)) if act >= 0 else (m, 0, 0)
-                pygame.draw.circle(surface, fill, (xs[li], ys[li][k]), 2)
+                pygame.draw.circle(surface, fill, (xs[li], y), 2)

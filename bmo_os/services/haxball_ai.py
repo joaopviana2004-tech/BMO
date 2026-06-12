@@ -79,6 +79,8 @@ class HaxWorld:
         self.b = Disc(FIELD_R - 48, CY, PLR_R, PLR_MASS, PLR_FRIC)
         self.touch_a = False
         self.touch_b = False
+        self.t = 0.0                      # tempo da partida
+        self.t_touch_a = self.t_touch_b = -999.0   # quando cada lado tocou a bola
 
     def random_reset(self, rng) -> None:
         """Saque ALEATÓRIO (só pro TREINO): bola e jogadores em posições/velocidades
@@ -105,12 +107,13 @@ class HaxWorld:
             d.x += d.vx * dt; d.y += d.vy * dt
         self._clamp_speed(self.ball, BALL_MAXV)
         if self._collide(self.a, self.ball):
-            self.touch_a = True; self.last_touch = "a"
+            self.touch_a = True; self.last_touch = "a"; self.t_touch_a = self.t
         if self._collide(self.b, self.ball):
-            self.touch_b = True; self.last_touch = "b"
+            self.touch_b = True; self.last_touch = "b"; self.t_touch_b = self.t
         self._collide(self.a, self.b)
         self._walls(self.a, ball=False)
         self._walls(self.b, ball=False)
+        self.t += dt
         return self._walls(self.ball, ball=True)
 
     # ---------- observação (entradas da rede) ----------
@@ -365,10 +368,13 @@ def heuristic_action(world, side):
     me = world.b if side == "b" else world.a
     opp = world.a if side == "b" else world.b
     ball = world.ball
-    if side == "b":
-        own_goal, enemy_goal = (FIELD_R, CY), (FIELD_L, CY)
-    else:
-        own_goal, enemy_goal = (FIELD_L, CY), (FIELD_R, CY)
+    egx = FIELD_L if side == "b" else FIELD_R
+    own_goal = (FIELD_R if side == "b" else FIELD_L, CY)
+    # mira no CANTO LIVRE do gol (longe do goleiro adversário) — não no centro,
+    # onde o goleiro está; é assim que se fura a defesa.
+    gtop, gbot = getattr(world, "goal_top", GOAL_TOP), getattr(world, "goal_bot", GOAL_BOT)
+    aim_y = (gbot - PLR_R) if opp.y < CY else (gtop + PLR_R)
+    enemy_goal = (egx, aim_y)
     # --- ataque (contínuo) ---
     pgx, pgy = enemy_goal[0] - ball.x, enemy_goal[1] - ball.y
     pg = math.hypot(pgx, pgy) or 1.0
