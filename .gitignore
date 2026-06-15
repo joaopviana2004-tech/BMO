@@ -201,6 +201,8 @@ flappy_ai.json
 
 # Campeão do treino de Haxball (neuroevolução) — modelo treinado local
 haxball_ai.json
+# Imitador supervisionado do heurístico (semente do treino) — cache local recomputável
+haxball_imitator.json
 
 # Tokens OAuth do Google Calendar (refresh tokens) — NUNCA commitar
 gcal_tokens.json

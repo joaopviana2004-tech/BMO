@@ -4,15 +4,24 @@ Compartilhado entre o jogo (screens/haxball.py) e a tela de TREINO
 (screens/haxball_train.py) — fonte única da física, então o cérebro treinado
 joga igualzinho quando você "joga contra" no jogo normal.
 
-Inspirado no repo do usuário (joaopviana2004-tech/Haxball_Genetic_Agent), com
-melhorias pra convergir mais rápido:
-  - 9 inputs (posição própria, bola RELATIVA + VELOCIDADE da bola, adversário
-    relativo, sinal do lado) — a velocidade da bola é o que faltava lá;
-  - âncora contra o bot scriptado (gradiente estável e rápido no começo);
-  - co-evolução com injeção do CAMPEÃO (hall-of-fame, anti-regressão);
+VISÃO POR RAYCAST: a rede NÃO recebe mais coordenadas polares prontas — ela
+"enxerga" o campo lançando 50 raios em 360° a partir do próprio jogador (igual
+aos vídeos clássicos de "IA aprende a jogar"). Cada raio reporta a PROXIMIDADE
+do primeiro obstáculo que acerta, num de 5 canais (parede, bola, oponente, gol
+adversário, próprio gol) — com OCLUSÃO real (se a bola tampa a parede, o raio só
+vê a bola). Além dos 250 valores de visão, 5 sentidos extras: velocidade própria,
+velocidade da bola e flag de "chute pronto". Tudo no frame canônico (o lado 'b' é
+espelhado no X pra todo agente atacar pra +x).
+
+Treino vs-HEURÍSTICO (oponente fixo e forte = fitness absoluto, não regride),
+seedado por um imitador supervisionado do heurístico, com:
+  - âncora/currículo: oponente que sobe de força conforme a IA domina;
+  - injeção do CAMPEÃO (hall-of-fame, anti-regressão);
   - mutação adaptativa em fases (caos -> intermediário -> refino).
 
-A física é Python puro (sem pygame aqui); a NN usa numpy (já é dependência core).
+A física e o raycast são Python+numpy (sem pygame aqui); numpy já é dependência
+core. O raycast é totalmente vetorizado (interseção analítica raio×parede/círculo)
+pra rodar leve no Raspberry Pi.
 """
 from __future__ import annotations
 
@@ -50,6 +59,68 @@ KICK_COOLDOWN = 0.35                 # segundos entre chutes
 
 def _clamp(v, lo, hi):
     return lo if v < lo else hi if v > hi else v
+
+
+# ========================= visão por raycast =========================
+# A "visão" do agente: 50 raios em 360° do jogador; cada um devolve a proximidade
+# do 1º obstáculo num de 5 canais (oclusão real). Vetorizado pra rodar leve no Pi.
+N_RAYS = 50
+RAY_CH = 5
+# RAIO DE VISÃO (>raio físico): a bola é pequena (r=4) e escaparia ENTRE dois raios
+# já a ~75px (50 raios = 7.2°/raio). Engorda o alvo SÓ pra visão (física intacta),
+# pra rede achar a bola/oponente de forma confiável às distâncias que importam.
+BALL_VIS_R = 10.0
+OPP_VIS_R = 12.0
+_CH_WALL, _CH_BALL, _CH_OPP, _CH_EGOAL, _CH_OGOAL = 0, 1, 2, 3, 4
+_RAY_COS = np.cos(np.linspace(0.0, 2.0 * math.pi, N_RAYS, endpoint=False))
+_RAY_SIN = np.sin(np.linspace(0.0, 2.0 * math.pi, N_RAYS, endpoint=False))
+_RAY_IDX = np.arange(N_RAYS)
+_INF = 1e9
+
+
+def _cast_rays(ox, oy, bx, by, opx, opy, goal_top, goal_bot):
+    """Lança N_RAYS raios em 360° de (ox,oy) e devolve um vetor achatado
+    (N_RAYS*RAY_CH,): a PROXIMIDADE (1-dist/diagonal) do 1º obstáculo de cada raio,
+    no canal do seu TIPO (oclusão: só o mais próximo conta; os outros canais ficam
+    0). Coordenadas já no frame canônico (quem chama espelha o lado 'b' no X).
+    Interseção analítica raio×reta (paredes/gols) e raio×círculo (bola/oponente)."""
+    cos, sin = _RAY_COS, _RAY_SIN
+    # FRONTEIRA do campo: como a origem está sempre DENTRO do retângulo, o raio sai
+    # por exatamente UMA parede vertical e o tempo até ela é o menor entre a vertical
+    # de saída (FIELD_R se cos>0, senão FIELD_L) e a horizontal de saída (idem). Isso
+    # dispensa testar as 4 paredes com máscara de segmento (metade das contas).
+    with np.errstate(divide="ignore", invalid="ignore"):
+        xw = np.where(cos > 0.0, FIELD_R, FIELD_L)
+        yw = np.where(sin > 0.0, FIELD_B, FIELD_T)
+        tx = (xw - ox) / cos
+        ty = (yw - oy) / sin
+    tx = np.where(np.isfinite(tx) & (tx > 0.0), tx, _INF)   # cos==0 -> raio vertical
+    ty = np.where(np.isfinite(ty) & (ty > 0.0), ty, _INF)
+    hit_vert = tx <= ty
+    tb = np.minimum(tx, ty)                       # distância até a fronteira
+    y_at = oy + tb * sin
+    in_mouth = (y_at >= goal_top) & (y_at <= goal_bot)
+    goal_ch = np.where(xw > CX, _CH_EGOAL, _CH_OGOAL)   # direita=adv, esquerda=próprio
+    chb = np.where(hit_vert & in_mouth, goal_ch, _CH_WALL)
+
+    def circle(cx, cy, r):
+        ocx, ocy = ox - cx, oy - cy
+        b = ocx * cos + ocy * sin                 # d·oc (d unitário) => quadrática a=1
+        disc = b * b - (ocx * ocx + ocy * ocy - r * r)
+        sq = np.sqrt(np.where(disc >= 0.0, disc, 0.0))
+        t = -b - sq                               # raiz mais próxima
+        t = np.where(t > 1e-6, t, -b + sq)        # se atrás (dentro do disco), pega a longe
+        return np.where((disc >= 0.0) & (t > 1e-6), t, _INF)
+
+    Ts = np.stack((tb, circle(bx, by, BALL_VIS_R), circle(opx, opy, OPP_VIS_R)))
+    CHs = np.stack((chb, np.full(N_RAYS, _CH_BALL), np.full(N_RAYS, _CH_OPP)))
+    bi = np.argmin(Ts, axis=0)                    # superfície mais próxima por raio
+    tmin = Ts[bi, _RAY_IDX]
+    chmin = CHs[bi, _RAY_IDX]
+    prox = np.where(tmin < _INF, np.clip(1.0 - tmin / _MAXD, 0.0, 1.0), 0.0)
+    out = np.zeros((N_RAYS, RAY_CH))
+    out[_RAY_IDX, chmin] = prox
+    return out.ravel()
 
 
 class Disc:
@@ -152,41 +223,29 @@ class HaxWorld:
     # ---------- observação (entradas da rede) ----------
 
     def observe(self, side):
-        """Entradas POLARES no FRAME CANÔNICO (o lado 'b' é espelhado no X pra todo
-        agente "atacar pra +x"; a saída é des-espelhada por brain_action). Pra cada
-        coisa relevante: distância + DIREÇÃO (cos, sin) — casa com a ação (mover
-        numa direção) e dá consciência explícita do GOL. 18 features:
-          bola: polar(3) + velocidade(2); oponente: polar(3) + velocidade(2);
-          gol adversário: polar(3); próprio gol: polar(3); minha velocidade(2)."""
+        """VISÃO POR RAYCAST (255 features) no FRAME CANÔNICO — o lado 'b' é
+        espelhado no X pra todo agente "atacar pra +x" (a ação é des-espelhada por
+        brain_action). Lança 50 raios em 360° do jogador; cada raio devolve a
+        proximidade (1-dist) do 1º obstáculo num de 5 canais (parede, bola,
+        oponente, gol adversário, próprio gol) com OCLUSÃO -> 250 valores. Depois,
+        5 sentidos extras: minha velocidade(2), velocidade da bola(2) e 'chute
+        pronto'(1). Casa com a ação (mover numa direção) e dá visão espacial direta."""
         me = self.b if side == "b" else self.a
         opp = self.a if side == "b" else self.b
         ball = self.ball
         mir = side == "b"
         mx = (lambda x: FIELD_L + FIELD_R - x) if mir else (lambda x: x)
         mv = (lambda v: -v) if mir else (lambda v: v)
-        mex, mey = mx(me.x), me.y
         c = _clamp
-
-        def pol(tx, ty):
-            dx, dy = tx - mex, ty - mey
-            d = math.hypot(dx, dy)
-            if d < 1e-6:
-                return (0.0, 1.0, 0.0)
-            return (c(d / _MAXD, 0.0, 1.0), dx / d, dy / d)   # dist, cos, sin
-
-        bp = pol(mx(ball.x), ball.y)
-        op = pol(mx(opp.x), opp.y)
-        eg = pol(FIELD_R, CY)        # gol adversário (canônico = lado +x)
-        og = pol(FIELD_L, CY)        # próprio gol (canônico = lado -x)
-        return [
-            bp[0], bp[1], bp[2],
-            c(mv(ball.vx) / BALL_MAXV, -1.0, 1.0), c(ball.vy / BALL_MAXV, -1.0, 1.0),
-            op[0], op[1], op[2],
-            c(mv(opp.vx) / PLR_MAXV, -1.0, 1.0), c(opp.vy / PLR_MAXV, -1.0, 1.0),
-            eg[0], eg[1], eg[2],
-            og[0], og[1], og[2],
+        rays = _cast_rays(mx(me.x), me.y, mx(ball.x), ball.y, mx(opp.x), opp.y,
+                          self.goal_top, self.goal_bot)
+        cd = self.kick_cd_b if side == "b" else self.kick_cd_a
+        extra = np.array([
             c(mv(me.vx) / PLR_MAXV, -1.0, 1.0), c(me.vy / PLR_MAXV, -1.0, 1.0),
-        ]
+            c(mv(ball.vx) / BALL_MAXV, -1.0, 1.0), c(ball.vy / BALL_MAXV, -1.0, 1.0),
+            1.0 if cd <= 0.0 else 0.0,           # chute pronto (cooldown zerado)
+        ])
+        return np.concatenate((rays, extra))
 
     # ---------- helpers de física ----------
 
@@ -286,11 +345,12 @@ def bot_action(world: HaxWorld, side: str):
 
 # ========================= rede neural =========================
 
-N_OBS = 18             # observações (polar + gols + velocidades, frame canônico)
+N_EXTRA = 5            # sentidos extras: minha vel(2) + vel da bola(2) + chute pronto(1)
+N_OBS = N_RAYS * RAY_CH + N_EXTRA   # 50*5 + 5 = 255 (visão por raycast + propriocepção)
 MEM = 4                # MEMÓRIA de curto prazo: neurônios recorrentes (realimentados)
 N_IN = N_OBS + MEM     # entrada = observação + memória do passo anterior
 N_OUT = 3 + MEM        # saída = ax, ay, chute + nova memória
-HIDDEN = [32, 24, 16]  # 3 camadas ocultas (rede maior = mais "inteligência")
+HIDDEN = [48, 32, 16]  # 3 camadas ocultas (1ª camada maior: digere os 250 raios)
 
 
 def goal_potential(x, y, goal_top, goal_bot):
@@ -362,7 +422,7 @@ def brain_action(brain: Brain, world: HaxWorld, side: str, mem=None):
     ax pro lado 'b'); 3ª saída > 0 = chuta; o resto da saída é a memória nova."""
     if mem is None:
         mem = [0.0] * MEM
-    out = brain.forward(list(world.observe(side)) + list(mem))
+    out = brain.forward(np.concatenate((world.observe(side), np.asarray(mem, dtype=np.float64))))
     ax, ay, kick = float(out[0]), float(out[1]), float(out[2])
     if side == "b":
         ax = -ax
@@ -507,7 +567,7 @@ def pretrain_imitator(epochs=900, batch=256, lr=0.08, momentum=0.9, seed=0):
     """Treina (backprop + momentum) um Brain pra imitar heuristic_action. Um
     dataset fixo grande + minibatches; devolve o Brain imitador."""
     rng = np.random.RandomState(seed)
-    Xall, Yall = _gen_dataset(rng, 8000)
+    Xall, Yall = _gen_dataset(rng, 12000)   # +amostras: a visão por raycast tem 255 dims
     brain = Brain()
     vW = [np.zeros_like(w) for w in brain.weights]
     vB = [np.zeros_like(b) for b in brain.biases]
@@ -531,6 +591,29 @@ def pretrain_imitator(epochs=900, batch=256, lr=0.08, momentum=0.9, seed=0):
             brain.weights[i] += vW[i]
             brain.biases[i] += vB[i]
     return brain
+
+
+def _imitator_path():
+    return config.REPO_ROOT / "haxball_imitator.json"
+
+
+def get_imitator():
+    """Imitador do heurístico CACHEADO em disco. A arquitetura é fixa e o treino é
+    determinístico (seed=0), então recomputar a cada abertura é desperdício — no Pi
+    o pré-treino leva ~dezenas de segundos. Recomputa só se o cache sumiu ou a
+    arquitetura (N_IN/N_OUT) mudou; aí regrava. Semente do treino e fallback do jogo."""
+    try:
+        b = Brain.from_dict(json.loads(_imitator_path().read_text(encoding="utf-8")))
+        if b.sizes[0] == N_IN and b.sizes[-1] == N_OUT:
+            return b
+    except Exception:
+        pass
+    b = pretrain_imitator()
+    try:
+        _imitator_path().write_text(json.dumps(b.to_dict()), encoding="utf-8")
+    except Exception:
+        pass
+    return b
 
 
 # ========================= persistência (jogar contra) =========================

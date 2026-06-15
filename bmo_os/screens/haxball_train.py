@@ -38,7 +38,9 @@ W, H = LOGICAL_SIZE
 COLS, ROWS = 3, 4
 POP = COLS * ROWS          # 12 redes (direita), todas visíveis
 MATCH_TIME = 12.0          # segundos de simulação por geração (partidas mais longas)
-SUBSTEPS = 2               # passos de física por frame (treina ~2x mais rápido)
+SUBSTEPS = 2               # passos de física por frame (treina ~2x mais rápido). É a
+                           # ALAVANCA DE CALOR do Pi: a visão por raycast é o custo
+                           # dominante por agente -> baixe pra 1 se o Pi esquentar.
 ELITE = 2
 GAP = 3
 COURT_X0, COURT_Y0 = 2, 17
@@ -70,7 +72,7 @@ _IMITATOR = None
 def _get_imitator():
     global _IMITATOR
     if _IMITATOR is None:
-        _IMITATOR = hai.pretrain_imitator()
+        _IMITATOR = hai.get_imitator()   # cacheado em disco (evita re-treinar na abertura)
     return _IMITATOR
 
 
@@ -445,10 +447,15 @@ class HaxballTrainScreen:
         cols = len(sizes)
         xs = [box.x + 12 + int(i * (box.w - 24) / (cols - 1)) for i in range(cols)]
         top, bot = box.y + 14, box.bottom - 6
-        # SÓ OS NÓS (sem arestas), brilho pela ativação
+        # SÓ OS NÓS (sem arestas), brilho pela ativação. A 1ª camada tem 259 nós
+        # (a visão por raycast) -> AMOSTRA até MAXN por camada pra não virar barra.
+        MAXN = 22
         for li, sz in enumerate(sizes):
-            ys = [(top + bot) // 2] if sz == 1 else [int(top + k * (bot - top) / (sz - 1)) for k in range(sz)]
-            for k, y in enumerate(ys):
+            shown = min(sz, MAXN)
+            ks = ([sz // 2] if shown == 1
+                  else [k * (sz - 1) // (shown - 1) for k in range(shown)])
+            for j, k in enumerate(ks):
+                y = (top + bot) // 2 if shown == 1 else int(top + j * (bot - top) / (shown - 1))
                 act = float(acts[li][k]) if (acts is not None and li < len(acts) and k < len(acts[li])) else 0.0
                 m = int(55 + min(1.0, abs(act)) * 200)
                 fill = (0, m, int(m * 0.4)) if act >= 0 else (m, 0, 0)
