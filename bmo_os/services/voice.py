@@ -117,6 +117,7 @@ class VoiceService:
         self._hold = False           # push-to-talk físico: True enquanto o botão está pressionado
         self._commands: list[tuple[list[str], object]] = []
         self._whisper = None
+        self._cap_rate = None        # taxa de captura resolvida p/ o mic (16k ou nativa)
         # --- debug ---
         self.wake_count = 0          # quantas vezes o wake word disparou
         self._last_wake = 0.0        # time.time() da última ativação
@@ -190,6 +191,51 @@ class VoiceService:
             pass
         return None
 
+    # ---------- taxa de captura (mics USB so falam 44.1/48k) ----------
+
+    def _capture_rate(self) -> int:
+        """Taxa em que o mic consegue abrir. Whisper/Porcupine querem 16k, mas
+        muito mic USB (ex: C-Media PnP) so aceita 44100/48000 no device 'hw:'
+        direto (sem reamostragem do ALSA). Resolve a melhor taxa nativa e o
+        codigo reamostra pra 16k depois. Cacheia (so muda se trocar de mic)."""
+        if self._cap_rate:
+            return self._cap_rate
+        rate = SAMPLE_RATE
+        if HAS_AUDIO:
+            dev = self._device_index()
+            for cand in (SAMPLE_RATE, 48000, 44100, 32000, 22050):
+                try:
+                    sd.check_input_settings(device=dev, samplerate=cand,
+                                            channels=1, dtype="float32")
+                    rate = cand
+                    break
+                except Exception:
+                    continue
+        self._cap_rate = rate
+        return rate
+
+    @staticmethod
+    def _resample(audio: "np.ndarray", src_rate: int, n_out=None) -> "np.ndarray":
+        """Reamostra mono float32 de src_rate -> 16k. Se n_out for dado, devolve
+        exatamente n_out amostras (usado no wake word, que exige frames fixos).
+        Decima por media quando a razao e inteira (anti-alias barato); senao
+        interpola linear."""
+        if audio is None or audio.size == 0:
+            return audio
+        if n_out is None:
+            if src_rate == SAMPLE_RATE:
+                return audio
+            n_out = max(1, int(round(audio.size * SAMPLE_RATE / src_rate)))
+        if n_out == audio.size:
+            return audio.astype(np.float32, copy=False)
+        if src_rate % SAMPLE_RATE == 0:
+            factor = src_rate // SAMPLE_RATE
+            if audio.size == n_out * factor:        # caminho exato (wake/blocos)
+                return audio.reshape(n_out, factor).mean(axis=1).astype(np.float32)
+        x_old = np.linspace(0.0, 1.0, audio.size, endpoint=False)
+        x_new = np.linspace(0.0, 1.0, n_out, endpoint=False)
+        return np.interp(x_new, x_old, audio).astype(np.float32)
+
     # ---------- nível do mic (medidor da tela de teste) ----------
 
     def level(self) -> float:
@@ -245,7 +291,7 @@ class VoiceService:
 
         try:
             self._monitor_stream = self._open_input_stream(
-                samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+                samplerate=self._capture_rate(), channels=1, dtype="float32",
                 device=self._device_index(), callback=cb, blocksize=1024,
             )
             self._monitor_stream.start()
@@ -416,8 +462,9 @@ class VoiceService:
         chunks: list = []
         t_prev = time.time()
         silence_t = 0.0
+        cap = self._capture_rate()
         try:
-            with self._open_input_stream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+            with self._open_input_stream(samplerate=cap, channels=1, dtype="float32",
                                          device=self._device_index(), blocksize=1024) as stream:
                 while True:
                     block, _ = stream.read(1024)
@@ -429,7 +476,7 @@ class VoiceService:
                     now = time.time()
                     silence_t = (silence_t + (now - t_prev)) if rms < SILENCE_RMS else 0.0
                     t_prev = now
-                    total_s = sum(len(c) for c in chunks) / SAMPLE_RATE
+                    total_s = sum(len(c) for c in chunks) / cap
                     if silence_t >= SILENCE_HANG_S and len(chunks) > 8:
                         break
                     if total_s >= MAX_UTTERANCE_S:
@@ -438,7 +485,7 @@ class VoiceService:
             return None
         if not chunks:
             return None
-        return np.concatenate(chunks)
+        return self._resample(np.concatenate(chunks), cap)   # -> 16k pro Whisper/API
 
     # ---------- push-to-talk (tela de teste) ----------
 
@@ -499,8 +546,9 @@ class VoiceService:
     def _hold_worker(self, on_done, state) -> None:
         chunks: list = []
         text = ""
+        cap = self._capture_rate()
         try:
-            with self._open_input_stream(samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+            with self._open_input_stream(samplerate=cap, channels=1, dtype="float32",
                                          device=self._device_index(), blocksize=1024) as stream:
                 while self._hold:
                     block, _ = stream.read(1024)
@@ -514,7 +562,7 @@ class VoiceService:
         with self._lock:
             self._level = 0.0
         try:
-            audio = np.concatenate(chunks) if chunks else None
+            audio = self._resample(np.concatenate(chunks), cap) if chunks else None
             self.status = "processando..."
             text = self._transcribe(audio) if audio is not None else ""
             with self._lock:
@@ -615,19 +663,34 @@ class VoiceService:
             return
         self.status = f"ouvindo '{WAKE_NAME}'"
 
+        # mic so abre na taxa nativa (ex: 48k); Porcupine quer 16k em frames
+        # fixos. Captura float32 no 'cap' e reamostra cada bloco pra frame_length.
+        cap = self._capture_rate()
+        resample = cap != handle.sample_rate
+        read_len = (int(round(handle.frame_length * cap / handle.sample_rate))
+                    if resample else handle.frame_length)
+
         def open_wake():
             s = self._open_input_stream(
-                samplerate=handle.sample_rate, channels=1, dtype="int16",
-                device=self._device_index(), blocksize=handle.frame_length)
+                samplerate=cap, channels=1,
+                dtype="float32" if resample else "int16",
+                device=self._device_index(), blocksize=read_len)
             s.start()
             return s
+
+        def next_frame(stream):
+            block, _ = stream.read(read_len)
+            mono = block[:, 0]
+            if not resample:
+                return mono                       # ja e int16 @16k
+            frame = self._resample(mono, cap, n_out=handle.frame_length)
+            return (np.clip(frame, -1.0, 1.0) * 32767.0).astype(np.int16)
 
         stream = None
         try:
             stream = open_wake()
             while not self._wake_stop.is_set():
-                block, _ = stream.read(handle.frame_length)
-                if handle.process(block[:, 0]) >= 0:
+                if handle.process(next_frame(stream)) >= 0:
                     # detectou a wake word -> libera o mic, grava e transcreve
                     self.wake_count += 1
                     self._last_wake = time.time()
