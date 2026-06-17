@@ -49,6 +49,7 @@ from bmo_os.screens.pomodoro import PomodoroScreen
 from bmo_os.screens.pong import PongAmbientScreen, PongScreen
 from bmo_os.screens.recorder import RecorderScreen
 from bmo_os.screens.settings import SettingsScreen
+from bmo_os.screens.smarthome import SmartHomeScreen
 from bmo_os.screens.sysinfo import SysInfoScreen
 from bmo_os.screens.shuffler import ShufflingAmbientScreen
 from bmo_os.screens.sleep import SleepScreen
@@ -71,6 +72,7 @@ from bmo_os.services.notifications import EventAlerter
 from bmo_os.services.pairing import PairingServer, local_ip
 from bmo_os.services.pet_brain import PetBrain
 from bmo_os.services.recorder import RecorderService
+from bmo_os.services.smarthome import SmartHomeService
 from bmo_os.services.pet_memory import PetMemory
 from bmo_os.services.pet_state import PetState
 from bmo_os.services.sysinfo import SysInfoService
@@ -178,6 +180,9 @@ def build_initial(app: App):
     alerter = EventAlerter()
     # Telemetria de hardware (tela SISTEMA). No PC mostra "--".
     sysinfo = SysInfoService()
+    # Casa inteligente (tela CASA): tomadas Tuya/JWcom controladas na LAN.
+    # Sem tinytuya (PC) ou sem tomadas no .env -> available=False (tela offline).
+    smarthome = SmartHomeService()
     # Coolers (2x) — refrigeração ativa via GPIO 17 (pino 11) e GPIO 23 (pino 16).
     # Liga no atalho da tela SISTEMA e sozinho acima de 60°C (lê a temp do sysinfo).
     cooler = CoolerService(get_temp=lambda: sysinfo.get().temp_c)
@@ -380,6 +385,10 @@ def build_initial(app: App):
         # desligar ficam no grid de AJUSTES, não aqui)
         return SysInfoScreen(on_back=app.manager.pop, sysinfo=sysinfo, cooler=cooler)
 
+    def make_smarthome_screen() -> SmartHomeScreen:
+        # tela CASA: liga/desliga as tomadas Tuya/JWcom (controle local)
+        return SmartHomeScreen(on_back=app.manager.pop, smarthome=smarthome)
+
     def confirm_shutdown() -> None:
         # tile DESLIGAR do grid: um toque é destrutivo, então confirma antes
         app.manager.push(ConfirmScreen(
@@ -420,6 +429,7 @@ def build_initial(app: App):
                         GalleryScreen(on_back=pop, photos_dir=PHOTOS_DIR)),
                 )),
                 on_dev=lambda: push(make_devhub_screen()),
+                on_smarthome=lambda: push(make_smarthome_screen()),
                 on_settings=lambda: push(make_settings()),
                 on_sysinfo=lambda: push(make_sysinfo_screen()),
                 on_shutdown=confirm_shutdown,
@@ -506,6 +516,8 @@ def build_initial(app: App):
                            _cmd(lambda: app.manager.push(TasksScreen(on_back=app.manager.pop, todoist=todoist))))
     voice.register_command(["sistema", "hardware", "temperatura", "cpu"],
                            _cmd(lambda: app.manager.push(make_sysinfo_screen())))
+    voice.register_command(["casa", "tomada", "tomadas", "luz", "smart house"],
+                           _cmd(lambda: app.manager.push(make_smarthome_screen())))
     voice.register_command(["foto", "fotos", "camera"],
                            _cmd(lambda: app.manager.push(
                                PhotoScreen(on_back=app.manager.pop, camera=camera,

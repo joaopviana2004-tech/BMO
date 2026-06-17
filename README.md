@@ -37,7 +37,7 @@ Mini-relógio HH:MM no topo das telas ambient (exceto clock que já tem o grand�
 e agenda**: **segure** pra gravar e **solte** pra mandar pro BMO (igual ao
 push-to-talk físico), sem precisar do botão GPIO.
 
-**Home — hub de categorias** (**IA · REPOUSO · ESTUDOS · AJUSTES**; arrasta pro
+**Home — hub de categorias** (**IA · REPOUSO · ESTUDOS · CASA · AJUSTES**; arrasta pro
 lado pra trocar de categoria, cada uma com sua grade de apps; auto-volta pro
 ambient após N segundos):
 - **CÉREBRO** *(IA)* — abre o grafo do Segundo Cérebro (ver seção própria)
@@ -72,6 +72,9 @@ ambient após N segundos):
 - **SISTEMA** — telemetria da Pi (CPU, GPU, temperatura, memória, tensão; no PC
   mostra "--") + **controle dos coolers** (ver seção "Refrigeração"): botão liga/
   desliga com ícone girando quando ativo.
+- **TOMADAS** *(CASA)* — liga/desliga as tomadas inteligentes Tuya/JWcom direto na
+  rede local (toque/A em cada card; botão TUDO liga/desliga todas). Ver seção
+  "Smart House".
 - **PHOTO** — câmera fullscreen:
   - Preview HD 800x480 com hflip (modo selfie)
   - Botão SHOOT vermelho (estilo app de câmera)
@@ -148,6 +151,10 @@ BMO — todas as telas CRT respeitam isso, content e corners empurrados pra dent
 - **Google Calendar** — `gcalendar.py`: lê eventos via iCal secreta (agenda
   privada) ou OAuth (Workspace). `notifications.py` dispara o alerta de evento.
 - **SysInfo** — telemetria de hardware (CPU/temp/memória) pra tela SISTEMA.
+- **Smart House** — controle local das tomadas Tuya/JWcom via `tinytuya` (LAN 3.4).
+  Thread faz polling do estado (snapshot lock-guarded) e executa os comandos
+  (on/off/toggle **otimistas**); sem `tinytuya` ou sem tomadas no `.env`, degrada
+  pra indisponível. Ver seção "Smart House".
 
 ## Estrutura
 
@@ -313,6 +320,11 @@ TODOIST_TOKEN=xxxxxxxx                  # token da REST API v1 do Todoist
 # WEATHER_LAT=-7.1195                   # default João Pessoa/PB
 # WEATHER_LON=-34.8450
 # WEATHER_TIMEZONE=America/Fortaleza
+# --- Smart House (tela CASA): tomadas Tuya/JWcom, uma por índice T1, T2... ---
+# SMARTHOME_T1_NAME=Tomada 1
+# SMARTHOME_T1_ID=eb9ee0b5867f260c61hvbq
+# SMARTHOME_T1_IP=192.168.0.107
+# SMARTHOME_T1_KEY=<local_key crua, sem aspas>     # SMARTHOME_T1_VER=3.4 (opcional)
 ```
 
 Veja `.env.example` (commitado) pra docs completas. Env vars já no shell têm
@@ -548,6 +560,32 @@ cada uma com um agente ESQUERDA contra um DIREITA + o **placar nas bordas**.
 > quadra conta ao vivo. Dois jogadores IGUAIS ainda tendem a empatar (a defesa
 > fecha), então o melhor da direita (que bate o heurístico) é o que o SALVAR
 > guarda pra você enfrentar.
+
+## Smart House (tomadas Tuya/JWcom)
+
+A tela **CASA → TOMADAS** liga/desliga tomadas inteligentes **JWcom** (por baixo
+são **Tuya**) **100% local**: o BMO fala **direto com a tomada** na rede Wi-Fi
+(protocolo **Tuya LAN 3.4**, via [`tinytuya`](https://github.com/jasonacox/tinytuya)),
+**sem nuvem** e **sem Home Assistant**. Cada tomada vira um card com o estado
+(**LIGADA / DESLIGADA / OFFLINE**) e um símbolo de power colorido; **toque** (ou A)
+liga/desliga a selecionada e o botão **TUDO** liga/desliga todas.
+
+Pra falar local, cada tomada exige uma **`local_key`** (a "senha" que criptografa
+os comandos). Ela é baixada **uma vez** por um login estilo Home Assistant
+(`tuya-sharing`, com as tomadas no app oficial **Smart Life**) — depois nunca mais
+precisa da nuvem. Configure no `.env` (uma por índice; veja `.env.example`):
+
+```
+SMARTHOME_T1_NAME=Tomada 1
+SMARTHOME_T1_ID=<device id>      # de: python -m tinytuya scan
+SMARTHOME_T1_IP=192.168.0.107    # IP da LAN (NÃO o IP público da nuvem)
+SMARTHOME_T1_KEY=<local_key>     # cru, sem aspas
+SMARTHOME_T1_VER=3.4             # opcional (default 3.4)
+```
+
+> Fixe o IP de cada tomada no roteador (reserva DHCP) pra não mudar. A `local_key`
+> **muda** se você resetar/reparear a tomada — aí refaça o login pra pegar a nova.
+> Sem `tinytuya` (PC de dev) ou sem tomadas no `.env`, a tela mostra "SMART HOUSE OFF".
 
 ## Refrigeração (coolers)
 

@@ -178,6 +178,17 @@ def _icon_sysinfo(surf: pygame.Surface, cx: int, cy: int) -> None:
         pygame.draw.line(surf, CRT_WHITE, (body.right, body.top + 13 + off), (body.right + 4, body.top + 13 + off), 2)
 
 
+def _icon_smarthome(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # tomada na parede: placa + 2 furos + terra, com um "led" de ligado
+    body = pygame.Rect(0, 0, 28, 32)
+    body.center = (cx, cy + 1)
+    pygame.draw.rect(surf, CRT_WHITE, body, 2, border_radius=7)
+    pygame.draw.circle(surf, CRT_WHITE, (cx - 6, cy - 3), 2)
+    pygame.draw.circle(surf, CRT_WHITE, (cx + 6, cy - 3), 2)
+    pygame.draw.line(surf, CRT_DIM, (cx, cy + 4), (cx, cy + 9), 2)
+    pygame.draw.circle(surf, CRT_DIM, (cx, body.top - 3), 2)   # led
+
+
 def _icon_aitest(surf: pygame.Surface, cx: int, cy: int) -> None:
     cap = pygame.Rect(0, 0, 14, 22)
     cap.center = (cx, cy - 4)
@@ -271,6 +282,15 @@ def _icon_cat_settings(surf: pygame.Surface, cx: int, cy: int) -> None:
     _icon_settings(surf, cx, cy)
 
 
+def _icon_cat_home(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # casinha: telhado + corpo + porta
+    pygame.draw.polygon(surf, CRT_WHITE, [
+        (cx, cy - 16), (cx - 19, cy - 1), (cx + 19, cy - 1)], 2)
+    body = pygame.Rect(cx - 13, cy - 1, 26, 17)
+    pygame.draw.rect(surf, CRT_WHITE, body, 2)
+    pygame.draw.rect(surf, CRT_DIM, (cx - 4, cy + 5, 8, 11))
+
+
 def build_categories(
     *,
     on_brain: Callable[[], None],
@@ -286,6 +306,7 @@ def build_categories(
     on_games: Callable[[], None],
     on_photo: Callable[[], None],
     on_dev: Callable[[], None],
+    on_smarthome: Callable[[], None],
     on_settings: Callable[[], None],
     on_sysinfo: Callable[[], None],
     on_shutdown: Callable[[], None],
@@ -311,6 +332,9 @@ def build_categories(
             HubItem("JOGOS", _icon_games, on_games),
             HubItem("FOTO", _icon_photo, on_photo),
             HubItem("DEV", _icon_devhub, on_dev),
+        ]),
+        HubCategory("CASA", _icon_cat_home, [
+            HubItem("TOMADAS", _icon_smarthome, on_smarthome),
         ]),
         HubCategory("AJUSTES", _icon_cat_settings, [
             HubItem("SETTINGS", _icon_settings, on_settings),
