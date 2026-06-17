@@ -210,7 +210,7 @@ def build_initial(app: App):
         return bool(svc and svc.push_note(path))
 
     chat = ChatService(memory=memory, knowledge=knowledge,
-                       on_note_saved=_push_note_to_drive)
+                       on_note_saved=_push_note_to_drive, smarthome=smarthome)
     # Voz do BMO (TTS): Edge TTS (Francisca pt-BR) por padrão — incorporado do
     # módulo de laboratório bmo_voz.py. Degrada sem edge-tts/internet.
     # Volume separado em SETTINGS->IA ("Voz BMO" = tts_volume); 0 = mudo.
@@ -597,12 +597,31 @@ def build_initial(app: App):
         "gravador": lambda: app.manager.push(make_recorder_screen()),
         "cerebro": lambda: app.manager.push(make_brain_screen()),
         "devhub": lambda: app.manager.push(make_devhub_screen()),
+        "casa": lambda: app.manager.push(make_smarthome_screen()),
         "configuracoes": lambda: app.manager.push(make_settings()),
         # relógio explícito (NÃO o ambient configurado, que pode ser face/pong)
         "relogio": lambda: app.manager.replace(_instantiate_ambient("clock")),
         "home": open_home,
         "atualizar": do_update,
     }
+
+    def _apply_power(power: dict) -> None:
+        """Executa a ação de tomada pedida pela IA (campo "power" do chat).
+        device: "tomadaN" ou "todas" (tolerante a variações); on liga/desliga.
+        smarthome.set/set_all são thread-safe (fila), então roda direto aqui."""
+        dev = (power.get("device") or "").strip().lower()
+        on = bool(power.get("on"))
+        if any(w in dev for w in ("tod", "all", "tudo", "amba")):
+            smarthome.set_all(on)
+        else:
+            digits = "".join(c for c in dev if c.isdigit())
+            if not digits:
+                return
+            smarthome.set(f"t{digits}", on)
+        # sem frase própria da IA? fala uma confirmação curta.
+        msg = (getattr(chat, "last_msg", "") or "").strip()
+        if not msg or msg == "...":
+            chat.last_msg = ("Ligando" if on else "Desligando") + " a tomada."
 
     def handle_ai_response(text: str) -> None:
         """Roda na thread de voz: manda o texto pro LLM e, conforme a resposta,
@@ -632,6 +651,13 @@ def build_initial(app: App):
             try:
                 if todoist.create(task) and tts is not None:
                     tts.speak("Tarefa criada.")   # cacheado = instantâneo
+            except Exception:
+                pass
+        # IA mandou ligar/desligar uma tomada? (campo "power" do JSON do chat)
+        power = getattr(chat, "last_power", None)
+        if power and getattr(smarthome, "available", False):
+            try:
+                _apply_power(power)
             except Exception:
                 pass
         action = screen_actions.get(screen_key)

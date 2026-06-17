@@ -163,6 +163,8 @@ SCREENS_DOC = (
     "- gravador: grava audio (aula/reuniao/ideia) pra sincronizar no Drive.\n"
     "- cerebro: grafo do conhecimento (notas do Obsidian interligadas).\n"
     "- devhub: painel de programacao (commits, CI/CD, logs do PC/Cursor).\n"
+    "- casa: tela das tomadas inteligentes (ver/ligar/desligar). Pra so LIGAR ou "
+    "DESLIGAR use o campo \"power\" (abaixo); abra a tela so se pedirem pra ver.\n"
     "- jogos: menu de jogos.\n"
     "- pong: abre direto o jogo Pong.\n"
     "- invaders: abre direto o jogo Space Invaders.\n"
@@ -216,7 +218,8 @@ SYSTEM_PROMPT = (
     'notes_query se nao souber o conteudo atual). Se nao for escrever, use null.\n'
     'Responda SEMPRE apenas com um JSON valido no formato '
     '{"msg": "sua resposta", "screen": "uma das chaves acima", "task": "", '
-    '"facts": [], "name": "", "notes_query": "", "notes_write": null}. '
+    '"facts": [], "name": "", "notes_query": "", "notes_write": null, '
+    '"power": null}. '
     'Use "screen" diferente de "none" SO quando o usuario pedir ou fizer claro '
     'sentido abrir aquela tela; em conversa normal use "none". '
     "Nada alem do JSON."
@@ -259,11 +262,13 @@ class ChatService:
 
     MAX_TOOL_ROUNDS = 4   # busca + escrita + resposta (com folga)
 
-    def __init__(self, memory=None, knowledge=None, on_note_saved=None) -> None:
+    def __init__(self, memory=None, knowledge=None, on_note_saved=None,
+                 smarthome=None) -> None:
         self.last_error = ""
         self.last_msg = ""       # última resposta do BMO (pra UI ler)
         self.last_screen = ""    # tela que o BMO pediu pra abrir ("" = nenhuma)
         self.last_task = ""      # tarefa que o BMO pediu pra criar ("" = nenhuma)
+        self.last_power = None    # ação de tomada pedida pela IA {device,on} ou None
         # Debug do RAG: o que foi pesquisado/lido nas notas na última ask()
         # (ex.: ["auto 'quem é jp?' -> JP", "tool 'projetos jp' -> Bimo"]).
         self.last_notes: list[str] = []
@@ -271,6 +276,8 @@ class ChatService:
         self.memory = memory
         # KnowledgeService opcional: tools notes_query (ler) e notes_write (gravar).
         self.knowledge = knowledge
+        # SmartHomeService opcional: deixa a IA ligar/desligar as tomadas (campo "power").
+        self.smarthome = smarthome
         # Callback após gravar nota: recebe Path e deve subir pro Drive (push_note).
         self.on_note_saved = on_note_saved
         # Histórico curto da conversa (pro BMO ter contexto entre falas).
@@ -289,10 +296,33 @@ class ChatService:
                     parts.append("MEMORIA ATUAL: " + mem)
             except Exception:
                 pass
+        sh = self._smarthome_doc()
+        if sh:
+            parts.append(sh)
         tone = MOOD_TONE.get((mood or "").strip().lower(), "")
         if tone:
             parts.append("HUMOR AGORA: " + tone)
         return "\n".join(parts)
+
+    def _smarthome_doc(self) -> str:
+        """Lista as tomadas configuradas e ensina o campo "power" (só se houver)."""
+        if self.smarthome is None or not getattr(self.smarthome, "available", False):
+            return ""
+        try:
+            devs = self.smarthome.get_devices()
+        except Exception:
+            return ""
+        if not devs:
+            return ""
+        lista = "; ".join(f'tomada{i} = "{d.get("name", "?")}"'
+                          for i, d in enumerate(devs, 1))
+        return (
+            "TOMADAS INTELIGENTES (campo \"power\"): " + lista + ". "
+            "Pra LIGAR ou DESLIGAR uma tomada, preencha \"power\" com "
+            "{\"device\": \"tomada1\"|\"tomada2\"|\"todas\", \"on\": true|false} e "
+            "confirme em \"msg\" (curto, ex.: \"Ligando a tomada 1.\"). Use "
+            "\"todas\" pra todas de uma vez. Se nao for sobre tomada, \"power\": null."
+        )
 
     @property
     def available(self) -> bool:
@@ -384,6 +414,7 @@ class ChatService:
         self.last_error = ""
         self.last_screen = ""
         self.last_task = ""
+        self.last_power = None
         self.last_notes = []
         provider, spec, url, api_key, model = _resolve()
         if not api_key:
@@ -418,7 +449,8 @@ class ChatService:
                 data = _http_post_json(url, api_key, spec["extra_headers"], payload)
                 content = data["choices"][0]["message"].get("content")
                 (self.last_msg, self.last_screen, self.last_task,
-                 facts, name, notes_query, notes_write) = self._parse(content)
+                 facts, name, notes_query, notes_write, power) = self._parse(content)
+                self.last_power = power
                 if round_ >= self.MAX_TOOL_ROUNDS - 1:
                     break
                 if notes_query and self.knowledge is not None:
@@ -539,7 +571,7 @@ class ChatService:
 
     # chaves de tela aceitas (espelha SCREENS_DOC e o registro do main.py)
     _SCREENS = {"agenda", "tarefas", "foco", "sistema", "foto", "gravador",
-                "cerebro", "devhub", "jogos", "pong", "invaders", "flappy",
+                "cerebro", "devhub", "casa", "jogos", "pong", "invaders", "flappy",
                 "snake", "configuracoes", "relogio", "home", "atualizar"}
 
     def _remember_turn(self, user_text: str, bmo_msg: str) -> None:
@@ -563,8 +595,23 @@ class ChatService:
             "mode": str(raw.get("mode", "create")).strip().lower() or "create",
         }
 
-    def _parse(self, content: str) -> tuple[str, str, str, list, str, str, dict | None]:
-        """Extrai (msg, screen, task, facts, name, notes_query, notes_write).
+    def _parse_power(self, raw) -> dict | None:
+        """Normaliza power {device, on} (ação de tomada pedida pela IA)."""
+        if not isinstance(raw, dict):
+            return None
+        dev = str(raw.get("device", "") or "").strip().lower()
+        if not dev or "on" not in raw:
+            return None
+        on_raw = raw.get("on")
+        if isinstance(on_raw, bool):
+            on = on_raw
+        else:
+            on = str(on_raw).strip().lower() in (
+                "true", "1", "on", "liga", "ligar", "ligada", "sim", "yes")
+        return {"device": dev, "on": on}
+
+    def _parse(self, content: str) -> tuple[str, str, str, list, str, str, dict | None, dict | None]:
+        """Extrai (msg, screen, task, facts, name, notes_query, notes_write, power).
         Tolerante: tenta o JSON inteiro, depois um objeto no meio do texto.
         Campos ausentes viram vazio. screen vira "" se ausente/invalido."""
         content = (content or "").strip()
@@ -592,7 +639,8 @@ class ChatService:
             name = str(obj.get("name", "") or "").strip()
             notes_query = str(obj.get("notes_query", "") or "").strip()
             notes_write = self._parse_notes_write(obj.get("notes_write"))
+            power = self._parse_power(obj.get("power"))
             pending = notes_query or notes_write
             return (msg or ("" if pending else _strip_emoji(content))), \
-                screen, task, facts, name, notes_query, notes_write
-        return _strip_emoji(content), "", "", [], "", "", None
+                screen, task, facts, name, notes_query, notes_write, power
+        return _strip_emoji(content), "", "", [], "", "", None, None
