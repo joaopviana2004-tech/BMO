@@ -144,7 +144,7 @@ def _webui_display() -> str:
     se desligado na config; cai em 'localhost' se a LAN não resolver o IP."""
     if not config.get("webui_enabled"):
         return "OFF"
-    port = os.environ.get("BMO_WEB_PORT", "8080") or "8080"
+    port = os.environ.get("BMO_WEB_PORT", "8000") or "8000"
     return f"{local_ip() or 'localhost'}:{port}"
 
 

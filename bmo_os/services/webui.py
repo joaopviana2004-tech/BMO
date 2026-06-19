@@ -36,7 +36,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from ..core import config
 
-DEFAULT_PORT = int(os.environ.get("BMO_WEB_PORT", "8080") or "8080")
+DEFAULT_PORT = int(os.environ.get("BMO_WEB_PORT", "8000") or "8000")
 
 # Fonte pixel opcional (mesma que a telinha usa). Serve via @font-face; sem ela
 # o CSS cai num monospace e o site continua funcionando.
