@@ -62,6 +62,15 @@ def _fmt_provider(v) -> str:
     return config.LLM_PROVIDER_LABELS.get(v, str(v).upper())
 
 
+def _fmt_local_url(v) -> str:
+    """Rótulo curto do endpoint do LLM local pro display CRT (preset ou host)."""
+    v = (v or "").strip()
+    if v in config.LOCAL_LLM_URL_LABELS:
+        return config.LOCAL_LLM_URL_LABELS[v]
+    short = v.split("://")[-1].split("/")[0]   # tira esquema e caminho
+    return (short if len(short) <= 14 else short[:13] + ".").upper()
+
+
 def _short_model(m: str) -> str:
     """Encurta o ID do modelo pro display CRT: tira o prefixo 'autor/' e o
     sufixo ':free', e trunca. Ex.: 'meta/llama-3.3-70b-instruct' -> 'LLAMA-3.3-70.'"""
@@ -104,7 +113,7 @@ def _sistema_items():
 
 
 def _ia_items():
-    return [
+    items = [
         {"type": "cycle", "key": "llm_provider", "label": "IA provedor",
          "options": config.LLM_PROVIDERS, "format": _fmt_provider},
         {"type": "llm_model", "key": "llm_model", "label": "IA modelo",
@@ -113,6 +122,14 @@ def _ia_items():
          "options": config.LLM_PROVIDERS, "format": _fmt_provider},
         {"type": "llm_model", "key": "vision_model", "label": "Visao modelo",
          "provider_key": "vision_provider", "models": "vision"},
+    ]
+    # Só aparece quando o LLM local está em uso (chat ou visão), pra não lotar a
+    # lista. AUTO = llama.cpp no mesmo PC (8080); host livre fica no painel web.
+    if config.get("llm_provider") == "local" or config.get("vision_provider") == "local":
+        items.append(
+            {"type": "cycle", "key": "local_llm_url", "label": "IA local",
+             "options": config.LOCAL_LLM_URL_OPTIONS, "format": _fmt_local_url})
+    items += [
         {"type": "cycle", "key": "voice_enabled", "label": "BMO me ouve",
          "options": [False, True], "format": _fmt_onoff},
         {"type": "cycle", "key": "mic_button_enabled", "label": "Botao de fala",
@@ -126,6 +143,7 @@ def _ia_items():
         # somente-leitura: endereço do painel web (abra do PC/celular na rede)
         {"type": "info", "key": "webui", "label": "Painel"},
     ]
+    return items
 
 
 def _conta_items():

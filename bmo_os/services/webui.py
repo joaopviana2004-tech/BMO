@@ -106,6 +106,11 @@ def _config_schema(list_mics) -> list:
             {"key": model_key, "label": "Modelo (chat)", "type": "select",
              "value": config.get(model_key),
              "options": [{"value": m, "label": m} for m in config.LLM_MODELS.get(provider, [])]},
+            # LLM no PC (llama.cpp/Ollama): host/URL editável. Vazio = padrão
+            # llama.cpp no mesmo PC (127.0.0.1:8080). Só relevante p/ provedor LOCAL.
+            {"key": "local_llm_url", "label": "LLM local (host/URL)", "type": "text",
+             "value": config.get("local_llm_url") or "",
+             "placeholder": "vazio = 127.0.0.1:8080 (llama.cpp)"},
             {"key": "vision_provider", "label": "Provedor (visão)", "type": "select",
              "value": vprovider, "options": _opts(config.LLM_PROVIDERS, config.LLM_PROVIDER_LABELS)},
             {"key": vmodel_key, "label": "Modelo (visão)", "type": "select",
@@ -614,6 +619,13 @@ async function refreshConfig(){
       if(it.type==='toggle'){
         return `<div class="row"><span class="lbl">${it.label}</span>
           <div class="tog ${it.value?'on':''}" onclick="setCfg('${it.key}', ${!it.value}, this)"></div></div>`;
+      }
+      if(it.type==='text'){
+        // onchange (dispara no blur/Enter) -> salva; refreshConfig re-renderiza com o valor salvo
+        return `<div class="row"><span class="lbl">${it.label}</span>
+          <input type="text" value="${attr(it.value||'')}" placeholder="${attr(it.placeholder||'')}"
+            onkeydown="if(event.key==='Enter')this.blur()"
+            onchange="setCfg('${it.key}', this.value, this)"></div>`;
       }
       const opts = (it.options||[]).map(o=>
         `<option value="${attr(o.value)}" ${String(o.value)===String(it.value)?'selected':''}>${escapeHtml(o.label)}</option>`).join('');

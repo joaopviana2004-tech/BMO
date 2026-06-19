@@ -64,7 +64,7 @@ DEFAULTS: dict = {
     "pet_proactive": True,          # BMO puxa conversa sozinho (falas espontâneas por humor/contexto)
     "webui_enabled": True,          # painel web no localhost (ajustes/espaço interno/chat) — porta via BMO_WEB_PORT
     # --- LLM do chat (BMO responde) — escolhível em SETTINGS -> IA ---
-    # provedor: "openrouter" | "nvidia" | "grok" (todos OpenAI-compatíveis)
+    # provedor: "openrouter" | "nvidia" | "grok" | "local" (todos OpenAI-compatíveis)
     "llm_provider": "openrouter",
     # modelo por provedor (o cycler do SETTINGS grava aqui). Env *_MODEL semeia o default.
     "openrouter_model": os.environ.get("OPENROUTER_MODEL", "").strip()
@@ -73,9 +73,14 @@ DEFAULTS: dict = {
         or "moonshotai/kimi-k2.6",
     "grok_model": os.environ.get("GROK_MODEL", "").strip()
         or "grok-3",
-    # LLM local no PC (Ollama): defina LOCAL_LLM_HOST=<ip-do-pc> no .env
+    # LLM local no PC (llama.cpp/Ollama). O endpoint sai daqui (editável na UI),
+    # do .env (LOCAL_LLM_URL/HOST) ou cai no padrão llama.cpp 127.0.0.1:8080.
+    # "" = AUTO (padrão/.env). Aceita URL completa, "host" ou "host:porta".
+    "local_llm_url": "",
+    # nome do modelo local. O llama-server serve um único modelo e IGNORA esse
+    # campo; no Ollama ele precisa bater com o `ollama list`.
     "local_model": os.environ.get("LOCAL_LLM_MODEL", "").strip()
-        or "llama3.2",
+        or "local-model",
     # --- Visão (teste de câmera -> LLM descreve a imagem) — escolha PRÓPRIA ---
     # (separada do chat porque só modelos multimodais enxergam imagem)
     "vision_provider": "openrouter",
@@ -130,14 +135,23 @@ LLM_MODELS = {
         "grok-3-mini",
         "grok-2-vision-1212",
     ],
-    # Ollama rodando no SEU PC (LOCAL_LLM_HOST no .env). Os nomes são os
-    # do `ollama list` — edite conforme o que você baixou.
+    # LLM no SEU PC (llama.cpp/Ollama). No llama-server o nome é ignorado
+    # (use "local-model"); no Ollama use os nomes do `ollama list`.
     "local": [
+        "local-model",
         "llama3.2",
-        "llama3.1:8b",
         "qwen2.5:7b",
         "mistral",
     ],
+}
+
+# Presets do endpoint do LLM local pro cycler do SETTINGS (texto livre fica no
+# painel web). "" = AUTO: usa o .env ou o padrão llama.cpp (127.0.0.1:8080).
+LOCAL_LLM_URL_OPTIONS = ["", "127.0.0.1:8080", "127.0.0.1:11434"]
+LOCAL_LLM_URL_LABELS = {
+    "": "AUTO",
+    "127.0.0.1:8080": "LLAMACPP",
+    "127.0.0.1:11434": "OLLAMA",
 }
 
 # Modelos de VISÃO (multimodais) por provedor — usados no teste de visão.

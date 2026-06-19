@@ -7,9 +7,15 @@ campo `msg`. urllib puro, degrada sem chave (available=False).
 O provedor e o modelo são escolhidos em SETTINGS -> IA (gravados no config), e
 lidos a cada `ask()` — trocar nas Settings vale na hora, sem reiniciar.
 
-PROVEDOR "local": um Ollama rodando no SEU PC (API OpenAI-compatível, sem
-chave). Defina LOCAL_LLM_HOST=<ip-do-pc> no .env da rasp; no PC rode
-`ollama serve` ouvindo na rede (OLLAMA_HOST=0.0.0.0).
+PROVEDOR "local": um servidor de LLM rodando no SEU PC (API OpenAI-compatível,
+sem chave). Funciona com:
+  - llama.cpp (llama-server) — padrao, porta 8080. Ex.:
+        llama-server -m modelo.gguf --host 0.0.0.0 --port 8080
+  - Ollama — porta 11434 (OLLAMA_HOST=0.0.0.0 ollama serve)
+O endpoint sai do config `local_llm_url` (editavel em SETTINGS -> IA e no
+painel web) ou do .env (LOCAL_LLM_URL / LOCAL_LLM_HOST). Sem nada configurado,
+cai no padrao llama.cpp do MESMO PC: http://127.0.0.1:8080/v1/chat/completions
+— ou seja, com o BMO e o modelo no mesmo PC, "LOCAL (PC)" ja funciona de cara.
 
 CONTEXTO DO OBSIDIAN (Segundo Cérebro) — dois caminhos se somam:
   1. AUTOMÁTICO: antes de chamar o LLM, o ask() busca os termos da mensagem
@@ -27,8 +33,9 @@ Env (chaves; o resto é via Settings):
     OPENROUTER_API_KEY   chave do OpenRouter (openrouter.ai/keys)
     NVIDIA_API_KEY       chave NIM da NVIDIA (build.nvidia.com), formato nvapi-...
     XAI_API_KEY          chave do Grok / xAI (console.x.ai)
-    LOCAL_LLM_HOST       ip[:porta] do Ollama no PC (porta padrão 11434)
-    LOCAL_LLM_URL        (alternativa) URL completa do /v1/chat/completions
+    LOCAL_LLM_URL        URL/host do LLM local (llama.cpp 8080 por padrão); aceita
+                         URL completa, "host" ou "host:porta"
+    LOCAL_LLM_HOST       (compat Ollama) ip[:porta] do LLM no PC (porta padrão 11434)
 """
 from __future__ import annotations
 
@@ -70,8 +77,9 @@ PROVIDERS = {
         "json_mode": True,
         "extra_headers": {},
     },
-    # Ollama no PC do dono — sem chave; URL vem do .env (LOCAL_LLM_HOST/URL).
-    # json_mode off: versões variadas do Ollama; o _parse acha o JSON no texto.
+    # LLM no PC do dono (llama.cpp/Ollama) — sem chave; URL vem do config
+    # `local_llm_url` ou do .env (LOCAL_LLM_URL/HOST). json_mode off: o
+    # llama-server/Ollama variam no suporte a JSON; o _parse acha o JSON no texto.
     "local": {
         "url": "",   # dinâmica — ver local_llm_url()
         "key_env": "",
@@ -83,20 +91,48 @@ PROVIDERS = {
 }
 
 
-def local_llm_url() -> str:
-    """URL do chat/completions do LLM local (Ollama no PC). "" = não configurado.
+# Padrão quando nada está configurado: llama.cpp (llama-server) no MESMO PC.
+DEFAULT_LOCAL_URL = "http://127.0.0.1:8080/v1/chat/completions"
 
-    LOCAL_LLM_URL ganha (URL completa); senão LOCAL_LLM_HOST=ip[:porta]
-    (porta padrão 11434, a do Ollama)."""
-    url = os.environ.get("LOCAL_LLM_URL", "").strip()
-    if url:
-        return url
-    host = os.environ.get("LOCAL_LLM_HOST", "").strip()
-    if not host:
+
+def _normalize_endpoint(value: str, default_port: int = 8080) -> str:
+    """Aceita URL completa, "host" ou "host:porta" e devolve a URL do
+    /v1/chat/completions. "" -> "". Ex.:
+        "127.0.0.1:8080"            -> http://127.0.0.1:8080/v1/chat/completions
+        "192.168.0.5"              -> http://192.168.0.5:8080/v1/chat/completions
+        "http://pc:8080"           -> http://pc:8080/v1/chat/completions
+        "http://pc:8080/v1/chat/completions" -> (inalterado)"""
+    v = (value or "").strip()
+    if not v:
         return ""
-    if ":" not in host:
-        host += ":11434"
-    return f"http://{host}/v1/chat/completions"
+    if "://" in v:                       # URL completa
+        v = v.rstrip("/")
+        if v.endswith("/chat/completions"):
+            return v
+        if v.endswith("/v1"):
+            return v + "/chat/completions"
+        return v + "/v1/chat/completions"
+    if ":" not in v:                     # só host -> adiciona a porta padrão
+        v += f":{default_port}"
+    return f"http://{v}/v1/chat/completions"
+
+
+def local_llm_url() -> str:
+    """URL do chat/completions do LLM local (llama.cpp/Ollama no PC).
+
+    Prioridade: config `local_llm_url` (UI) > LOCAL_LLM_URL (.env) >
+    LOCAL_LLM_HOST (.env, compat Ollama porta 11434) > padrão llama.cpp
+    (127.0.0.1:8080). Nunca volta "" — com o modelo no mesmo PC já resolve."""
+    cfg = (config.get("local_llm_url") or "").strip()
+    if cfg:
+        return _normalize_endpoint(cfg, 8080)
+    env_url = os.environ.get("LOCAL_LLM_URL", "").strip()
+    if env_url:
+        return _normalize_endpoint(env_url, 8080)
+    env_host = os.environ.get("LOCAL_LLM_HOST", "").strip()
+    if env_host:
+        return _normalize_endpoint(env_host, 11434)   # compat Ollama
+    return DEFAULT_LOCAL_URL
 
 
 def _provider(cfg_key: str = "llm_provider") -> str:
@@ -110,7 +146,7 @@ def _resolve(provider_key: str = "llm_provider", model_field: str = "model_key")
     model_field escolhe 'model_key' (chat) ou 'vision_model_key' (visão).
 
     No provedor "local" não há chave: api_key volta "ollama" (placeholder
-    aceito) quando a URL está configurada, e a URL vem do .env."""
+    aceito) e a URL vem do config `local_llm_url`/.env/padrão (local_llm_url())."""
     name = _provider(provider_key)
     spec = PROVIDERS[name]
     if name == "local":
