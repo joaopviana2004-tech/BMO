@@ -79,6 +79,7 @@ from bmo_os.services.sysinfo import SysInfoService
 from bmo_os.services.todoist import TodoistService
 from bmo_os.services.tts import SCREEN_PHRASES, TTSService
 from bmo_os.services.voice import VoiceService
+from bmo_os.services.webui import WebUIServer
 
 # Sync das preferências do perfil com o Drive (None = guest/sem credencial).
 # Vive aqui pra o logout do SETTINGS conseguir dar o flush final.
@@ -234,6 +235,11 @@ def build_initial(app: App):
         """Libera hardware (mic, câmera, GPIO) ANTES do restart por execv.
         Sem isso, libs em C (libcamera, lgpio) deixam fds abertos que
         sobrevivem ao execv e o processo novo não reivindica câmera/botão."""
+        try:
+            if webui is not None:   # fecha a porta do painel antes do novo bind
+                webui.stop()
+        except Exception:
+            pass
         try:
             voice.set_enabled(False)
         except Exception:
@@ -682,6 +688,91 @@ def build_initial(app: App):
         }
 
     _remote_chat["fn"] = remote_chat
+
+    # ---- painel web (localhost temático): ajustes + espaço interno + chat ----
+    def web_state() -> dict:
+        """Snapshot do 'mundo interno' do BMO pro painel: humor/afeto/energia/
+        streak, o que ele lembra de você e a telemetria da Pi. Tudo via getters
+        thread-safe que já existem — nada bloqueia."""
+        snap = pet.get()
+        sysd = sysinfo.get()
+        try:
+            graph = knowledge.scan()
+            notes, links = len(graph.notes), len(graph.edges)
+        except Exception:
+            notes, links = 0, 0
+        last = (getattr(chat, "last_msg", "") or "").strip()
+        return {
+            "pet": {"mood": snap.mood, "energy": round(snap.energy, 3),
+                    "affection": round(snap.affection, 1), "streak": snap.streak,
+                    "idle_s": int(snap.idle_s), "present": snap.present},
+            "memory": {"name": memory.name, "facts": memory.facts()},
+            "sys": {"cpu": sysd.cpu_pct, "temp": sysd.temp_c, "ram_pct": sysd.ram_pct,
+                    "gpu": sysd.gpu_pct, "volts": sysd.volts, "ok": sysd.ok},
+            "knowledge": {"notes": notes, "links": links},
+            "bmo_says": "" if last == "..." else last,
+        }
+
+    def web_set_config(key: str, value) -> dict:
+        """Aplica uma config vinda do painel, espelhando os efeitos vivos do
+        SETTINGS (volume, voz, coolers). Só aceita chaves conhecidas e coage o
+        tipo pelo DEFAULT, então o painel não quebra a config."""
+        if key not in config.DEFAULTS:
+            return {"ok": False, "error": "config desconhecida"}
+        default = config.DEFAULTS[key]
+        try:
+            if isinstance(default, bool):
+                value = value in (True, "true", "True", 1, "1", "on")
+            elif isinstance(default, int):       # bool já tratado acima
+                value = int(value)
+            elif isinstance(default, float):
+                value = float(value)
+            else:
+                value = "" if value is None else str(value)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "valor invalido"}
+        config.set_value(key, value)
+        if key == "volume":
+            audio.set_volume(value / 100)
+        elif key == "cooler_enabled":
+            try:
+                cooler.set_enabled(bool(value))
+            except Exception:
+                pass
+        try:
+            on_setting_change(key, value)   # reabre o mic em voice_enabled/mic_device
+        except Exception:
+            pass
+        return {"ok": True, "key": key, "value": config.get(key)}
+
+    def web_memory(payload: dict) -> dict:
+        """Edita a memória do BMO pelo painel (espaço interno): nome, fatos e
+        'esquecer tudo'. Usa a API thread-safe do PetMemory."""
+        action = (payload.get("action") or "").strip()
+        if action == "set_name":
+            memory.set_name(payload.get("name", ""))
+        elif action == "add_fact":
+            memory.add_facts([payload.get("fact", "")])
+        elif action == "del_fact":
+            memory.remove_fact(payload.get("fact", ""))
+        elif action == "clear":
+            memory.clear()
+        else:
+            return {"ok": False, "error": "acao invalida"}
+        return {"ok": True, "name": memory.name, "facts": memory.facts()}
+
+    # Sobe o painel (no-op se desligado na config ou porta ocupada). Reaproveita
+    # remote_chat: o chat web abre telas / cria tarefas / fala no aparelho, igual
+    # ao push-to-talk. Mesmo modelo de confiança da rede local (ver pairing.py).
+    webui = None
+    if config.get("webui_enabled"):
+        webui = WebUIServer(on_chat=remote_chat, get_state=web_state,
+                            list_mics=voice.list_input_devices,
+                            on_set_config=web_set_config, on_memory=web_memory)
+        if webui.start():
+            ip = local_ip()
+            extra = f"  (rede: http://{ip}:{webui.port})" if ip else ""
+            print(f"[webui] painel do BMO em {webui.url()}{extra}")
 
     # Telas onde o BMO pode falar sozinho (ambientes/descanso) — nunca durante
     # jogos ativos, menus ou suspensão (tela apagada).

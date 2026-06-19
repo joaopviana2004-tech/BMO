@@ -62,6 +62,7 @@ DEFAULTS: dict = {
     "mic_device": "",               # nome (ou trecho) do microfone de entrada; "" = padrão do sistema
     "tts_volume": 100,              # 0-100 — volume da voz do BMO (eSpeak-NG), separado do volume dos efeitos
     "pet_proactive": True,          # BMO puxa conversa sozinho (falas espontâneas por humor/contexto)
+    "webui_enabled": True,          # painel web no localhost (ajustes/espaço interno/chat) — porta via BMO_WEB_PORT
     # --- LLM do chat (BMO responde) — escolhível em SETTINGS -> IA ---
     # provedor: "openrouter" | "nvidia" | "grok" (todos OpenAI-compatíveis)
     "llm_provider": "openrouter",
