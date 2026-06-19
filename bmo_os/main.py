@@ -685,6 +685,7 @@ def build_initial(app: App):
             "task": getattr(chat, "last_task", ""),
             "error": getattr(chat, "last_error", ""),
             "notes": getattr(chat, "last_notes", []),
+            "rag": getattr(chat, "last_rag", []),   # quais notas o LLM consultou
         }
 
     _remote_chat["fn"] = remote_chat
@@ -761,6 +762,40 @@ def build_initial(app: App):
             return {"ok": False, "error": "acao invalida"}
         return {"ok": True, "name": memory.name, "facts": memory.facts()}
 
+    def web_brain() -> dict:
+        """Snapshot do 'cérebro' (RAG do Obsidian) pro painel: resumo do grafo,
+        lista das notas (mais recentes primeiro) e o que o RAG consultou na
+        última resposta — pra o dono ver quais arquivos foram pro LLM."""
+        g = knowledge.scan()
+        notes = []
+        for n in sorted(g.notes.values(), key=lambda x: -x.mtime):
+            notes.append({
+                "id": n.id, "title": n.title,
+                "tags": list(n.tags), "links": g.degree(n.id),
+                "preview": " ".join(n.preview)[:160], "mtime": n.mtime,
+            })
+        return {
+            "summary": {"notes": len(g.notes), "links": len(g.edges),
+                        "ghosts": len(g.ghosts)},
+            "notes": notes,
+            "last_rag": getattr(chat, "last_rag", []),
+        }
+
+    def web_brain_search(query: str) -> dict:
+        """Roda a MESMA busca do RAG (knowledge.search) pro dono testar o que o
+        BMO acharia — mostra título, score e trecho de cada acerto."""
+        q = (query or "").strip()
+        if not q:
+            return {"query": "", "hits": []}
+        try:
+            hits = knowledge.search(q, k=6)
+        except Exception as e:
+            return {"query": q, "hits": [], "error": str(e)[:80]}
+        return {"query": q, "hits": [
+            {"title": h["title"], "score": round(float(h.get("score", 0)), 1),
+             "tags": h.get("tags", []), "snippet": (h.get("snippet", "") or "")[:300]}
+            for h in hits]}
+
     # Sobe o painel (no-op se desligado na config ou porta ocupada). Reaproveita
     # remote_chat: o chat web abre telas / cria tarefas / fala no aparelho, igual
     # ao push-to-talk. Mesmo modelo de confiança da rede local (ver pairing.py).
@@ -768,7 +803,8 @@ def build_initial(app: App):
     if config.get("webui_enabled"):
         webui = WebUIServer(on_chat=remote_chat, get_state=web_state,
                             list_mics=voice.list_input_devices,
-                            on_set_config=web_set_config, on_memory=web_memory)
+                            on_set_config=web_set_config, on_memory=web_memory,
+                            get_brain=web_brain, on_brain_search=web_brain_search)
         if webui.start():
             ip = local_ip()
             extra = f"  (rede: http://{ip}:{webui.port})" if ip else ""

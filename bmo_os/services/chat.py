@@ -272,6 +272,9 @@ class ChatService:
         # Debug do RAG: o que foi pesquisado/lido nas notas na última ask()
         # (ex.: ["auto 'quem é jp?' -> JP", "tool 'projetos jp' -> Bimo"]).
         self.last_notes: list[str] = []
+        # Versão estruturada do mesmo (pro painel web mostrar quais notas foram
+        # enviadas ao LLM): [{kind, query, hits:[{title, score}]}].
+        self.last_rag: list[dict] = []
         # Memória opcional (PetMemory): se None, o chat se comporta como antes.
         self.memory = memory
         # KnowledgeService opcional: tools notes_query (ler) e notes_write (gravar).
@@ -339,6 +342,11 @@ class ChatService:
         titles = ", ".join(h["title"] for h in hits) if hits else "(nada)"
         entry = f"{kind} '{query}' -> {titles}"
         self.last_notes.append(entry)
+        self.last_rag.append({
+            "kind": kind, "query": query,
+            "hits": [{"title": h["title"],
+                      "score": round(float(h.get("score", 0)), 1)} for h in hits],
+        })
         print(f"[chat] notas {entry}", flush=True)
 
     def _notes_context(self, query: str) -> str:
@@ -416,6 +424,7 @@ class ChatService:
         self.last_task = ""
         self.last_power = None
         self.last_notes = []
+        self.last_rag = []
         provider, spec, url, api_key, model = _resolve()
         if not api_key:
             self.last_error = ("configure LOCAL_LLM_HOST no .env" if provider == "local"

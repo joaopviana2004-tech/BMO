@@ -33,6 +33,7 @@ import json
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from ..core import config
 
@@ -135,12 +136,15 @@ class WebUIServer:
     thread lá no main.py (mesma ponte do chat remoto)."""
 
     def __init__(self, *, on_chat=None, get_state=None, list_mics=None,
-                 on_set_config=None, on_memory=None, port: int | None = None) -> None:
+                 on_set_config=None, on_memory=None, get_brain=None,
+                 on_brain_search=None, port: int | None = None) -> None:
         self.on_chat = on_chat
         self.get_state = get_state
         self.list_mics = list_mics or (lambda: [])
         self.on_set_config = on_set_config
         self.on_memory = on_memory
+        self.get_brain = get_brain            # snapshot do cérebro (RAG/notas)
+        self.on_brain_search = on_brain_search  # roda knowledge.search pro painel
         self.port = port or DEFAULT_PORT
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -186,6 +190,10 @@ class WebUIServer:
                     self._api_state()
                 elif path == "/api/config":
                     self._send(200, {"groups": _config_schema(srv.list_mics)})
+                elif path == "/api/brain":
+                    self._api_brain()
+                elif path == "/api/brain/search":
+                    self._api_brain_search()
                 else:
                     self._send(404, {"error": "not found"})
 
@@ -204,6 +212,25 @@ class WebUIServer:
                     return
                 try:
                     self._send(200, srv.get_state() or {})
+                except Exception as e:
+                    self._send(500, {"error": str(e)[:80]})
+
+            def _api_brain(self) -> None:
+                if srv.get_brain is None:
+                    self._send(503, {"error": "cerebro indisponivel"})
+                    return
+                try:
+                    self._send(200, srv.get_brain() or {})
+                except Exception as e:
+                    self._send(500, {"error": str(e)[:80]})
+
+            def _api_brain_search(self) -> None:
+                if srv.on_brain_search is None:
+                    self._send(503, {"error": "busca indisponivel"})
+                    return
+                q = (parse_qs(urlparse(self.path).query).get("q", [""]) or [""])[0]
+                try:
+                    self._send(200, srv.on_brain_search(q) or {})
                 except Exception as e:
                     self._send(500, {"error": str(e)[:80]})
 
@@ -389,6 +416,31 @@ PAGE = r"""<!DOCTYPE html>
   .composer{ display:flex; gap:8px; margin-top:10px; }
   .composer input{ flex:1; max-width:none; }
   .composer .btn{ background:var(--green); }
+
+  /* --- correções de alinhamento + aba extra (regras tardias sobrescrevem) --- */
+  .row select, .row input[type=text]{ flex:0 0 54%; width:54%; min-width:0; max-width:54%; }
+  .row .tog{ flex:0 0 auto; }
+  .tabs button{ flex:1 1 0; min-width:68px; font-size:9px; padding:10px 4px; }
+  .tabs button .dot{ width:8px; height:8px; margin-right:4px; }
+
+  /* --- CÉREBRO (RAG do Obsidian) --- */
+  .brain-sum{ display:flex; gap:8px; margin-bottom:10px; }
+  .brain-sum .card{ flex:1; text-align:center; padding:8px 4px; }
+  .brain-search{ display:flex; gap:6px; margin-bottom:10px; }
+  .brain-search input{ flex:1; max-width:none; }
+  .note{ background:#fff; border:3px solid var(--ink); border-radius:10px; padding:8px 10px; margin:7px 0; }
+  .note .nt{ font-size:11px; display:flex; justify-content:space-between; gap:6px; align-items:center; }
+  .note .deg{ font-size:9px; color:#fff; background:var(--ink); border-radius:6px; padding:1px 6px; white-space:nowrap; }
+  .note .tags{ margin-top:4px; }
+  .tag{ display:inline-block; font-size:9px; background:#dff0e8; border:2px solid var(--ink); border-radius:6px; padding:1px 5px; margin:2px 3px 0 0; }
+  .note .prev{ font-size:9px; color:#4f6b62; margin-top:5px; line-height:1.4; }
+  .score{ font-size:9px; color:#7a5fb0; }
+  .ragbox{ background:#efeaf7; border:3px solid var(--ink); border-radius:10px; padding:8px 10px; margin-bottom:12px; }
+  .ragbox .k{ font-size:9px; color:#7a5fb0; }
+  .ragline{ font-size:10px; margin-top:5px; line-height:1.4; }
+  .ragline b{ color:#7a5fb0; }
+  .kind{ display:inline-block; font-size:8px; color:#fff; background:#7a5fb0; border-radius:5px; padding:1px 5px; margin-right:5px; vertical-align:1px; }
+  .msg.rag{ align-self:flex-start; background:#efeaf7; font-size:9px; color:#5b4a86; border-color:#b9a7e0; max-width:90%; }
 </style>
 </head>
 <body>
@@ -403,7 +455,8 @@ PAGE = r"""<!DOCTYPE html>
 
   <div class="tabs">
     <button id="tab-chat" class="on" onclick="showTab('chat')"><span class="dot" style="background:var(--green)"></span>CONVERSAR</button>
-    <button id="tab-estado" onclick="showTab('estado')"><span class="dot" style="background:var(--blue)"></span>ESPAÇO INTERNO</button>
+    <button id="tab-estado" onclick="showTab('estado')"><span class="dot" style="background:var(--blue)"></span>INTERNO</button>
+    <button id="tab-cerebro" onclick="showTab('cerebro')"><span class="dot" style="background:#9b7fd0"></span>CÉREBRO</button>
     <button id="tab-ajustes" onclick="showTab('ajustes')"><span class="dot" style="background:var(--red)"></span>AJUSTES</button>
   </div>
 
@@ -439,6 +492,18 @@ PAGE = r"""<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- CÉREBRO (RAG) -->
+  <div id="panel-cerebro" class="panel hidden">
+    <h2>CÉREBRO (RAG DO OBSIDIAN)</h2>
+    <div class="brain-sum" id="brainSum"></div>
+    <div id="ragLast"></div>
+    <div class="brain-search">
+      <input id="brainQ" type="text" placeholder="testar busca do RAG (ex: projetos)" onkeydown="if(event.key==='Enter')searchBrain()">
+      <button class="btn" onclick="searchBrain()">BUSCAR</button>
+    </div>
+    <div id="brainList"><span class="muted">carregando notas...</span></div>
+  </div>
+
   <!-- AJUSTES -->
   <div id="panel-ajustes" class="panel hidden">
     <h2>AJUSTES</h2>
@@ -457,11 +522,12 @@ async function api(path, opts){
 
 function showTab(name){
   TAB = name;
-  for(const t of ['chat','estado','ajustes']){
+  for(const t of ['chat','estado','cerebro','ajustes']){
     $('#panel-'+t).classList.toggle('hidden', t!==name);
     $('#tab-'+t).classList.toggle('on', t===name);
   }
   if(name==='estado') refreshState();
+  if(name==='cerebro') refreshBrain();
   if(name==='ajustes') refreshConfig();
 }
 
@@ -565,6 +631,58 @@ async function setCfg(key, value, el){
   if(r && r.error) flashChip(r.error);
 }
 
+/* ---------- CÉREBRO (RAG do Obsidian) ---------- */
+const RAG_KIND = { auto:'auto', tool:'busca', write:'gravou' };
+
+function renderRag(rag){
+  // bloco "última consulta do RAG": quais notas foram enviadas ao LLM
+  if(!rag || !rag.length) return '';
+  const lines = rag.map(r=>{
+    const hits = (r.hits||[]).map(h=>
+      `${escapeHtml(h.title)}<span class="score"> ${h.score}</span>`).join(', ')
+      || '<span class="muted">nada</span>';
+    return `<div class="ragline"><span class="kind">${RAG_KIND[r.kind]||r.kind}</span>`+
+      `<b>${escapeHtml(r.query)}</b> → ${hits}</div>`;
+  }).join('');
+  return `<div class="ragbox"><div class="k">RAG DA ÚLTIMA RESPOSTA — notas enviadas ao LLM</div>${lines}</div>`;
+}
+
+function noteCard(n, deg, body){
+  const tags = (n.tags||[]).map(t=>`<span class="tag">#${escapeHtml(t)}</span>`).join('');
+  return `<div class="note"><div class="nt"><span>${escapeHtml(n.title)}</span>`+
+    `<span class="deg">${deg}</span></div>`+
+    (tags?`<div class="tags">${tags}</div>`:'')+
+    (body?`<div class="prev">${escapeHtml(body)}</div>`:'')+`</div>`;
+}
+
+async function refreshBrain(){
+  const b = await api('/api/brain');
+  if(b.error){ $('#brainList').innerHTML='<span class="muted">'+escapeHtml(b.error)+'</span>'; $('#brainSum').innerHTML=''; return; }
+  const s = b.summary||{};
+  $('#brainSum').innerHTML =
+    `<div class="card"><div class="k">NOTAS</div><div class="v">${s.notes||0}</div></div>`+
+    `<div class="card"><div class="k">LIGAÇÕES</div><div class="v">${s.links||0}</div></div>`+
+    `<div class="card"><div class="k">FANTASMAS</div><div class="v">${s.ghosts||0}</div></div>`;
+  $('#ragLast').innerHTML = renderRag(b.last_rag);
+  const notes = b.notes||[];
+  if(!notes.length){ $('#brainList').innerHTML='<span class="muted">o cérebro está vazio — nenhuma nota sincada do Obsidian</span>'; return; }
+  $('#brainList').innerHTML = `<div class="muted">${notes.length} nota(s) · mais recentes primeiro</div>`+
+    notes.map(n=>noteCard(n, (n.links||0)+' lig.', n.preview)).join('');
+}
+
+async function searchBrain(){
+  const q = $('#brainQ').value.trim();
+  if(!q){ refreshBrain(); return; }
+  $('#brainList').innerHTML='<span class="muted">buscando...</span>';
+  const r = await api('/api/brain/search?q='+encodeURIComponent(q));
+  if(r.error){ $('#brainList').innerHTML='<span class="muted">'+escapeHtml(r.error)+'</span>'; return; }
+  const hits = r.hits||[];
+  if(!hits.length){ $('#brainList').innerHTML=`<div class="muted">nada encontrado para "${escapeHtml(q)}"</div>`; return; }
+  $('#brainList').innerHTML =
+    `<div class="muted">busca RAG p/ "${escapeHtml(q)}" — score = relevância (≥4 = match forte de título/tag)</div>`+
+    hits.map(h=>noteCard(h, 'score '+h.score, h.snippet)).join('');
+}
+
 /* ---------- CONVERSAR ---------- */
 function addMsg(cls, text){
   const d = document.createElement('div'); d.className='msg '+cls; d.textContent=text;
@@ -581,9 +699,17 @@ async function sendChat(){
   const extra = [];
   if(r.screen && r.screen!=='none' && r.screen!=='') extra.push('abriu: '+r.screen);
   if(r.task) extra.push('tarefa criada: '+r.task);
-  if(r.notes && r.notes.length) extra.push('nota salva');
+  // visibilidade do RAG: quais notas o LLM consultou (auto/busca) ou gravou
+  const reads = [], writes = [];
+  for(const e of (r.rag||[])){
+    const titles = (e.hits||[]).map(h=>h.title);
+    if(e.kind==='write') writes.push(...titles);
+    else if(titles.length) reads.push(...titles);
+  }
+  if(writes.length) extra.push('nota salva: '+[...new Set(writes)].join(', '));
   if(extra.length) addMsg('sys', extra.join(' · '));
-  if(!r.msg && !extra.length) addMsg('bmo', '(ok)');
+  if(reads.length) addMsg('rag', 'consultei no cérebro: '+[...new Set(reads)].join(', '));
+  if(!r.msg && !extra.length && !reads.length) addMsg('bmo', '(ok)');
 }
 
 function flashChip(t){ const c=$('#chip'); const old=c.textContent; c.textContent=t; setTimeout(()=>c.textContent=old, 2500); }
