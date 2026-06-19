@@ -26,6 +26,7 @@ from ..core.widgets import (
     LOGICAL_SIZE,
 )
 from ..services import audio
+from ..services.pairing import local_ip
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SHUTDOWN_CONFIRM_S = 3.0
@@ -122,6 +123,8 @@ def _ia_items():
         {"type": "cycle", "key": "camera_face_tracking", "label": "BMO te ve",
          "options": [False, True], "format": _fmt_onoff},
         {"type": "action", "key": "gen_voice_cache", "label": "Gerar vozes"},
+        # somente-leitura: endereço do painel web (abra do PC/celular na rede)
+        {"type": "info", "key": "webui", "label": "Painel"},
     ]
 
 
@@ -134,6 +137,15 @@ def _conta_items():
         {"type": "action", "key": "connect", "label": "Conectar conta"},
         {"type": "action", "key": "logout", "label": "Trocar usuario"},
     ]
+
+
+def _webui_display() -> str:
+    """Endereço do painel web pro display CRT (sem 'http://' pra caber). 'OFF'
+    se desligado na config; cai em 'localhost' se a LAN não resolver o IP."""
+    if not config.get("webui_enabled"):
+        return "OFF"
+    port = os.environ.get("BMO_WEB_PORT", "8080") or "8080"
+    return f"{local_ip() or 'localhost'}:{port}"
 
 
 def _account_display() -> str:
@@ -440,7 +452,9 @@ class SettingsListScreen:
     def _row_rects(self):
         # passo/altura menores quando a categoria tem muitos itens (IA), pra caber tudo
         n = len(self._rows)
-        if n > 10:
+        if n > 11:
+            step, top, hgt = 16, 28, 14
+        elif n > 10:
             step, top, hgt = 17, 30, 15
         elif n > 9:
             step, top, hgt = 19, 32, 17
@@ -485,7 +499,12 @@ class SettingsListScreen:
             surface.blit(label, label.get_rect(midleft=(label_x, rect.centery)))
 
             if item["type"] == "info":
-                val = _account_display() if item["key"] == "account" else ""
+                if item["key"] == "account":
+                    val = _account_display()
+                elif item["key"] == "webui":
+                    val = _webui_display()
+                else:
+                    val = ""
                 val_img = render_text(val, 9, fg, pixel=False)
                 surface.blit(val_img, val_img.get_rect(midright=(rect.right - 8, rect.centery)))
             elif item["type"] in ("cycle", "mic", "llm_model"):
