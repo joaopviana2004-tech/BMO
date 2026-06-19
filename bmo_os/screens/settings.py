@@ -179,6 +179,9 @@ CATEGORIES = [
     ("SOM", _som_items),
     ("TELA", _tela_items),
     ("SISTEMA", _sistema_items),
+    # items_fn=None -> categoria com TELA PROPRIA (não é lista de cyclers):
+    # ativa o callback on_open_wifi (abre a WifiScreen).
+    ("INTERNET", None),
     ("IA", _ia_items),
     ("CONTA", _conta_items),
 ]
@@ -193,7 +196,7 @@ class SettingsScreen:
 
     def __init__(self, *, on_back, on_open, on_change=None, mic_options=None,
                  on_cleanup=None, tts=None, on_logout=None,
-                 on_connect=None) -> None:
+                 on_connect=None, on_open_wifi=None) -> None:
         self.on_back = on_back
         self.on_open = on_open          # push de uma sub-tela
         self.on_change = on_change
@@ -202,6 +205,7 @@ class SettingsScreen:
         self.tts = tts                  # serviço de voz (pra ação "Gerar vozes")
         self.on_logout = on_logout      # Wipe & Load (main.do_logout)
         self.on_connect = on_connect    # abre o LOGIN QR por cima (main.do_connect)
+        self.on_open_wifi = on_open_wifi  # abre a WifiScreen (categoria INTERNET)
         self._index = 0
         self._rows = [label for label, _ in CATEGORIES] + ["Voltar"]
 
@@ -234,6 +238,10 @@ class SettingsScreen:
             audio.play("back"); self.on_back(); return
         audio.play("select")
         label, items_fn = CATEGORIES[self._index]
+        if items_fn is None:   # categoria com tela própria (INTERNET -> WifiScreen)
+            if self.on_open_wifi is not None:
+                self.on_open_wifi()
+            return
         # on_back da sub = mesmo pop do menu: com a sub no topo, pop volta
         # pro menu; com o menu no topo, pop sai das configs.
         self.on_open(SettingsListScreen(

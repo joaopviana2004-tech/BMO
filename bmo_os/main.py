@@ -20,7 +20,7 @@ import pygame
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from bmo_os.core import config, session
+from bmo_os.core import config, session, theme_state
 from bmo_os.core.app import App
 from bmo_os.core.theme import Colors, LOGICAL_SIZE, render_text
 from bmo_os.screens.agenda import AgendaScreen
@@ -50,6 +50,7 @@ from bmo_os.screens.pong import PongAmbientScreen, PongScreen
 from bmo_os.screens.recorder import RecorderScreen
 from bmo_os.screens.settings import SettingsScreen
 from bmo_os.screens.smarthome import SmartHomeScreen
+from bmo_os.screens.wifi import WifiScreen
 from bmo_os.screens.sysinfo import SysInfoScreen
 from bmo_os.screens.shuffler import ShufflingAmbientScreen
 from bmo_os.screens.sleep import SleepScreen
@@ -68,6 +69,7 @@ from bmo_os.services.gcalendar import CalendarService
 from bmo_os.services.gpio_button import GPIOButton
 from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.knowledge import KnowledgeService
+from bmo_os.services.network import NetworkService
 from bmo_os.services.notifications import EventAlerter
 from bmo_os.services.pairing import PairingServer, local_ip
 from bmo_os.services.pet_brain import PetBrain
@@ -181,6 +183,10 @@ def build_initial(app: App):
     alerter = EventAlerter()
     # Telemetria de hardware (tela SISTEMA). No PC mostra "--".
     sysinfo = SysInfoService()
+    # Rede: detecção de internet (qualquer SO) + WiFi via nmcli (só no Pi).
+    # A status bar passa a mostrar "sem internet" quando offline.
+    network = NetworkService()
+    theme_state.set_online_getter(lambda: network.online)
     # Casa inteligente (tela CASA): tomadas Tuya/JWcom controladas na LAN.
     # Sem tinytuya (PC) ou sem tomadas no .env -> available=False (tela offline).
     smarthome = SmartHomeService()
@@ -254,6 +260,10 @@ def build_initial(app: App):
             pass
         try:
             camera.stop()
+        except Exception:
+            pass
+        try:
+            network.stop()   # encerra a thread de checagem de internet
         except Exception:
             pass
         try:
@@ -498,6 +508,11 @@ def build_initial(app: App):
         app.manager.push(LoginScreen(on_success=_ok, on_guest=app.manager.pop,
                                      pair_ip=local_ip(), guest_label="VOLTAR"))
 
+    def open_wifi() -> None:
+        app.manager.push(WifiScreen(
+            net=network, camera=camera,
+            on_back=app.manager.pop, push=app.manager.push, pop=app.manager.pop))
+
     def make_settings() -> SettingsScreen:
         return SettingsScreen(
             on_back=app.manager.pop,
@@ -508,6 +523,7 @@ def build_initial(app: App):
             tts=tts,
             on_logout=do_logout,
             on_connect=do_connect,
+            on_open_wifi=open_wifi,
         )
 
     # ---- comandos de voz -> navegação (executados no main thread) ----

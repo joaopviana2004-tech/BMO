@@ -84,6 +84,7 @@ class CameraService:
         self._lock = threading.Lock()
         self._latest_frame: Optional[pygame.Surface] = None
         self._latest_array = None   # último frame cru (BGR ndarray) p/ capture_jpeg
+        self._qr = None             # cv2.QRCodeDetector lazy (leitura de QR de WiFi)
         self._latest_faces: list[tuple[int, int, int, int]] = []
         self._last_face_request = 0.0
         self._frame_count = 0
@@ -321,6 +322,23 @@ class CameraService:
             return buf.tobytes() if ok else None
         except Exception:
             return None
+
+    def read_qr(self) -> str:
+        """Decodifica um QR no último frame (pro WiFi por QR). "" se não achar.
+        Usa o cv2.QRCodeDetector no frame que a thread já capturou."""
+        if not self.is_available or not HAS_CV2_MODULE:
+            return ""
+        with self._lock:
+            arr = self._latest_array
+        if arr is None:
+            return ""
+        try:
+            if self._qr is None:
+                self._qr = cv2.QRCodeDetector()
+            data, _points, _straight = self._qr.detectAndDecode(arr)
+            return data or ""
+        except Exception:
+            return ""
 
     def capture_photo(self, target_dir: Path) -> Optional[Path]:
         """Captura uma foto. Retorna o Path ou None."""
