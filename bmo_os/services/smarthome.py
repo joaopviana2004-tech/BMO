@@ -19,12 +19,19 @@ rede (que pode travar segundos quando a tomada está offline). Os comandos
 (on/off/toggle) são otimistas — atualizam o snapshot na hora pra UI responder —
 e são executados na thread de trabalho. Degrada sozinho: sem `tinytuya` (PC de
 dev) ou sem tomadas no `.env`, `available=False` e a tela mostra offline.
+
+AUTO-RECUPERAÇÃO DE IP (DHCP): se o IP do `.env` parar de responder, a tomada
+provavelmente só trocou de IP no roteador (o app da Tuya não percebe porque vai
+pela nuvem). Em vez de marcar 'offline' pra sempre, o serviço faz uma varredura
+broadcast Tuya (`tinytuya.deviceScan`), acha a tomada pelo ID e atualiza o IP em
+memória sozinho — sem precisar editar o `.env` nem reiniciar. Ver `_rediscover`.
 """
 from __future__ import annotations
 
 import os
 import queue
 import threading
+import time
 
 try:
     import tinytuya
@@ -37,6 +44,8 @@ SWITCH_DP = "1"          # DP do relé principal (quase sempre "1" nas tomadas T
 POLL_INTERVAL = 6.0      # s entre leituras de estado em background
 SOCKET_TIMEOUT = 4       # s de timeout por chamada à tomada
 MAX_DEVICES = 8          # quantos slots SMARTHOME_T{i}_* procurar no .env
+REDISCOVER_COOLDOWN = 30.0   # s mínimos entre varreduras de redescoberta (DHCP)
+SCAN_SECONDS = 5         # tempo da varredura broadcast Tuya na redescoberta
 
 
 def _load_devices() -> list[dict]:
@@ -67,6 +76,8 @@ class SmartHomeService:
         self._conns: dict = {}                # key -> tinytuya.OutletDevice (cache)
         self._cmd_q: "queue.Queue" = queue.Queue()
         self._wake = threading.Event()        # acorda a thread (comando novo)
+        self._last_scan = 0.0                 # throttle da redescoberta (monotonic)
+        self._scan_cache: dict = {}           # último resultado do deviceScan
         # snapshot por tomada (o que a tela lê)
         self._state = {
             d["key"]: {"key": d["key"], "name": d["name"], "ip": d["ip"],
@@ -147,7 +158,37 @@ class SmartHomeService:
             except Exception:  # noqa: BLE001
                 pass
 
-    def _read(self, dev: dict) -> None:
+    def _rediscover(self, dev: dict) -> bool:
+        """Acha o IP ATUAL da tomada pelo ID via broadcast Tuya quando o IP do
+        .env parou de responder — típico de troca de IP por DHCP (a tomada some
+        do IP velho mas continua na rede). Auto-recuperação: sem isso, mudar o
+        roteador/lease deixava as tomadas 'offline' embora o app funcionasse.
+
+        Varredura é cara (~SCAN_SECONDS, broadcast): throttle por
+        REDISCOVER_COOLDOWN e cache do resultado pra todas as tomadas do ciclo.
+        Atualiza dev['ip'] + snapshot e dropa a conexão velha. True se mudou."""
+        if tinytuya is None:
+            return False
+        now = time.monotonic()
+        if now - self._last_scan >= REDISCOVER_COOLDOWN:
+            self._last_scan = now
+            try:
+                self._scan_cache = tinytuya.deviceScan(False, SCAN_SECONDS) or {}
+            except Exception:  # noqa: BLE001
+                self._scan_cache = {}
+        for ip, info in (self._scan_cache or {}).items():
+            gw = info.get("gwId") or info.get("id") or ""
+            if gw == dev["id"] and ip and ip != dev["ip"]:
+                dev["ip"] = ip
+                self._drop_conn(dev["key"])
+                with self._lock:
+                    self._state[dev["key"]]["ip"] = ip
+                print(f"[smarthome] {dev['key']} IP atualizado p/ {ip} (DHCP)", flush=True)
+                return True
+        return False
+
+    def _try_read(self, dev: dict) -> bool:
+        """Lê o estado uma vez. True se online; marca offline e False se falhou."""
         try:
             data = self._conn(dev).status()
             if not isinstance(data, dict) or "dps" not in data:
@@ -156,15 +197,19 @@ class SmartHomeService:
             on = bool(data["dps"].get(SWITCH_DP))
             with self._lock:
                 self._state[dev["key"]].update(on=on, online=True, err="")
+            return True
         except Exception as e:  # noqa: BLE001 — rede/tomada offline: marca e segue
             self._drop_conn(dev["key"])
             with self._lock:
                 self._state[dev["key"]].update(online=False, err=str(e)[:40])
+            return False
 
-    def _apply(self, key: str, on: bool) -> None:
-        dev = next((d for d in self._devices if d["key"] == key), None)
-        if dev is None:
-            return
+    def _read(self, dev: dict) -> None:
+        # falhou no IP atual? pode ter trocado de IP (DHCP): redescobre e tenta de novo
+        if not self._try_read(dev) and self._rediscover(dev):
+            self._try_read(dev)
+
+    def _try_switch(self, dev: dict, on: bool) -> bool:
         try:
             c = self._conn(dev)
             if on:
@@ -172,11 +217,21 @@ class SmartHomeService:
             else:
                 c.turn_off(switch=SWITCH_DP)
             with self._lock:
-                self._state[key].update(on=on, online=True, err="")
+                self._state[dev["key"]].update(on=on, online=True, err="")
+            return True
         except Exception as e:  # noqa: BLE001
-            self._drop_conn(key)
+            self._drop_conn(dev["key"])
             with self._lock:
-                self._state[key].update(err=str(e)[:40])
+                self._state[dev["key"]].update(err=str(e)[:40])
+            return False
+
+    def _apply(self, key: str, on: bool) -> None:
+        dev = next((d for d in self._devices if d["key"] == key), None)
+        if dev is None:
+            return
+        # comando falhou? redescobre o IP (DHCP) e reenvia, pra não perder o toque
+        if not self._try_switch(dev, on) and self._rediscover(dev):
+            self._try_switch(dev, on)
 
     def _loop(self) -> None:
         for d in self._devices:        # leitura inicial

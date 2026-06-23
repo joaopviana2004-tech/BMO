@@ -136,6 +136,44 @@ def local_llm_url() -> str:
     return DEFAULT_LOCAL_URL
 
 
+def probe_endpoint(value: str = "", timeout: int = 4) -> dict:
+    """Verifica se há um servidor LLM OpenAI-compatível ACESSÍVEL no endpoint
+    (pro 'LED verde' do painel ao escolher o IP do LLM local).
+
+    `value`: host/URL livre, mesmo formato do config `local_llm_url`
+    ("host", "host:porta" ou URL completa). "" usa o endpoint local efetivo
+    atual (local_llm_url(): config > .env > padrão llama.cpp). Faz um GET barato
+    em /v1/models. Retorna {ok, url, model, error}: ok=True se o servidor
+    respondeu (mesmo HTTP de erro conta como acessível). Roda no APARELHO
+    (BMO/Pi), então o LED reflete o que o BMO alcança — não o navegador."""
+    raw_val = (value or "").strip()
+    chat_url = _normalize_endpoint(raw_val, 8080) if raw_val else local_llm_url()
+    if not chat_url:
+        return {"ok": False, "url": "", "error": "sem endpoint"}
+    models_url = chat_url.replace("/chat/completions", "/models")
+    try:
+        req = urllib.request.Request(models_url, method="GET")
+        req.add_header("Authorization", "Bearer ollama")   # placeholder (Ollama)
+        req.add_header("User-Agent", "BMO-OS/1.0")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8", "ignore")
+        model = ""
+        try:
+            data = json.loads(body)
+            items = data.get("data") or data.get("models") or []
+            if items:
+                m0 = items[0]
+                model = m0.get("id") or m0.get("name") or m0.get("model") or ""
+        except Exception:
+            pass
+        return {"ok": True, "url": models_url, "model": model}
+    except urllib.error.HTTPError as e:
+        # respondeu HTTP (mesmo 401/404) => o servidor existe e está acessível
+        return {"ok": True, "url": models_url, "model": "", "note": f"HTTP {e.code}"}
+    except Exception as e:
+        return {"ok": False, "url": models_url, "error": str(e)[:80]}
+
+
 def _provider(cfg_key: str = "llm_provider") -> str:
     p = (config.get(cfg_key) or "openrouter").strip()
     return p if p in PROVIDERS else "openrouter"

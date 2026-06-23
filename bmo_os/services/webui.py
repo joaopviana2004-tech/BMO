@@ -165,9 +165,11 @@ def _config_schema(list_mics) -> list:
              "options": [{"value": m, "label": m} for m in config.LLM_MODELS.get(provider, [])]},
             # LLM no PC (llama.cpp/Ollama): host/URL editável. Vazio = padrão
             # llama.cpp no mesmo PC (127.0.0.1:8080). Só relevante p/ provedor LOCAL.
+            # ping=True -> o painel mostra um LED verde se o BMO ALCANÇA esse
+            # endpoint (GET /v1/models), evitando salvar um IP morto.
             {"key": "local_llm_url", "label": "LLM local (host/URL)", "type": "text",
              "value": config.get("local_llm_url") or "",
-             "placeholder": "vazio = 127.0.0.1:8080 (llama.cpp)"},
+             "placeholder": "vazio = 127.0.0.1:8080 (llama.cpp)", "ping": True},
             {"key": "vision_provider", "label": "Provedor (visão)", "type": "select",
              "value": vprovider, "options": _opts(config.LLM_PROVIDERS, config.LLM_PROVIDER_LABELS)},
             {"key": vmodel_key, "label": "Modelo (visão)", "type": "combo",
@@ -204,8 +206,9 @@ class WebUIServer:
                  get_tasks=None, on_tasks=None, get_agenda=None, on_agenda_create=None,
                  get_smarthome=None, on_smarthome=None, on_update=None,
                  get_notifications=None, on_notification_read=None,
-                 port: int | None = None) -> None:
+                 on_llm_ping=None, port: int | None = None) -> None:
         self.on_chat = on_chat
+        self.on_llm_ping = on_llm_ping        # testa alcance do LLM local (LED verde)
         self.get_state = get_state
         self.list_mics = list_mics or (lambda: [])
         self.on_set_config = on_set_config
@@ -267,6 +270,8 @@ class WebUIServer:
                     self._send(200, {"groups": _config_schema(srv.list_mics)})
                 elif path == "/api/brain":
                     self._call_get(srv.get_brain, "cerebro")
+                elif path == "/api/llm/ping":
+                    self._api_llm_ping()
                 elif path == "/api/brain/search":
                     self._api_brain_search()
                 elif path == "/api/brain/note":
@@ -373,6 +378,18 @@ class WebUIServer:
 
             def _api_state(self) -> None:
                 self._call_get(srv.get_state, "estado")
+
+            def _api_llm_ping(self) -> None:
+                """Testa se o BMO alcança o endpoint do LLM local (LED verde).
+                ?url= host/URL livre; vazio = endpoint local efetivo atual."""
+                if srv.on_llm_ping is None:
+                    self._send(503, {"ok": False, "error": "indisponivel"})
+                    return
+                url = (parse_qs(urlparse(self.path).query).get("url", [""]) or [""])[0]
+                try:
+                    self._send(200, srv.on_llm_ping(url) or {})
+                except Exception as e:
+                    self._send(500, {"ok": False, "error": str(e)[:80]})
 
             def _api_brain_search(self) -> None:
                 if srv.on_brain_search is None:

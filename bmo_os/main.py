@@ -61,7 +61,7 @@ from bmo_os.screens.tasks import TasksScreen
 from bmo_os.services import audio
 from bmo_os.services import google_auth
 from bmo_os.services.camera import CameraService
-from bmo_os.services.chat import ChatService
+from bmo_os.services.chat import ChatService, probe_endpoint
 from bmo_os.services.cooler import CoolerService
 from bmo_os.services.dev_hub import DevHubService
 from bmo_os.services.github_dev import GitHubPoller
@@ -979,7 +979,8 @@ def build_initial(app: App):
                             get_smarthome=web_smarthome, on_smarthome=web_smarthome_action,
                             on_update=web_update,
                             get_notifications=web_notifications,
-                            on_notification_read=web_notification_read)
+                            on_notification_read=web_notification_read,
+                            on_llm_ping=probe_endpoint)
         if webui.start():
             ip = local_ip()
             extra = f"  (rede: http://{ip}:{webui.port})" if ip else ""
