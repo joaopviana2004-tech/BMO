@@ -771,6 +771,9 @@ def build_initial(app: App):
         except (TypeError, ValueError):
             return {"ok": False, "error": "valor invalido"}
         config.set_value(key, value)
+        # Modelo de chat/visão digitado no painel: guarda como "personalizado"
+        # pra o cycler do device (SETTINGS -> IA) oferecer junto dos presets.
+        config.remember_custom_model(key, value)
         if key == "volume":
             audio.set_volume(value / 100)
         elif key == "cooler_enabled":

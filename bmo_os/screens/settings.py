@@ -367,7 +367,9 @@ class SettingsListScreen:
         if item["type"] == "mic":
             return ["(padrao)"] + list(self.mic_options())
         if item["type"] == "llm_model":
-            return list(self._llm_table(item).get(self._llm_provider(item), []))
+            # personalizado (digitado no painel web) + presets do provedor
+            kind = "vision" if item.get("models") == "vision" else "chat"
+            return config.model_options(self._llm_provider(item), kind)
         return item["options"]
 
     def _mic_current_display(self):

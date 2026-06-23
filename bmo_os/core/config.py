@@ -94,6 +94,18 @@ DEFAULTS: dict = {
         or "grok-2-vision-1212",
     "local_vision_model": os.environ.get("LOCAL_LLM_VISION_MODEL", "").strip()
         or "llava",
+    # --- Modelo PERSONALIZADO (digitado livremente no painel web) por slot ---
+    # O painel do PC deixa escrever QUALQUER nome de modelo; o último digitado
+    # fica guardado aqui por provedor+tipo, pra o cycler do device oferecer ele
+    # junto dos presets (SETTINGS -> IA). "" = sem personalizado ainda.
+    "openrouter_model_custom": "",
+    "nvidia_model_custom": "",
+    "grok_model_custom": "",
+    "local_model_custom": "",
+    "openrouter_vision_model_custom": "",
+    "nvidia_vision_model_custom": "",
+    "grok_vision_model_custom": "",
+    "local_vision_model_custom": "",
 }
 
 IDLE_TIMEOUT_OPTIONS = [5, 10, 15, 30, 60, 120]
@@ -180,6 +192,53 @@ LLM_VISION_MODELS = {
         "llama3.2-vision",
     ],
 }
+
+# Chaves de modelo ATIVO (o que o chat.py lê) por provedor — chat e visão.
+MODEL_KEYS = ({f"{p}_model" for p in LLM_PROVIDERS}
+              | {f"{p}_vision_model" for p in LLM_PROVIDERS})
+
+
+def custom_model_key(model_key: str) -> str:
+    """Slot que guarda o último modelo digitado livremente no painel web pra
+    a mesma chave de modelo. Ex.: 'openrouter_model' -> 'openrouter_model_custom',
+    'nvidia_vision_model' -> 'nvidia_vision_model_custom'."""
+    return f"{model_key}_custom"
+
+
+def _presets_for(provider: str, kind: str = "chat") -> list:
+    table = LLM_VISION_MODELS if kind == "vision" else LLM_MODELS
+    return list(table.get(provider, []))
+
+
+def model_options(provider: str, kind: str = "chat") -> list:
+    """Opções do cycler de modelo no device: o modelo personalizado (digitado
+    no painel web, se houver) PRIMEIRO + os presets, sem duplicar.
+    kind = 'chat' | 'vision'."""
+    suffix = "_vision_model" if kind == "vision" else "_model"
+    custom = (get(custom_model_key(f"{provider}{suffix}")) or "").strip()
+    opts = _presets_for(provider, kind)
+    if custom and custom not in opts:
+        opts = [custom] + opts
+    return opts
+
+
+def remember_custom_model(model_key: str, value) -> None:
+    """Guarda `value` como o 'modelo personalizado' do slot, pra o cycler do
+    device oferecer ele junto dos presets. No-op se model_key não for uma chave
+    de modelo, se o valor for vazio, ou se já for um preset (aí preserva o
+    personalizado anterior). Chamado pelo painel web ao trocar o modelo."""
+    if model_key not in MODEL_KEYS:
+        return
+    value = (value or "").strip()
+    if not value:
+        return
+    kind = "vision" if model_key.endswith("_vision_model") else "chat"
+    suffix = "_vision_model" if kind == "vision" else "_model"
+    provider = model_key[: -len(suffix)]
+    if value in _presets_for(provider, kind):
+        return
+    set_value(custom_model_key(model_key), value)
+
 
 _lock = Lock()
 _data: dict | None = None

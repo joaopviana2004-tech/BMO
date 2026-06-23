@@ -156,8 +156,12 @@ def _config_schema(list_mics) -> list:
         {"group": "IA", "items": [
             {"key": "llm_provider", "label": "Provedor (chat)", "type": "select",
              "value": provider, "options": _opts(config.LLM_PROVIDERS, config.LLM_PROVIDER_LABELS)},
-            {"key": model_key, "label": "Modelo (chat)", "type": "select",
+            # combo: digite QUALQUER nome de modelo (vale na hora) ou escolha um
+            # preset da lista. O que for digitado vira o "personalizado" e
+            # aparece no cycler do device junto dos presets.
+            {"key": model_key, "label": "Modelo (chat)", "type": "combo",
              "value": config.get(model_key),
+             "placeholder": "digite o modelo ou escolha um preset",
              "options": [{"value": m, "label": m} for m in config.LLM_MODELS.get(provider, [])]},
             # LLM no PC (llama.cpp/Ollama): host/URL editável. Vazio = padrão
             # llama.cpp no mesmo PC (127.0.0.1:8080). Só relevante p/ provedor LOCAL.
@@ -166,8 +170,9 @@ def _config_schema(list_mics) -> list:
              "placeholder": "vazio = 127.0.0.1:8080 (llama.cpp)"},
             {"key": "vision_provider", "label": "Provedor (visão)", "type": "select",
              "value": vprovider, "options": _opts(config.LLM_PROVIDERS, config.LLM_PROVIDER_LABELS)},
-            {"key": vmodel_key, "label": "Modelo (visão)", "type": "select",
+            {"key": vmodel_key, "label": "Modelo (visão)", "type": "combo",
              "value": config.get(vmodel_key),
+             "placeholder": "modelo multimodal — digite ou escolha um preset",
              "options": [{"value": m, "label": m} for m in config.LLM_VISION_MODELS.get(vprovider, [])]},
             {"key": "voice_enabled", "label": "BMO me ouve", "type": "toggle",
              "value": bool(config.get("voice_enabled"))},
