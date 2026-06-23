@@ -78,7 +78,7 @@ from bmo_os.services.smarthome import SmartHomeService
 from bmo_os.services.pet_memory import PetMemory
 from bmo_os.services.pet_state import PetState
 from bmo_os.services.sysinfo import SysInfoService
-from bmo_os.services.todoist import TodoistService
+from bmo_os.services.todoist import SECTION_LABELS, SECTION_NAMES, TodoistService
 from bmo_os.services.tts import SCREEN_PHRASES, TTSService
 from bmo_os.services.voice import VoiceService
 from bmo_os.services.webui import WebUIServer
@@ -812,6 +812,91 @@ def build_initial(app: App):
              "tags": h.get("tags", []), "snippet": (h.get("snippet", "") or "")[:300]}
             for h in hits]}
 
+    def web_tasks() -> dict:
+        """Snapshot do Kanban (Todoist) pro painel: colunas TO-DO/DOING/DONE com
+        suas tarefas. Getter thread-safe — não bloqueia o frame."""
+        snap = todoist.get()
+        cols = todoist.by_section()
+        return {
+            "ok": bool(snap.ok), "error": snap.error,
+            "columns": [
+                {"key": k, "label": SECTION_LABELS.get(k, k.upper()),
+                 "tasks": [{"id": t.id, "content": t.content} for t in cols.get(k, [])]}
+                for k in SECTION_NAMES
+            ],
+        }
+
+    def web_tasks_action(payload: dict) -> dict:
+        """Cria ou move uma tarefa do Kanban pelo painel. todoist.create/move já
+        rodam em thread própria (otimistas), então chamamos direto."""
+        action = (payload.get("action") or "").strip()
+        if action == "create":
+            ok = todoist.create(payload.get("content", ""),
+                                payload.get("section", "to-do") or "to-do")
+            return {"ok": bool(ok)}
+        if action == "move":
+            ok = todoist.move(payload.get("id", ""), payload.get("target", ""))
+            return {"ok": bool(ok)}
+        return {"ok": False, "error": "acao invalida"}
+
+    def web_agenda() -> dict:
+        """Eventos de HOJE (Calendar) pro painel. Snapshot thread-safe."""
+        snap = calendar.get()
+        events = []
+        for e in snap.events:
+            events.append({
+                "title": e.title, "all_day": bool(e.all_day),
+                "start": "" if e.all_day else e.start.strftime("%H:%M"),
+                "end": "" if e.all_day else e.end.strftime("%H:%M"),
+                "start_iso": e.start.isoformat(), "cal": e.cal_label,
+            })
+        return {"ok": bool(snap.ok), "error": snap.error, "events": events}
+
+    def web_smarthome() -> dict:
+        """Estado das tomadas smart pro painel."""
+        if not getattr(smarthome, "available", False):
+            return {"ok": False, "error": getattr(smarthome, "status", "indisponivel"),
+                    "devices": []}
+        return {"ok": True, "devices": smarthome.get_devices()}
+
+    def web_smarthome_action(payload: dict) -> dict:
+        """Liga/desliga/toggle das tomadas pelo painel. Comandos thread-safe
+        (fila interna), refletem otimista na hora."""
+        if not getattr(smarthome, "available", False):
+            return {"ok": False, "error": "casa indisponivel"}
+        action = (payload.get("action") or "").strip()
+        key = (payload.get("key") or "").strip()
+        on = bool(payload.get("on"))
+        if action == "set":
+            smarthome.set(key, on)
+        elif action == "toggle":
+            smarthome.toggle(key)
+        elif action == "all":
+            smarthome.set_all(on)
+        else:
+            return {"ok": False, "error": "acao invalida"}
+        return {"ok": True, "devices": smarthome.get_devices()}
+
+    def web_mic(action: str) -> dict:
+        """Push-to-talk remoto: o painel segura o botão (start) e solta (stop);
+        o BMO ouve pelo PRÓPRIO mic e responde no aparelho (igual ao botão
+        físico). O on_done reaproveita o handler da IA."""
+        action = (action or "").strip()
+        if action == "start":
+            voice.ptt_begin(on_done=_ptt_done)
+        elif action == "stop":
+            voice.ptt_end()
+        else:
+            return {"ok": False, "error": "acao invalida"}
+        return {"ok": True}
+
+    def web_update() -> dict:
+        """Atualiza a versão (git reset --hard origin/main) e reinicia, igual ao
+        tile ATUALIZAR. Enfileira pro main thread: do_update libera o hardware e
+        chama execv — não pode rodar na thread do request."""
+        voice_enqueue(do_update)
+        return {"ok": True, "msg": "baixando a ultima versao e reiniciando..."}
+
     # Sobe o painel (no-op se desligado na config ou porta ocupada). Reaproveita
     # remote_chat: o chat web abre telas / cria tarefas / fala no aparelho, igual
     # ao push-to-talk. Mesmo modelo de confiança da rede local (ver pairing.py).
@@ -820,7 +905,12 @@ def build_initial(app: App):
         webui = WebUIServer(on_chat=remote_chat, get_state=web_state,
                             list_mics=voice.list_input_devices,
                             on_set_config=web_set_config, on_memory=web_memory,
-                            get_brain=web_brain, on_brain_search=web_brain_search)
+                            get_brain=web_brain, on_brain_search=web_brain_search,
+                            camera=camera, on_mic=web_mic,
+                            get_tasks=web_tasks, on_tasks=web_tasks_action,
+                            get_agenda=web_agenda,
+                            get_smarthome=web_smarthome, on_smarthome=web_smarthome_action,
+                            on_update=web_update)
         if webui.start():
             ip = local_ip()
             extra = f"  (rede: http://{ip}:{webui.port})" if ip else ""

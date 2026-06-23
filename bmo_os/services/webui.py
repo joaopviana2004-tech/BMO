@@ -1,28 +1,43 @@
 """Painel web do BMO — sobe sozinho num localhost temático.
 
-Um servidor HTTP leve (em thread daemon, igual ao PairingServer) que serve um
-site com a carinha do BMO onde o dono, do navegador do PC/celular na mesma
-rede, pode:
+Um servidor HTTP leve (em thread daemon, igual ao PairingServer) que serve o
+painel do BMO (SPA Vite+Preact buildada no PC -> `bmo_os/webui_dist/`) onde o
+dono, do navegador do PC/celular na mesma rede, pode controlar TUDO:
 
-  - AJUSTES        — mexer nas configurações (mesmas do SETTINGS na telinha)
-  - ESPAÇO INTERNO — espiar o "mundo interno" do BMO: humor/energia/afeto/streak,
-                     o que ele lembra de você (nome + fatos) e a telemetria da Pi
-  - CONVERSAR      — falar com o BMO por texto (mesmo caminho do push-to-talk:
-                     o LLM responde, pode abrir telas/criar tarefas e FALAR no
-                     próprio aparelho)
+  - CONVERSAR      — falar com o BMO por texto (mesmo caminho do push-to-talk)
+  - AJUSTES        — TODAS as configurações (mesmas do SETTINGS na telinha)
+  - ESPAÇO INTERNO — humor/energia/afeto/streak + o que ele lembra de você
+  - CÉREBRO        — RAG do Obsidian (notas, ligações, busca, última consulta)
+  - CÂMERA         — feed ao vivo (MJPEG) da câmera do BMO
+  - TAREFAS        — o Kanban (Todoist): listar / criar / mover
+  - AGENDA         — eventos de hoje (Google Calendar)
+  - CASA           — tomadas smart (liga/desliga/toggle)
+  - MIC            — aciona o microfone do aparelho (push-to-talk remoto)
+  - ATUALIZAR      — git reset --hard origin/main + restart, igual à telinha
 
-Tudo é estático + uma API JSON: a página não interpola nada no servidor (sem
-.format no HTML), os dados descem por fetch(/api/...). Sem dependência externa
-(http.server da stdlib) e sem CDN — funciona offline no Pi.
+O front é 100% estático (build no PC) e os dados sobem por fetch(/api/...). Sem
+dependência externa no Pi (http.server da stdlib) e sem CDN — funciona offline.
 
-Endpoints:
-    GET  /                -> a página (SPA temática)
-    GET  /assets/font     -> a fonte pixel (se existir em assets/fonts), senão 404
-    GET  /api/state       -> snapshot do espaço interno (pet/memória/sistema/cérebro)
-    GET  /api/config      -> esquema das configs editáveis + valores atuais
-    POST /api/config      -> {"key","value"} aplica uma config (espelha o SETTINGS)
-    POST /api/chat        -> {"text"} conversa com o BMO (bloqueia até o LLM)
-    POST /api/memory      -> edita a memória ({"action": set_name|add_fact|clear})
+Endpoints (GET):
+    /                     -> a SPA (index.html do build); fallback p/ SPA
+    /assets/*             -> assets do build (js/css/img/fontes)
+    /api/state            -> snapshot do espaço interno (pet/memória/sistema/cérebro)
+    /api/config           -> esquema das configs editáveis + valores atuais
+    /api/brain            -> snapshot do cérebro (RAG) + última consulta
+    /api/brain/search?q=  -> roda knowledge.search pro painel
+    /api/tasks            -> colunas do Kanban (Todoist)
+    /api/agenda           -> eventos de hoje (Calendar)
+    /api/smarthome        -> estado das tomadas smart
+    /api/camera/stream    -> MJPEG multipart (feed ao vivo)
+    /api/camera/snapshot  -> 1 frame JPEG
+Endpoints (POST):
+    /api/chat             -> {"text"} conversa com o BMO (bloqueia até o LLM)
+    /api/config           -> {"key","value"} aplica uma config
+    /api/memory           -> edita a memória ({"action": set_name|add_fact|del_fact|clear})
+    /api/tasks            -> {"action": create|move, ...}
+    /api/smarthome        -> {"action": set|toggle|all, "key", "on"}
+    /api/mic              -> {"action": start|stop} push-to-talk remoto
+    /api/update           -> baixa a última versão do git e reinicia
 
 Segurança: bind em 0.0.0.0 (pra abrir do PC), mesmo modelo de confiança da
 rede local da casa que o PairingServer já adota. Porta via BMO_WEB_PORT.
@@ -32,6 +47,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -39,9 +55,41 @@ from ..core import config
 
 DEFAULT_PORT = int(os.environ.get("BMO_WEB_PORT", "8000") or "8000")
 
-# Fonte pixel opcional (mesma que a telinha usa). Serve via @font-face; sem ela
-# o CSS cai num monospace e o site continua funcionando.
+# Build estático da SPA (Vite+Preact), gerado no PC e commitado no repo pra o
+# Pi servir sem Node. Ver ai-chat-refresh (fonte) -> `bun run build`.
+WEBUI_DIST = config.REPO_ROOT / "bmo_os" / "webui_dist"
+
+# Fonte pixel opcional (legado): alguns assets antigos pediam /assets/font.
 FONT_PATH = config.REPO_ROOT / "bmo_os" / "assets" / "fonts" / "PressStart2P.ttf"
+
+# Tipos de conteúdo dos arquivos estáticos do build.
+_CTYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json",
+    ".map": "application/json",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".txt": "text/plain; charset=utf-8",
+}
+
+_FALLBACK_HTML = (
+    b"<!doctype html><meta charset=utf-8>"
+    b"<body style='font-family:monospace;background:#0a0a0a;color:#10b981;padding:40px'>"
+    b"<h1>BMO // painel nao buildado</h1>"
+    b"<p>Rode <code>bun install &amp;&amp; bun run build</code> em "
+    b"<code>ai-chat-refresh</code> para gerar <code>bmo_os/webui_dist/</code>.</p></body>"
+)
 
 
 # ============================================================
@@ -137,12 +185,15 @@ def _config_schema(list_mics) -> list:
 class WebUIServer:
     """Painel web em thread daemon. Os callbacks rodam NA THREAD do request
     (cada request tem a sua), então on_chat pode bloquear no LLM sem travar
-    o resto. Quem mexe em estado da UI (abrir tela) já enfileira pro main
-    thread lá no main.py (mesma ponte do chat remoto)."""
+    o resto. Quem mexe em estado da UI (abrir tela / atualizar) já enfileira
+    pro main thread lá no main.py (mesma ponte do chat remoto)."""
 
     def __init__(self, *, on_chat=None, get_state=None, list_mics=None,
                  on_set_config=None, on_memory=None, get_brain=None,
-                 on_brain_search=None, port: int | None = None) -> None:
+                 on_brain_search=None, camera=None, on_mic=None,
+                 get_tasks=None, on_tasks=None, get_agenda=None,
+                 get_smarthome=None, on_smarthome=None, on_update=None,
+                 port: int | None = None) -> None:
         self.on_chat = on_chat
         self.get_state = get_state
         self.list_mics = list_mics or (lambda: [])
@@ -150,6 +201,14 @@ class WebUIServer:
         self.on_memory = on_memory
         self.get_brain = get_brain            # snapshot do cérebro (RAG/notas)
         self.on_brain_search = on_brain_search  # roda knowledge.search pro painel
+        self.camera = camera                  # serviço de câmera (acquire/jpeg/release)
+        self.on_mic = on_mic                  # push-to-talk remoto (start/stop)
+        self.get_tasks = get_tasks            # snapshot do Kanban (Todoist)
+        self.on_tasks = on_tasks              # create/move tarefa
+        self.get_agenda = get_agenda          # eventos de hoje (Calendar)
+        self.get_smarthome = get_smarthome    # estado das tomadas
+        self.on_smarthome = on_smarthome      # liga/desliga/toggle
+        self.on_update = on_update            # git update + restart
         self.port = port or DEFAULT_PORT
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -187,20 +246,74 @@ class WebUIServer:
             # ---------- GET ----------
             def do_GET(self) -> None:
                 path = self.path.split("?", 1)[0]
-                if path in ("/", "/index.html"):
-                    self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8", raw=True)
-                elif path == "/assets/font":
-                    self._serve_font()
-                elif path == "/api/state":
+                if path == "/api/state":
                     self._api_state()
                 elif path == "/api/config":
                     self._send(200, {"groups": _config_schema(srv.list_mics)})
                 elif path == "/api/brain":
-                    self._api_brain()
+                    self._call_get(srv.get_brain, "cerebro")
                 elif path == "/api/brain/search":
                     self._api_brain_search()
+                elif path == "/api/tasks":
+                    self._call_get(srv.get_tasks, "tarefas")
+                elif path == "/api/agenda":
+                    self._call_get(srv.get_agenda, "agenda")
+                elif path == "/api/smarthome":
+                    self._call_get(srv.get_smarthome, "casa")
+                elif path == "/api/camera/stream":
+                    self._api_camera_stream()
+                elif path == "/api/camera/snapshot":
+                    self._api_camera_snapshot()
+                elif path == "/assets/font":
+                    self._serve_font()
+                elif path.startswith("/api/"):
+                    self._send(404, {"error": "not found"})
+                else:
+                    self._serve_static(path)
+
+            # ---------- POST ----------
+            def do_POST(self) -> None:
+                path = self.path.split("?", 1)[0]
+                if path == "/api/chat":
+                    self._api_chat()
+                elif path == "/api/config":
+                    self._api_config()
+                elif path == "/api/memory":
+                    self._call_post(srv.on_memory, "memoria")
+                elif path == "/api/tasks":
+                    self._call_post(srv.on_tasks, "tarefas")
+                elif path == "/api/smarthome":
+                    self._call_post(srv.on_smarthome, "casa")
+                elif path == "/api/mic":
+                    self._api_mic()
+                elif path == "/api/update":
+                    self._api_update()
                 else:
                     self._send(404, {"error": "not found"})
+
+            # ---------- estáticos ----------
+            def _serve_static(self, path: str) -> None:
+                rel = path.lstrip("/")
+                if not rel or rel.endswith("/"):
+                    rel = "index.html"
+                try:
+                    base = WEBUI_DIST.resolve()
+                    target = (WEBUI_DIST / rel).resolve()
+                    target.relative_to(base)          # barra path traversal
+                except (ValueError, OSError):
+                    self._send(404, {"error": "not found"})
+                    return
+                if not target.is_file():
+                    # SPA fallback: rota desconhecida -> index.html
+                    target = WEBUI_DIST / "index.html"
+                    if not target.is_file():
+                        self._send(503, _FALLBACK_HTML, "text/html; charset=utf-8", raw=True)
+                        return
+                ctype = _CTYPES.get(target.suffix.lower(), "application/octet-stream")
+                try:
+                    self._send(200, target.read_bytes(), ctype, raw=True)
+                except Exception:
+                    self._send(500, {"error": "io"})
 
             def _serve_font(self) -> None:
                 try:
@@ -211,23 +324,32 @@ class WebUIServer:
                     pass
                 self._send(404, {"error": "sem fonte"})
 
-            def _api_state(self) -> None:
-                if srv.get_state is None:
-                    self._send(503, {"error": "estado indisponivel"})
+            # ---------- helpers genéricos de API ----------
+            def _call_get(self, fn, name: str) -> None:
+                if fn is None:
+                    self._send(503, {"error": name + " indisponivel"})
                     return
                 try:
-                    self._send(200, srv.get_state() or {})
+                    self._send(200, fn() or {})
                 except Exception as e:
                     self._send(500, {"error": str(e)[:80]})
 
-            def _api_brain(self) -> None:
-                if srv.get_brain is None:
-                    self._send(503, {"error": "cerebro indisponivel"})
+            def _call_post(self, fn, name: str) -> None:
+                if fn is None:
+                    self._send(503, {"error": name + " indisponivel"})
                     return
                 try:
-                    self._send(200, srv.get_brain() or {})
+                    data = self._read_json()
+                except Exception:
+                    self._send(400, {"error": "payload invalido"})
+                    return
+                try:
+                    self._send(200, fn(data) or {})
                 except Exception as e:
                     self._send(500, {"error": str(e)[:80]})
+
+            def _api_state(self) -> None:
+                self._call_get(srv.get_state, "estado")
 
             def _api_brain_search(self) -> None:
                 if srv.on_brain_search is None:
@@ -238,18 +360,6 @@ class WebUIServer:
                     self._send(200, srv.on_brain_search(q) or {})
                 except Exception as e:
                     self._send(500, {"error": str(e)[:80]})
-
-            # ---------- POST ----------
-            def do_POST(self) -> None:
-                path = self.path.split("?", 1)[0]
-                if path == "/api/chat":
-                    self._api_chat()
-                elif path == "/api/config":
-                    self._api_config()
-                elif path == "/api/memory":
-                    self._api_memory()
-                else:
-                    self._send(404, {"error": "not found"})
 
             def _api_chat(self) -> None:
                 if srv.on_chat is None:
@@ -282,19 +392,95 @@ class WebUIServer:
                 except Exception as e:
                     self._send(500, {"error": str(e)[:80]})
 
-            def _api_memory(self) -> None:
-                if srv.on_memory is None:
-                    self._send(503, {"error": "memoria indisponivel"})
+            def _api_mic(self) -> None:
+                if srv.on_mic is None:
+                    self._send(503, {"error": "mic indisponivel"})
                     return
                 try:
-                    data = self._read_json()
+                    action = str(self._read_json().get("action", "")).strip()
                 except Exception:
                     self._send(400, {"error": "payload invalido"})
                     return
                 try:
-                    self._send(200, srv.on_memory(data) or {})
+                    self._send(200, srv.on_mic(action) or {})
                 except Exception as e:
                     self._send(500, {"error": str(e)[:80]})
+
+            def _api_update(self) -> None:
+                if srv.on_update is None:
+                    self._send(503, {"error": "update indisponivel"})
+                    return
+                try:
+                    self._send(200, srv.on_update() or {})
+                except Exception as e:
+                    self._send(500, {"error": str(e)[:80]})
+
+            # ---------- câmera ----------
+            def _camera_or_503(self):
+                cam = srv.camera
+                if cam is None or not getattr(cam, "is_available", False):
+                    self._send(503, {"error": "camera indisponivel"})
+                    return None
+                return cam
+
+            def _api_camera_snapshot(self) -> None:
+                cam = self._camera_or_503()
+                if cam is None:
+                    return
+                jpg = None
+                try:
+                    cam.acquire()
+                    for _ in range(20):            # espera a câmera esquentar
+                        jpg = cam.capture_jpeg(quality=75)
+                        if jpg:
+                            break
+                        time.sleep(0.05)
+                finally:
+                    try:
+                        cam.release()
+                    except Exception:
+                        pass
+                if not jpg:
+                    self._send(503, {"error": "sem frame"})
+                    return
+                self._send(200, jpg, "image/jpeg", raw=True)
+
+            def _api_camera_stream(self) -> None:
+                cam = self._camera_or_503()
+                if cam is None:
+                    return
+                boundary = "bmoframe"
+                try:
+                    cam.acquire()
+                except Exception:
+                    self._send(503, {"error": "camera off"})
+                    return
+                try:
+                    self.send_response(200)
+                    self.send_header(
+                        "Content-Type",
+                        f"multipart/x-mixed-replace; boundary={boundary}")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    bnd = ("--" + boundary + "\r\n").encode()
+                    while True:
+                        jpg = cam.capture_jpeg(quality=70)
+                        if jpg:
+                            self.wfile.write(bnd)
+                            self.wfile.write(b"Content-Type: image/jpeg\r\n")
+                            self.wfile.write(
+                                ("Content-Length: %d\r\n\r\n" % len(jpg)).encode())
+                            self.wfile.write(jpg)
+                            self.wfile.write(b"\r\n")
+                        time.sleep(0.1)            # ~10 fps: economiza CPU/calor
+                except Exception:
+                    pass                           # cliente fechou a aba
+                finally:
+                    try:
+                        cam.release()
+                    except Exception:
+                        pass
 
         try:
             self._httpd = ThreadingHTTPServer(("0.0.0.0", self.port), Handler)
@@ -311,426 +497,3 @@ class WebUIServer:
             except Exception:
                 pass
             self._httpd = None
-
-
-# ============================================================
-# A página (estática; todo dado dinâmico vem por fetch /api/*)
-# ============================================================
-
-PAGE = r"""<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="theme-color" content="#0e2724">
-<title>BMO</title>
-<style>
-  @font-face{ font-family:'BMOPixel'; src:url('/assets/font') format('truetype'); font-display:swap; }
-  :root{
-    --teal:#54bfae; --teal-d:#3a9c8d; --ink:#143029; --mint:#cdeede; --mint-d:#a9dcc9;
-    --bg:#0e2724; --red:#e0533d; --blue:#4a7fd0; --green:#62b24b; --yellow:#f2c64c;
-    --pix:'BMOPixel', ui-monospace, 'Consolas', monospace;
-  }
-  *{ box-sizing:border-box; }
-  html,body{ margin:0; height:100%; }
-  body{
-    background:
-      radial-gradient(circle at 50% -10%, #18423b 0%, var(--bg) 60%),
-      var(--bg);
-    color:var(--ink); font-family:var(--pix); letter-spacing:.5px;
-    -webkit-font-smoothing:none; image-rendering:pixelated;
-    display:flex; justify-content:center; padding:18px 12px 40px;
-  }
-  .device{
-    width:min(560px,100%); background:linear-gradient(180deg,var(--teal),var(--teal-d));
-    border:5px solid var(--ink); border-radius:26px;
-    box-shadow:0 14px 0 rgba(0,0,0,.25), inset 0 4px 0 rgba(255,255,255,.25);
-    padding:18px 16px 22px;
-  }
-  /* --- cabeçalho: a carinha do BMO --- */
-  .head{ display:flex; gap:14px; align-items:center; }
-  .screen{
-    flex:0 0 128px; height:96px; background:var(--mint);
-    border:4px solid var(--ink); border-radius:14px; position:relative; overflow:hidden;
-    box-shadow:inset 0 0 0 3px var(--mint-d);
-  }
-  .screen svg{ position:absolute; inset:0; width:100%; height:100%; }
-  .zzz{ position:absolute; right:8px; top:6px; font-size:11px; color:var(--ink); opacity:.7; }
-  .head .meta{ flex:1; }
-  .head h1{ margin:0; font-size:26px; color:var(--ink); text-shadow:2px 2px 0 rgba(255,255,255,.3); }
-  .chip{
-    display:inline-block; margin-top:8px; background:var(--ink); color:var(--mint);
-    font-size:10px; padding:5px 9px; border-radius:8px;
-  }
-  /* --- abas (botões do BMO) --- */
-  .tabs{ display:flex; gap:8px; margin:18px 0 14px; }
-  .tabs button{
-    flex:1; font-family:var(--pix); font-size:10px; color:var(--ink); cursor:pointer;
-    background:var(--mint); border:3px solid var(--ink); border-radius:12px;
-    padding:11px 6px; box-shadow:0 4px 0 rgba(0,0,0,.25); transition:transform .05s;
-  }
-  .tabs button:active{ transform:translateY(2px); box-shadow:0 2px 0 rgba(0,0,0,.25); }
-  .tabs button.on{ background:var(--yellow); }
-  .tabs button .dot{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; border:2px solid var(--ink); vertical-align:-1px; }
-  .panel{
-    background:var(--mint); border:4px solid var(--ink); border-radius:16px;
-    padding:14px; min-height:280px;
-  }
-  .hidden{ display:none !important; }
-  h2{ font-size:12px; margin:2px 0 12px; color:var(--ink); }
-  .muted{ color:#4f6b62; font-size:10px; }
-
-  /* --- AJUSTES --- */
-  .grp{ margin-bottom:16px; }
-  .grp .gtitle{ font-size:10px; color:var(--teal-d); border-bottom:2px dashed var(--ink); padding-bottom:4px; margin-bottom:8px; }
-  .row{ display:flex; align-items:center; gap:8px; margin:7px 0; }
-  .row .lbl{ flex:1; font-size:10px; }
-  select, input[type=text]{
-    font-family:var(--pix); font-size:10px; color:var(--ink); background:#fff;
-    border:3px solid var(--ink); border-radius:8px; padding:6px 8px; max-width:62%;
-  }
-  .tog{ width:54px; height:26px; border:3px solid var(--ink); border-radius:13px; background:#c14b3a; position:relative; cursor:pointer; }
-  .tog.on{ background:var(--green); }
-  .tog::after{ content:''; position:absolute; top:1px; left:1px; width:18px; height:18px; border-radius:50%; background:#fff; border:2px solid var(--ink); transition:left .12s; }
-  .tog.on::after{ left:27px; }
-
-  /* --- ESPAÇO INTERNO --- */
-  .cards{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-  .card{ background:#fff; border:3px solid var(--ink); border-radius:12px; padding:10px; }
-  .card.full{ grid-column:1 / -1; }
-  .card .k{ font-size:9px; color:var(--teal-d); }
-  .card .v{ font-size:18px; margin-top:3px; }
-  .bar{ height:10px; border:2px solid var(--ink); border-radius:6px; background:#e7f4ee; margin-top:7px; overflow:hidden; }
-  .bar > i{ display:block; height:100%; background:var(--teal); }
-  .facts{ list-style:none; margin:6px 0 0; padding:0; }
-  .facts li{ font-size:10px; background:#eef8f2; border:2px solid var(--ink); border-radius:8px; padding:5px 7px; margin:5px 0; display:flex; justify-content:space-between; gap:6px; }
-  .facts li button{ border:none; background:var(--red); color:#fff; border-radius:5px; cursor:pointer; font-family:var(--pix); font-size:9px; padding:2px 6px; }
-  .mini{ display:flex; gap:6px; margin-top:8px; }
-  .mini input{ flex:1; max-width:none; }
-  .btn{ font-family:var(--pix); font-size:10px; color:#fff; background:var(--ink); border:none; border-radius:8px; padding:8px 10px; cursor:pointer; box-shadow:0 3px 0 rgba(0,0,0,.3); }
-  .btn:active{ transform:translateY(2px); box-shadow:0 1px 0 rgba(0,0,0,.3); }
-  .btn.red{ background:var(--red); }
-  .btn.green{ background:var(--green); }
-
-  /* --- CONVERSAR --- */
-  #log{ height:300px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:4px; }
-  .msg{ max-width:82%; font-size:11px; padding:8px 10px; border:3px solid var(--ink); border-radius:12px; line-height:1.45; word-wrap:break-word; }
-  .msg.me{ align-self:flex-end; background:var(--blue); color:#fff; }
-  .msg.bmo{ align-self:flex-start; background:#fff; }
-  .msg.sys{ align-self:center; background:transparent; border:none; color:#4f6b62; font-size:9px; }
-  .composer{ display:flex; gap:8px; margin-top:10px; }
-  .composer input{ flex:1; max-width:none; }
-  .composer .btn{ background:var(--green); }
-
-  /* --- correções de alinhamento + aba extra (regras tardias sobrescrevem) --- */
-  .row select, .row input[type=text]{ flex:0 0 54%; width:54%; min-width:0; max-width:54%; }
-  .row .tog{ flex:0 0 auto; }
-  .tabs button{ flex:1 1 0; min-width:68px; font-size:9px; padding:10px 4px; }
-  .tabs button .dot{ width:8px; height:8px; margin-right:4px; }
-
-  /* --- CÉREBRO (RAG do Obsidian) --- */
-  .brain-sum{ display:flex; gap:8px; margin-bottom:10px; }
-  .brain-sum .card{ flex:1; text-align:center; padding:8px 4px; }
-  .brain-search{ display:flex; gap:6px; margin-bottom:10px; }
-  .brain-search input{ flex:1; max-width:none; }
-  .note{ background:#fff; border:3px solid var(--ink); border-radius:10px; padding:8px 10px; margin:7px 0; }
-  .note .nt{ font-size:11px; display:flex; justify-content:space-between; gap:6px; align-items:center; }
-  .note .deg{ font-size:9px; color:#fff; background:var(--ink); border-radius:6px; padding:1px 6px; white-space:nowrap; }
-  .note .tags{ margin-top:4px; }
-  .tag{ display:inline-block; font-size:9px; background:#dff0e8; border:2px solid var(--ink); border-radius:6px; padding:1px 5px; margin:2px 3px 0 0; }
-  .note .prev{ font-size:9px; color:#4f6b62; margin-top:5px; line-height:1.4; }
-  .score{ font-size:9px; color:#7a5fb0; }
-  .ragbox{ background:#efeaf7; border:3px solid var(--ink); border-radius:10px; padding:8px 10px; margin-bottom:12px; }
-  .ragbox .k{ font-size:9px; color:#7a5fb0; }
-  .ragline{ font-size:10px; margin-top:5px; line-height:1.4; }
-  .ragline b{ color:#7a5fb0; }
-  .kind{ display:inline-block; font-size:8px; color:#fff; background:#7a5fb0; border-radius:5px; padding:1px 5px; margin-right:5px; vertical-align:1px; }
-  .msg.rag{ align-self:flex-start; background:#efeaf7; font-size:9px; color:#5b4a86; border-color:#b9a7e0; max-width:90%; }
-</style>
-</head>
-<body>
-<div class="device">
-  <div class="head">
-    <div class="screen"><svg id="face" viewBox="0 0 128 96"></svg><span id="zzz" class="zzz hidden">z z z</span></div>
-    <div class="meta">
-      <h1>BMO</h1>
-      <span id="chip" class="chip">conectando...</span>
-    </div>
-  </div>
-
-  <div class="tabs">
-    <button id="tab-chat" class="on" onclick="showTab('chat')"><span class="dot" style="background:var(--green)"></span>CONVERSAR</button>
-    <button id="tab-estado" onclick="showTab('estado')"><span class="dot" style="background:var(--blue)"></span>INTERNO</button>
-    <button id="tab-cerebro" onclick="showTab('cerebro')"><span class="dot" style="background:#9b7fd0"></span>CÉREBRO</button>
-    <button id="tab-ajustes" onclick="showTab('ajustes')"><span class="dot" style="background:var(--red)"></span>AJUSTES</button>
-  </div>
-
-  <!-- CONVERSAR -->
-  <div id="panel-chat" class="panel">
-    <div id="log"><div class="msg sys">Fale com o BMO — ele responde, abre telas e cria tarefas.</div></div>
-    <div class="composer">
-      <input id="chatInput" type="text" placeholder="Escreva pro BMO..." onkeydown="if(event.key==='Enter')sendChat()">
-      <button class="btn" onclick="sendChat()">ENVIAR</button>
-    </div>
-  </div>
-
-  <!-- ESPAÇO INTERNO -->
-  <div id="panel-estado" class="panel hidden">
-    <h2>MUNDO INTERNO</h2>
-    <div class="cards" id="petCards"></div>
-    <div class="card full" style="margin-top:10px">
-      <div class="k">O QUE O BMO LEMBRA DE VOCÊ</div>
-      <div class="mini">
-        <input id="nameInput" type="text" placeholder="seu nome">
-        <button class="btn green" onclick="saveName()">SALVAR</button>
-      </div>
-      <ul id="facts" class="facts"></ul>
-      <div class="mini">
-        <input id="factInput" type="text" placeholder="ensinar um fato (ex: gosto de café)" onkeydown="if(event.key==='Enter')addFact()">
-        <button class="btn" onclick="addFact()">+ FATO</button>
-      </div>
-      <button class="btn red" style="margin-top:8px" onclick="clearMem()">ESQUECER TUDO</button>
-    </div>
-    <div class="card full" style="margin-top:10px">
-      <div class="k">TELEMETRIA DA PI</div>
-      <div id="sys" class="muted" style="margin-top:6px">--</div>
-    </div>
-  </div>
-
-  <!-- CÉREBRO (RAG) -->
-  <div id="panel-cerebro" class="panel hidden">
-    <h2>CÉREBRO (RAG DO OBSIDIAN)</h2>
-    <div class="brain-sum" id="brainSum"></div>
-    <div id="ragLast"></div>
-    <div class="brain-search">
-      <input id="brainQ" type="text" placeholder="testar busca do RAG (ex: projetos)" onkeydown="if(event.key==='Enter')searchBrain()">
-      <button class="btn" onclick="searchBrain()">BUSCAR</button>
-    </div>
-    <div id="brainList"><span class="muted">carregando notas...</span></div>
-  </div>
-
-  <!-- AJUSTES -->
-  <div id="panel-ajustes" class="panel hidden">
-    <h2>AJUSTES</h2>
-    <div id="cfg"><span class="muted">carregando...</span></div>
-  </div>
-</div>
-
-<script>
-const $ = s => document.querySelector(s);
-let TAB = 'chat';
-
-async function api(path, opts){
-  try{ const r = await fetch(path, opts); return await r.json(); }
-  catch(e){ return {error:'sem conexão com o BMO'}; }
-}
-
-function showTab(name){
-  TAB = name;
-  for(const t of ['chat','estado','cerebro','ajustes']){
-    $('#panel-'+t).classList.toggle('hidden', t!==name);
-    $('#tab-'+t).classList.toggle('on', t===name);
-  }
-  if(name==='estado') refreshState();
-  if(name==='cerebro') refreshBrain();
-  if(name==='ajustes') refreshConfig();
-}
-
-/* ---------- carinha do BMO ---------- */
-const MOOD_PT = { loving:'apaixonado', excited:'animado', happy:'feliz',
-  sleepy:'sonolento', lonely:'carente', bored:'entediado', neutral:'neutro' };
-
-function faceSVG(mood){
-  const eyeY = 40, lx = 42, rx = 86;
-  let eyes, mouth;
-  const dotEye = (x)=>`<circle cx="${x}" cy="${eyeY}" r="7" fill="#143029"/>`;
-  const arcEye = (x)=>`<path d="M${x-9} ${eyeY+3} Q${x} ${eyeY-9} ${x+9} ${eyeY+3}" stroke="#143029" stroke-width="5" fill="none" stroke-linecap="round"/>`;
-  const lineEye = (x)=>`<rect x="${x-9}" y="${eyeY-1}" width="18" height="4" rx="2" fill="#143029"/>`;
-  const bigEye = (x)=>`<circle cx="${x}" cy="${eyeY}" r="9" fill="#143029"/><circle cx="${x+3}" cy="${eyeY-3}" r="2.4" fill="#cdeede"/>`;
-  const smile = `<path d="M48 64 Q64 78 80 64" stroke="#143029" stroke-width="5" fill="none" stroke-linecap="round"/>`;
-  const bigSmile = `<path d="M44 62 Q64 84 84 62" stroke="#143029" stroke-width="5" fill="none" stroke-linecap="round"/>`;
-  const flat = `<rect x="52" y="66" width="24" height="4" rx="2" fill="#143029"/>`;
-  const openMouth = `<ellipse cx="64" cy="67" rx="11" ry="8" fill="#143029"/>`;
-  const smallMouth = `<rect x="58" y="66" width="12" height="3.5" rx="1.5" fill="#143029"/>`;
-  switch(mood){
-    case 'loving':  eyes=arcEye(lx)+arcEye(rx); mouth=bigSmile; break;
-    case 'excited': eyes=bigEye(lx)+bigEye(rx); mouth=openMouth; break;
-    case 'sleepy':  eyes=lineEye(lx)+lineEye(rx); mouth=smallMouth; break;
-    case 'lonely':  eyes=dotEye(lx)+dotEye(rx); mouth=`<path d="M50 70 Q64 60 78 70" stroke="#143029" stroke-width="5" fill="none" stroke-linecap="round"/>`; break;
-    case 'bored':   eyes=lineEye(lx)+lineEye(rx); mouth=flat; break;
-    case 'neutral': eyes=dotEye(lx)+dotEye(rx); mouth=flat; break;
-    default:        eyes=dotEye(lx)+dotEye(rx); mouth=smile;
-  }
-  return eyes + mouth;
-}
-function setFace(mood){
-  $('#face').innerHTML = faceSVG(mood||'happy');
-  $('#zzz').classList.toggle('hidden', mood!=='sleepy');
-}
-
-/* ---------- ESPAÇO INTERNO ---------- */
-function pct(x){ return Math.max(0, Math.min(100, Math.round(x))); }
-function bar(label, value, sub){
-  return `<div class="card"><div class="k">${label}</div><div class="v">${sub}</div>
-    <div class="bar"><i style="width:${pct(value)}%"></i></div></div>`;
-}
-async function refreshState(){
-  const s = await api('/api/state');
-  if(s.error){ $('#chip').textContent = s.error; return; }
-  const p = s.pet||{}, m = s.memory||{}, sy = s.sys||{}, k = s.knowledge||{};
-  setFace(p.mood);
-  let chip = 'humor: ' + (MOOD_PT[p.mood]||p.mood||'?');
-  if(sy.temp!=null) chip += ' · ' + Math.round(sy.temp) + '°C';
-  $('#chip').textContent = chip;
-
-  $('#petCards').innerHTML =
-    bar('AFETO', p.affection, (Math.round(p.affection||0)) + '/100') +
-    bar('ENERGIA', (p.energy||0)*100, Math.round((p.energy||0)*100) + '%') +
-    `<div class="card"><div class="k">STREAK</div><div class="v">${p.streak||0} dia(s)</div></div>` +
-    `<div class="card"><div class="k">CÉREBRO</div><div class="v">${k.notes||0} nota(s)</div><div class="muted">${k.links||0} ligações</div></div>`;
-
-  // memória (só sobrescreve os inputs se o usuário não estiver digitando)
-  if(document.activeElement!==$('#nameInput')) $('#nameInput').value = m.name||'';
-  $('#facts').innerHTML = (m.facts||[]).map((f,i)=>
-    `<li><span>${escapeHtml(f)}</span><button onclick="delFact(${i})">x</button></li>`).join('')
-    || '<li class="muted" style="border:none;background:none">ele ainda não sabe nada sobre você</li>';
-  window._facts = m.facts||[];
-
-  // telemetria
-  const fmt = (v,suf)=> v==null ? '--' : (Math.round(v)+suf);
-  $('#sys').innerHTML = sy.ok===false || sy.cpu==null && sy.temp==null
-    ? 'rodando no PC (sem telemetria de hardware)'
-    : `CPU ${fmt(sy.cpu,'%')} · TEMP ${fmt(sy.temp,'°C')} · RAM ${fmt(sy.ram_pct,'%')} · GPU ${fmt(sy.gpu,'%')}`;
-}
-function escapeHtml(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-
-async function saveName(){ await api('/api/memory',{method:'POST',headers:JSONH,body:JSON.stringify({action:'set_name',name:$('#nameInput').value})}); refreshState(); }
-async function addFact(){ const f=$('#factInput').value.trim(); if(!f)return; $('#factInput').value=''; await api('/api/memory',{method:'POST',headers:JSONH,body:JSON.stringify({action:'add_fact',fact:f})}); refreshState(); }
-async function delFact(i){ const f=(window._facts||[])[i]; await api('/api/memory',{method:'POST',headers:JSONH,body:JSON.stringify({action:'del_fact',fact:f})}); refreshState(); }
-async function clearMem(){ if(!confirm('Apagar tudo que o BMO lembra de você?'))return; await api('/api/memory',{method:'POST',headers:JSONH,body:JSON.stringify({action:'clear'})}); refreshState(); }
-
-/* ---------- AJUSTES ---------- */
-const JSONH = {'Content-Type':'application/json'};
-async function refreshConfig(){
-  const c = await api('/api/config');
-  if(c.error){ $('#cfg').innerHTML = '<span class="muted">'+c.error+'</span>'; return; }
-  $('#cfg').innerHTML = (c.groups||[]).map(g=>{
-    const rows = g.items.map(it=>{
-      if(it.type==='toggle'){
-        return `<div class="row"><span class="lbl">${it.label}</span>
-          <div class="tog ${it.value?'on':''}" onclick="setCfg('${it.key}', ${!it.value}, this)"></div></div>`;
-      }
-      if(it.type==='text'){
-        // onchange (dispara no blur/Enter) -> salva; refreshConfig re-renderiza com o valor salvo
-        return `<div class="row"><span class="lbl">${it.label}</span>
-          <input type="text" value="${attr(it.value||'')}" placeholder="${attr(it.placeholder||'')}"
-            onkeydown="if(event.key==='Enter')this.blur()"
-            onchange="setCfg('${it.key}', this.value, this)"></div>`;
-      }
-      const opts = (it.options||[]).map(o=>
-        `<option value="${attr(o.value)}" ${String(o.value)===String(it.value)?'selected':''}>${escapeHtml(o.label)}</option>`).join('');
-      return `<div class="row"><span class="lbl">${it.label}</span>
-        <select onchange="setCfg('${it.key}', this.value, this)">${opts}</select></div>`;
-    }).join('');
-    return `<div class="grp"><div class="gtitle">${g.group}</div>${rows}</div>`;
-  }).join('');
-}
-function attr(s){ return escapeHtml(String(s)).replace(/'/g,'&#39;'); }
-async function setCfg(key, value, el){
-  const r = await api('/api/config',{method:'POST',headers:JSONH,body:JSON.stringify({key,value})});
-  // provedor/modelo mudam as opções de outros campos -> recarrega o esquema todo
-  await refreshConfig();
-  if(r && r.error) flashChip(r.error);
-}
-
-/* ---------- CÉREBRO (RAG do Obsidian) ---------- */
-const RAG_KIND = { auto:'auto', tool:'busca', write:'gravou' };
-
-function renderRag(rag){
-  // bloco "última consulta do RAG": quais notas foram enviadas ao LLM
-  if(!rag || !rag.length) return '';
-  const lines = rag.map(r=>{
-    const hits = (r.hits||[]).map(h=>
-      `${escapeHtml(h.title)}<span class="score"> ${h.score}</span>`).join(', ')
-      || '<span class="muted">nada</span>';
-    return `<div class="ragline"><span class="kind">${RAG_KIND[r.kind]||r.kind}</span>`+
-      `<b>${escapeHtml(r.query)}</b> → ${hits}</div>`;
-  }).join('');
-  return `<div class="ragbox"><div class="k">RAG DA ÚLTIMA RESPOSTA — notas enviadas ao LLM</div>${lines}</div>`;
-}
-
-function noteCard(n, deg, body){
-  const tags = (n.tags||[]).map(t=>`<span class="tag">#${escapeHtml(t)}</span>`).join('');
-  return `<div class="note"><div class="nt"><span>${escapeHtml(n.title)}</span>`+
-    `<span class="deg">${deg}</span></div>`+
-    (tags?`<div class="tags">${tags}</div>`:'')+
-    (body?`<div class="prev">${escapeHtml(body)}</div>`:'')+`</div>`;
-}
-
-async function refreshBrain(){
-  const b = await api('/api/brain');
-  if(b.error){ $('#brainList').innerHTML='<span class="muted">'+escapeHtml(b.error)+'</span>'; $('#brainSum').innerHTML=''; return; }
-  const s = b.summary||{};
-  $('#brainSum').innerHTML =
-    `<div class="card"><div class="k">NOTAS</div><div class="v">${s.notes||0}</div></div>`+
-    `<div class="card"><div class="k">LIGAÇÕES</div><div class="v">${s.links||0}</div></div>`+
-    `<div class="card"><div class="k">FANTASMAS</div><div class="v">${s.ghosts||0}</div></div>`;
-  $('#ragLast').innerHTML = renderRag(b.last_rag);
-  const notes = b.notes||[];
-  if(!notes.length){ $('#brainList').innerHTML='<span class="muted">o cérebro está vazio — nenhuma nota sincada do Obsidian</span>'; return; }
-  $('#brainList').innerHTML = `<div class="muted">${notes.length} nota(s) · mais recentes primeiro</div>`+
-    notes.map(n=>noteCard(n, (n.links||0)+' lig.', n.preview)).join('');
-}
-
-async function searchBrain(){
-  const q = $('#brainQ').value.trim();
-  if(!q){ refreshBrain(); return; }
-  $('#brainList').innerHTML='<span class="muted">buscando...</span>';
-  const r = await api('/api/brain/search?q='+encodeURIComponent(q));
-  if(r.error){ $('#brainList').innerHTML='<span class="muted">'+escapeHtml(r.error)+'</span>'; return; }
-  const hits = r.hits||[];
-  if(!hits.length){ $('#brainList').innerHTML=`<div class="muted">nada encontrado para "${escapeHtml(q)}"</div>`; return; }
-  $('#brainList').innerHTML =
-    `<div class="muted">busca RAG p/ "${escapeHtml(q)}" — score = relevância (≥4 = match forte de título/tag)</div>`+
-    hits.map(h=>noteCard(h, 'score '+h.score, h.snippet)).join('');
-}
-
-/* ---------- CONVERSAR ---------- */
-function addMsg(cls, text){
-  const d = document.createElement('div'); d.className='msg '+cls; d.textContent=text;
-  $('#log').appendChild(d); $('#log').scrollTop = $('#log').scrollHeight; return d;
-}
-async function sendChat(){
-  const inp = $('#chatInput'); const text = inp.value.trim(); if(!text) return;
-  inp.value=''; addMsg('me', text);
-  const thinking = addMsg('sys', 'BMO pensando...');
-  const r = await api('/api/chat',{method:'POST',headers:JSONH,body:JSON.stringify({text})});
-  thinking.remove();
-  if(r.error){ addMsg('sys', '⚠ '+r.error); return; }
-  if(r.msg) addMsg('bmo', r.msg);
-  const extra = [];
-  if(r.screen && r.screen!=='none' && r.screen!=='') extra.push('abriu: '+r.screen);
-  if(r.task) extra.push('tarefa criada: '+r.task);
-  // visibilidade do RAG: quais notas o LLM consultou (auto/busca) ou gravou
-  const reads = [], writes = [];
-  for(const e of (r.rag||[])){
-    const titles = (e.hits||[]).map(h=>h.title);
-    if(e.kind==='write') writes.push(...titles);
-    else if(titles.length) reads.push(...titles);
-  }
-  if(writes.length) extra.push('nota salva: '+[...new Set(writes)].join(', '));
-  if(extra.length) addMsg('sys', extra.join(' · '));
-  if(reads.length) addMsg('rag', 'consultei no cérebro: '+[...new Set(reads)].join(', '));
-  if(!r.msg && !extra.length && !reads.length) addMsg('bmo', '(ok)');
-}
-
-function flashChip(t){ const c=$('#chip'); const old=c.textContent; c.textContent=t; setTimeout(()=>c.textContent=old, 2500); }
-
-/* ---------- boot ---------- */
-setFace('happy');
-refreshState();
-setInterval(()=>{ if(TAB==='estado' || TAB==='chat') refreshState(); }, 4000);
-</script>
-</body>
-</html>
-"""
