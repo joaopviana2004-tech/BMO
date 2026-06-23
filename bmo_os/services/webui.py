@@ -147,6 +147,11 @@ def _config_schema(list_mics) -> list:
              "value": bool(config.get("cooler_enabled"))},
             {"key": "pet_proactive", "label": "BMO fala sozinho", "type": "toggle",
              "value": bool(config.get("pet_proactive"))},
+            {"key": "briefing_enabled", "label": "Briefing diário", "type": "toggle",
+             "value": bool(config.get("briefing_enabled"))},
+            {"key": "briefing_time", "label": "Hora do briefing", "type": "select",
+             "value": config.get("briefing_time"),
+             "options": [{"value": t, "label": t} for t in config.BRIEFING_TIME_OPTIONS]},
         ]},
         {"group": "IA", "items": [
             {"key": "llm_provider", "label": "Provedor (chat)", "type": "select",
@@ -193,6 +198,7 @@ class WebUIServer:
                  on_brain_search=None, on_brain_note=None, camera=None, on_mic=None,
                  get_tasks=None, on_tasks=None, get_agenda=None,
                  get_smarthome=None, on_smarthome=None, on_update=None,
+                 get_notifications=None, on_notification_read=None,
                  port: int | None = None) -> None:
         self.on_chat = on_chat
         self.get_state = get_state
@@ -210,6 +216,8 @@ class WebUIServer:
         self.get_smarthome = get_smarthome    # estado das tomadas
         self.on_smarthome = on_smarthome      # liga/desliga/toggle
         self.on_update = on_update            # git update + restart
+        self.get_notifications = get_notifications      # central de lembretes (aba HOJE)
+        self.on_notification_read = on_notification_read  # marca aviso(s) como lido
         self.port = port or DEFAULT_PORT
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -263,6 +271,8 @@ class WebUIServer:
                     self._call_get(srv.get_agenda, "agenda")
                 elif path == "/api/smarthome":
                     self._call_get(srv.get_smarthome, "casa")
+                elif path == "/api/notifications":
+                    self._call_get(srv.get_notifications, "avisos")
                 elif path == "/api/camera/stream":
                     self._api_camera_stream()
                 elif path == "/api/camera/snapshot":
@@ -287,6 +297,8 @@ class WebUIServer:
                     self._call_post(srv.on_tasks, "tarefas")
                 elif path == "/api/smarthome":
                     self._call_post(srv.on_smarthome, "casa")
+                elif path == "/api/notifications/read":
+                    self._call_post(srv.on_notification_read, "avisos")
                 elif path == "/api/mic":
                     self._api_mic()
                 elif path == "/api/update":

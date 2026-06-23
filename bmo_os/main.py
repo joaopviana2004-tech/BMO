@@ -7,6 +7,7 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import os
 import subprocess
 import sys
@@ -78,6 +79,8 @@ from bmo_os.services.smarthome import SmartHomeService
 from bmo_os.services.pet_memory import PetMemory
 from bmo_os.services.pet_state import PetState
 from bmo_os.services.sysinfo import SysInfoService
+from bmo_os.services.reminders import ReminderService
+from bmo_os.services.routines import due_today as routines_due_today, load_routines
 from bmo_os.services.todoist import SECTION_LABELS, SECTION_NAMES, TodoistService
 from bmo_os.services.tts import SCREEN_PHRASES, TTSService
 from bmo_os.services.voice import VoiceService
@@ -209,6 +212,10 @@ def build_initial(app: App):
     pet = PetState()
     memory = PetMemory()
     brain = PetBrain(pet, sysinfo=sysinfo, calendar=calendar, todoist=todoist)
+    # Secretária: central de lembretes proativos (briefing matinal + prazos +
+    # rotinas do Obsidian). Alimentada pelo secretary_tick (frame_hook); a aba
+    # HOJE do painel e a voz na telinha consomem daqui.
+    reminders = ReminderService()
     # BMO responde via LLM (OpenRouter ou NVIDIA NIM — escolhível em SETTINGS->IA).
     # Degrada sem a chave do provedor ativo (OPENROUTER_API_KEY / NVIDIA_API_KEY).
     # memory dá contexto (nome/fatos) e histórico entre conversas.
@@ -842,7 +849,8 @@ def build_initial(app: App):
             "ok": bool(snap.ok), "error": snap.error,
             "columns": [
                 {"key": k, "label": SECTION_LABELS.get(k, k.upper()),
-                 "tasks": [{"id": t.id, "content": t.content} for t in cols.get(k, [])]}
+                 "tasks": [{"id": t.id, "content": t.content, "due": t.due}
+                           for t in cols.get(k, [])]}
                 for k in SECTION_NAMES
             ],
         }
@@ -918,6 +926,18 @@ def build_initial(app: App):
         voice_enqueue(do_update)
         return {"ok": True, "msg": "baixando a ultima versao e reiniciando..."}
 
+    def web_notifications() -> dict:
+        """Central de lembretes (aba HOJE): briefing + cutucadas de prazo/rotina."""
+        return reminders.snapshot()
+
+    def web_notification_read(payload: dict) -> dict:
+        """Marca um aviso (ou todos, {all:true}) como lido."""
+        if payload.get("all"):
+            reminders.mark_read(every=True)
+        else:
+            reminders.mark_read(str(payload.get("id", "")))
+        return reminders.snapshot()
+
     # Sobe o painel (no-op se desligado na config ou porta ocupada). Reaproveita
     # remote_chat: o chat web abre telas / cria tarefas / fala no aparelho, igual
     # ao push-to-talk. Mesmo modelo de confiança da rede local (ver pairing.py).
@@ -932,7 +952,9 @@ def build_initial(app: App):
                             get_tasks=web_tasks, on_tasks=web_tasks_action,
                             get_agenda=web_agenda,
                             get_smarthome=web_smarthome, on_smarthome=web_smarthome_action,
-                            on_update=web_update)
+                            on_update=web_update,
+                            get_notifications=web_notifications,
+                            on_notification_read=web_notification_read)
         if webui.start():
             ip = local_ip()
             extra = f"  (rede: http://{ip}:{webui.port})" if ip else ""
@@ -942,6 +964,119 @@ def build_initial(app: App):
     # jogos ativos, menus ou suspensão (tela apagada).
     TALKATIVE_SCREENS = (BMOFaceScreen, ClockScreen, PongAmbientScreen,
                          SpaceInvadersAmbientScreen, ShufflingAmbientScreen)
+
+    # ---- secretária: briefing matinal + cutucadas de prazo/rotina ----
+    _secretary = {"last_tick": 0.0, "last_spoke": 0.0}
+    SECRETARY_TICK_S = 30.0       # recalcula os lembretes a cada 30s
+    SECRETARY_SPEAK_GAP_S = 25.0  # fala no máximo 1 lembrete a cada 25s
+
+    def _build_briefing(today: dt.date) -> str:
+        lines = [f"Resumo de hoje ({today.strftime('%d/%m')}):"]
+        try:
+            snap = calendar.get()
+            evs = list(getattr(snap, "events", []) or []) if getattr(snap, "ok", False) else []
+        except Exception:
+            evs = []
+        for e in evs[:6]:
+            when = "dia todo" if getattr(e, "all_day", False) else e.start.strftime("%H:%M")
+            lines.append(f"- {when}  {e.title}")
+        today_s = today.isoformat()
+        tom_s = (today + dt.timedelta(days=1)).isoformat()
+        try:
+            tsnap = todoist.get()
+            tasks = list(getattr(tsnap, "tasks", []) or []) if getattr(tsnap, "ok", False) else []
+        except Exception:
+            tasks = []
+        for t in tasks:
+            if getattr(t, "section_key", "") == "done":
+                continue
+            due = (getattr(t, "due", "") or "")[:10]
+            if due == today_s:
+                lines.append(f"- tarefa hoje: {t.content}")
+            elif due == tom_s:
+                lines.append(f"- tarefa amanhã: {t.content}")
+        try:
+            for it in routines_due_today(load_routines(knowledge.dir), today):
+                tag = f" #{it['area']}" if it["area"] else ""
+                if it["antec"] == 1:
+                    lines.append(f"- amanhã: {it['text']} (prepare hoje){tag}")
+                elif it["antec"] >= 2:
+                    lines.append(f"- em {it['antec']} dias: {it['text']}{tag}")
+                else:
+                    lines.append(f"- {it['text']}{tag}")
+        except Exception:
+            pass
+        if len(lines) == 1:
+            lines.append("- nada marcado. Dia livre.")
+        return "\n".join(lines)
+
+    def secretary_tick() -> None:
+        """Recalcula os lembretes proativos (rotinas + prazos + briefing) e os
+        joga na central. Roda no main thread (frame_hook), com throttle. Gated só
+        por briefing_enabled — independe do 'BMO fala sozinho' (que só controla a
+        VOZ; o painel sempre recebe)."""
+        if not config.get("briefing_enabled"):
+            return
+        today = dt.date.today()
+        # 1) rotinas que disparam hoje -> lembrete + auto-cria a task (1x/ocorrência)
+        try:
+            for it in routines_due_today(load_routines(knowledge.dir), today):
+                area = it["area"]
+                if it["antec"] == 1:
+                    txt = f"Amanhã: {it['text']} — prepare hoje"
+                elif it["antec"] >= 2:
+                    txt = f"Em {it['antec']} dias: {it['text']}"
+                else:
+                    txt = it["text"]
+                if area:
+                    txt += f"  ·  #{area}"
+                created = reminders.add(txt, area=area, kind="routine",
+                                        when=it["occur"],
+                                        key=f"rt:{it['key']}:{it['occur']}")
+                if created:
+                    try:
+                        todoist.create(it["text"])
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # 2) tarefas com prazo hoje/amanhã -> cutucada (1x/dia por task)
+        try:
+            tsnap = todoist.get()
+            if getattr(tsnap, "ok", False):
+                today_s = today.isoformat()
+                tom_s = (today + dt.timedelta(days=1)).isoformat()
+                for t in getattr(tsnap, "tasks", []) or []:
+                    if getattr(t, "section_key", "") == "done":
+                        continue
+                    due = (getattr(t, "due", "") or "")[:10]
+                    if due == today_s:
+                        reminders.add(f"Tarefa para hoje: {t.content}", kind="task",
+                                      when=due, key=f"due:{t.id}:{due}")
+                    elif due == tom_s:
+                        reminders.add(f"Tarefa para amanhã: {t.content}", kind="task",
+                                      when=due, key=f"due:{t.id}:{due}")
+        except Exception:
+            pass
+        # 3) briefing matinal — 1x/dia, a partir do horário configurado
+        bt = str(config.get("briefing_time") or "08:00")
+        try:
+            hh, mm = (int(x) for x in bt.split(":")[:2])
+        except Exception:
+            hh, mm = 8, 0
+        nowdt = dt.datetime.now()
+        bkey = f"briefing:{today.isoformat()}"
+        if (nowdt.hour, nowdt.minute) >= (hh, mm) and not reminders.fired_today(bkey):
+            reminders.add(_build_briefing(today), kind="briefing", key=bkey)
+
+    def _speak_reminder_text(item: dict) -> str:
+        """Texto pro TTS — tira bullets/símbolos (o motor de voz engasga neles)."""
+        t = (item.get("text") or "").replace("\n", ". ").replace("- ", "")
+        for ch in ("•", "#", "·"):
+            t = t.replace(ch, "")
+        if item.get("kind") == "briefing":
+            t = "Bom dia! " + t
+        return " ".join(t.split())
 
     def frame_hook(_dt: float) -> None:
         # Roda todo frame (main thread).
@@ -957,6 +1092,15 @@ def build_initial(app: App):
                 fn()
             except Exception:
                 pass
+        # 1.5) secretária: recalcula os lembretes (briefing/prazos/rotinas) com
+        # throttle. Sempre roda (independe do 'fala sozinho') pra o painel receber.
+        now_t = time.time()
+        if now_t - _secretary["last_tick"] >= SECRETARY_TICK_S:
+            _secretary["last_tick"] = now_t
+            try:
+                secretary_tick()
+            except Exception:
+                pass
         # 2) proatividade: o BMO puxa conversa sozinho (com parcimônia), só em
         # telas tagarelas e quando não está ocupado ouvindo/pensando/falando.
         if config.get("pet_proactive"):
@@ -964,12 +1108,25 @@ def build_initial(app: App):
             busy = (getattr(voice, "busy", False) or getattr(tts, "speaking", False)
                     or (getattr(chat, "last_msg", "") or "").strip() == "...")
             if isinstance(cur, TALKATIVE_SCREENS) and not busy:
-                try:
-                    phrase = brain.tick()
-                except Exception:
-                    phrase = None
-                if phrase:
-                    bmo_say(phrase)
+                said = False
+                # lembretes da secretária têm prioridade — fala 1 de cada vez
+                if now_t - _secretary["last_spoke"] >= SECRETARY_SPEAK_GAP_S:
+                    pend = reminders.unspoken()
+                    if pend:
+                        order = {"briefing": 0, "task": 1, "routine": 2}
+                        pend.sort(key=lambda r: order.get(r.get("kind"), 9))
+                        item = pend[0]
+                        bmo_say(_speak_reminder_text(item))
+                        reminders.mark_spoke(item["id"])
+                        _secretary["last_spoke"] = now_t
+                        said = True
+                if not said:
+                    try:
+                        phrase = brain.tick()
+                    except Exception:
+                        phrase = None
+                    if phrase:
+                        bmo_say(phrase)
         # 3) se um evento está próximo, empilha a AlertScreen por cima de
         # qualquer tela (relógio, jogo, suspended...)
         if isinstance(app.manager.current, AlertScreen):

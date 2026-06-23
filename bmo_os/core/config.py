@@ -63,6 +63,8 @@ DEFAULTS: dict = {
     "tts_volume": 100,              # 0-100 — volume da voz do BMO (eSpeak-NG), separado do volume dos efeitos
     "pet_proactive": True,          # BMO puxa conversa sozinho (falas espontâneas por humor/contexto)
     "webui_enabled": True,          # painel web no localhost (ajustes/espaço interno/chat) — porta via BMO_WEB_PORT
+    "briefing_enabled": True,       # secretária: briefing matinal + cutucadas de prazo/rotina (aba HOJE)
+    "briefing_time": "08:00",       # horário do briefing diário (HH:MM, 24h)
     # --- LLM do chat (BMO responde) — escolhível em SETTINGS -> IA ---
     # provedor: "openrouter" | "nvidia" | "grok" | "local" (todos OpenAI-compatíveis)
     "llm_provider": "openrouter",
@@ -108,6 +110,8 @@ AMBIENT_MODE_LABELS = {
 BRIGHTNESS_OPTIONS = [20, 40, 60, 80, 100]
 VOLUME_OPTIONS = [0, 25, 50, 75, 100]
 EVENT_WARNING_OPTIONS = [1, 5, 10, 15, 30, 60]   # minutos de antecedência
+BRIEFING_TIME_OPTIONS = ["06:00", "07:00", "07:30", "08:00", "08:30",
+                         "09:00", "10:00", "12:00"]   # horário do briefing matinal
 
 # --- LLM: provedores e modelos de troca rápida (SETTINGS -> IA) ---
 # Edite à vontade. Os IDs são os esperados por cada API (OpenAI-compatível).
