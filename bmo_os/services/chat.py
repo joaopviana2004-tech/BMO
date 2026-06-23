@@ -40,6 +40,7 @@ Env (chaves; o resto é via Settings):
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import json
 import os
 import re
@@ -252,10 +253,16 @@ SYSTEM_PROMPT = (
     'salva e sincronizada no Drive/Obsidian. Use create pra nota nova, append '
     'pra acrescentar no fim, replace pra sobrescrever (busque antes com '
     'notes_query se nao souber o conteudo atual). Se nao for escrever, use null.\n'
+    'AGENDA: voce pode CRIAR um evento no calendario do usuario. Preencha '
+    '"event" com {"title": "...", "date": "YYYY-MM-DD", "time": "HH:MM" '
+    '(vazio = dia todo), "duration_min": 60}. Resolva datas relativas '
+    '("hoje", "amanha", "sexta") pela DATA/HORA AGORA deste prompt. Title curto '
+    '(o compromisso, sem "marcar"/"lembrar"). So preencha quando for claramente '
+    'um compromisso COM DATA; pra tarefa sem hora marcada use "task". Senao null.\n'
     'Responda SEMPRE apenas com um JSON valido no formato '
     '{"msg": "sua resposta", "screen": "uma das chaves acima", "task": "", '
     '"facts": [], "name": "", "notes_query": "", "notes_write": null, '
-    '"power": null}. '
+    '"power": null, "event": null}. '
     'Use "screen" diferente de "none" SO quando o usuario pedir ou fizer claro '
     'sentido abrir aquela tela; em conversa normal use "none". '
     "Nada alem do JSON."
@@ -305,6 +312,7 @@ class ChatService:
         self.last_screen = ""    # tela que o BMO pediu pra abrir ("" = nenhuma)
         self.last_task = ""      # tarefa que o BMO pediu pra criar ("" = nenhuma)
         self.last_power = None    # ação de tomada pedida pela IA {device,on} ou None
+        self.last_event = None    # evento de calendário pedido pela IA ou None
         # Debug do RAG: o que foi pesquisado/lido nas notas na última ask()
         # (ex.: ["auto 'quem é jp?' -> JP", "tool 'projetos jp' -> Bimo"]).
         self.last_notes: list[str] = []
@@ -328,6 +336,14 @@ class ChatService:
     def _build_system(self, mood: str = "") -> str:
         """System prompt = base + memória do usuário + tom conforme o humor."""
         parts = [SYSTEM_PROMPT]
+        try:
+            agora = dt.datetime.now().astimezone()
+            dias = ["segunda", "terca", "quarta", "quinta", "sexta", "sabado", "domingo"]
+            parts.append(f"DATA/HORA AGORA: {agora.isoformat(timespec='minutes')} "
+                         f"({dias[agora.weekday()]}). Use pra resolver datas "
+                         f"relativas ('hoje', 'amanha', 'sexta').")
+        except Exception:
+            pass
         if self.memory is not None:
             try:
                 mem = self.memory.summary()
@@ -459,6 +475,7 @@ class ChatService:
         self.last_screen = ""
         self.last_task = ""
         self.last_power = None
+        self.last_event = None
         self.last_notes = []
         self.last_rag = []
         provider, spec, url, api_key, model = _resolve()
@@ -494,8 +511,9 @@ class ChatService:
                 data = _http_post_json(url, api_key, spec["extra_headers"], payload)
                 content = data["choices"][0]["message"].get("content")
                 (self.last_msg, self.last_screen, self.last_task,
-                 facts, name, notes_query, notes_write, power) = self._parse(content)
+                 facts, name, notes_query, notes_write, power, event) = self._parse(content)
                 self.last_power = power
+                self.last_event = event
                 if round_ >= self.MAX_TOOL_ROUNDS - 1:
                     break
                 if notes_query and self.knowledge is not None:
@@ -655,8 +673,23 @@ class ChatService:
                 "true", "1", "on", "liga", "ligar", "ligada", "sim", "yes")
         return {"device": dev, "on": on}
 
-    def _parse(self, content: str) -> tuple[str, str, str, list, str, str, dict | None, dict | None]:
-        """Extrai (msg, screen, task, facts, name, notes_query, notes_write, power).
+    def _parse_event(self, raw) -> dict | None:
+        """Normaliza event {title, date, time, duration_min} (evento de calendário)."""
+        if not isinstance(raw, dict):
+            return None
+        title = str(raw.get("title", "") or "").strip()
+        date = str(raw.get("date", "") or "").strip()[:10]
+        if not title or len(date) != 10:
+            return None
+        time_ = str(raw.get("time", "") or "").strip()
+        try:
+            dur = int(raw.get("duration_min", 60) or 60)
+        except (TypeError, ValueError):
+            dur = 60
+        return {"title": title, "date": date, "time": time_, "duration_min": dur}
+
+    def _parse(self, content: str) -> tuple[str, str, str, list, str, str, dict | None, dict | None, dict | None]:
+        """Extrai (msg, screen, task, facts, name, notes_query, notes_write, power, event).
         Tolerante: tenta o JSON inteiro, depois um objeto no meio do texto.
         Campos ausentes viram vazio. screen vira "" se ausente/invalido."""
         content = (content or "").strip()
@@ -685,7 +718,8 @@ class ChatService:
             notes_query = str(obj.get("notes_query", "") or "").strip()
             notes_write = self._parse_notes_write(obj.get("notes_write"))
             power = self._parse_power(obj.get("power"))
+            event = self._parse_event(obj.get("event"))
             pending = notes_query or notes_write
             return (msg or ("" if pending else _strip_emoji(content))), \
-                screen, task, facts, name, notes_query, notes_write, power
-        return _strip_emoji(content), "", "", [], "", "", None, None
+                screen, task, facts, name, notes_query, notes_write, power, event
+        return _strip_emoji(content), "", "", [], "", "", None, None, None

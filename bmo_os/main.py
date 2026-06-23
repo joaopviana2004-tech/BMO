@@ -689,6 +689,20 @@ def build_initial(app: App):
                 _apply_power(power)
             except Exception:
                 pass
+        # IA mandou criar um evento na agenda? (campo "event" do JSON do chat)
+        event = getattr(chat, "last_event", None)
+        if event:
+            try:
+                res = calendar.create_event(
+                    event.get("title", ""), event.get("date", ""),
+                    event.get("time", ""), event.get("duration_min", 60))
+                cur = (getattr(chat, "last_msg", "") or "").strip()
+                if not res.get("ok"):
+                    chat.last_msg = "Nao consegui criar o evento: " + (res.get("error") or "?")
+                elif not cur or cur == "...":
+                    chat.last_msg = "Evento criado na agenda."
+            except Exception:
+                pass
         action = screen_actions.get(screen_key)
         if action is not None:
             voice_enqueue(action)
@@ -709,6 +723,7 @@ def build_initial(app: App):
             "error": getattr(chat, "last_error", ""),
             "notes": getattr(chat, "last_notes", []),
             "rag": getattr(chat, "last_rag", []),   # quais notas o LLM consultou
+            "event": getattr(chat, "last_event", None),  # evento criado na agenda
         }
 
     _remote_chat["fn"] = remote_chat
@@ -879,7 +894,14 @@ def build_initial(app: App):
                 "end": "" if e.all_day else e.end.strftime("%H:%M"),
                 "start_iso": e.start.isoformat(), "cal": e.cal_label,
             })
-        return {"ok": bool(snap.ok), "error": snap.error, "events": events}
+        return {"ok": bool(snap.ok), "error": snap.error, "events": events,
+                "can_write": calendar.can_write()}
+
+    def web_agenda_create(payload: dict) -> dict:
+        """Cria um evento na agenda (conta pessoal com escopo de escrita)."""
+        return calendar.create_event(
+            payload.get("title", ""), payload.get("date", ""),
+            payload.get("time", ""), payload.get("duration_min", 60))
 
     def web_smarthome() -> dict:
         """Estado das tomadas smart pro painel."""
@@ -950,7 +972,7 @@ def build_initial(app: App):
                             on_brain_note=web_brain_note,
                             camera=camera, on_mic=web_mic,
                             get_tasks=web_tasks, on_tasks=web_tasks_action,
-                            get_agenda=web_agenda,
+                            get_agenda=web_agenda, on_agenda_create=web_agenda_create,
                             get_smarthome=web_smarthome, on_smarthome=web_smarthome_action,
                             on_update=web_update,
                             get_notifications=web_notifications,

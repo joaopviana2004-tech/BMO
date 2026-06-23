@@ -23,6 +23,7 @@ import json
 import os
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -375,6 +376,68 @@ class CalendarService:
                 color=color,
             ))
         return out
+
+    # ---------- escrita (criar evento) ----------
+
+    def _writable_account(self) -> dict | None:
+        """Primeira conta OAuth autorizada com escopo de ESCRITA (gcal_auth
+        --write marca "write": true). None se nenhuma pode escrever."""
+        for a in _resolve_oauth_accounts():
+            if a.get("write"):
+                return a
+        return None
+
+    def can_write(self) -> bool:
+        return self._writable_account() is not None
+
+    def create_event(self, title: str, date: str, time: str = "",
+                     duration_min: int = 60) -> dict:
+        """Cria um evento na conta com permissão de escrita (a pessoal).
+        date = "YYYY-MM-DD"; time = "HH:MM" ("" = dia todo). Retorna
+        {ok, error?, title, date, time}. Dispara refresh do snapshot."""
+        acc = self._writable_account()
+        if acc is None:
+            return {"ok": False, "error": "nenhuma conta com permissao de escrita "
+                    "(rode: python scripts/gcal_auth.py --write)"}
+        title = (title or "").strip() or "(sem titulo)"
+        try:
+            d = dt.date.fromisoformat((date or "").strip()[:10])
+        except Exception:
+            return {"ok": False, "error": "data invalida (use YYYY-MM-DD)"}
+        body: dict = {"summary": title}
+        time = (time or "").strip()
+        if time:
+            try:
+                hh, mm = (int(x) for x in time.split(":")[:2])
+            except Exception:
+                hh, mm = 9, 0
+            start_dt = dt.datetime.combine(d, dt.time(hh, mm), tzinfo=_local_tz())
+            end_dt = start_dt + dt.timedelta(minutes=max(5, int(duration_min or 60)))
+            body["start"] = {"dateTime": start_dt.isoformat()}
+            body["end"] = {"dateTime": end_dt.isoformat()}
+        else:
+            body["start"] = {"date": d.isoformat()}
+            body["end"] = {"date": (d + dt.timedelta(days=1)).isoformat()}
+        try:
+            token = self._access_token(acc["refresh_token"])
+        except Exception as e:
+            return {"ok": False, "error": "auth: " + str(e)[:70]}
+        cal_id = acc.get("calendar_id") or "primary"
+        url = f"{CAL_API}/{urllib.parse.quote(cal_id, safe='')}/events"
+        req = urllib.request.Request(
+            url, data=json.dumps(body).encode("utf-8"), method="POST",
+            headers={"Authorization": f"Bearer {token}",
+                     "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+                created = json.load(resp)
+        except urllib.error.HTTPError as e:
+            return {"ok": False, "error": f"HTTP {e.code} ao criar evento"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:80]}
+        self.trigger_refresh()
+        return {"ok": True, "id": created.get("id", ""), "title": title,
+                "date": d.isoformat(), "time": time}
 
     def _set(self, snap: CalendarSnapshot) -> None:
         with self._lock:

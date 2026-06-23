@@ -196,7 +196,7 @@ class WebUIServer:
     def __init__(self, *, on_chat=None, get_state=None, list_mics=None,
                  on_set_config=None, on_memory=None, get_brain=None,
                  on_brain_search=None, on_brain_note=None, camera=None, on_mic=None,
-                 get_tasks=None, on_tasks=None, get_agenda=None,
+                 get_tasks=None, on_tasks=None, get_agenda=None, on_agenda_create=None,
                  get_smarthome=None, on_smarthome=None, on_update=None,
                  get_notifications=None, on_notification_read=None,
                  port: int | None = None) -> None:
@@ -213,6 +213,7 @@ class WebUIServer:
         self.get_tasks = get_tasks            # snapshot do Kanban (Todoist)
         self.on_tasks = on_tasks              # create/move tarefa
         self.get_agenda = get_agenda          # eventos de hoje (Calendar)
+        self.on_agenda_create = on_agenda_create  # cria evento na agenda (pessoal)
         self.get_smarthome = get_smarthome    # estado das tomadas
         self.on_smarthome = on_smarthome      # liga/desliga/toggle
         self.on_update = on_update            # git update + restart
@@ -295,6 +296,8 @@ class WebUIServer:
                     self._call_post(srv.on_memory, "memoria")
                 elif path == "/api/tasks":
                     self._call_post(srv.on_tasks, "tarefas")
+                elif path == "/api/agenda":
+                    self._call_post(srv.on_agenda_create, "agenda")
                 elif path == "/api/smarthome":
                     self._call_post(srv.on_smarthome, "casa")
                 elif path == "/api/notifications/read":
