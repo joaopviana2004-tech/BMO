@@ -812,6 +812,27 @@ def build_initial(app: App):
              "tags": h.get("tags", []), "snippet": (h.get("snippet", "") or "")[:300]}
             for h in hits]}
 
+    def web_brain_note(note_id: str) -> dict:
+        """Conteúdo integral de UMA nota do cérebro pro painel (visualização
+        Obsidian). Aceita o id (stem minúsculo) OU o título; lê o .md direto
+        pelo path do grafo."""
+        g = knowledge.scan()
+        nid = (note_id or "").strip().lower()
+        note = g.notes.get(nid)
+        if note is None:
+            for n in g.notes.values():
+                if n.title.lower() == nid:
+                    note = n
+                    break
+        if note is None:
+            return {"error": "nota nao encontrada"}
+        try:
+            body = note.path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            body = ""
+        return {"id": note.id, "title": note.title, "tags": list(note.tags),
+                "links": g.degree(note.id), "mtime": note.mtime, "body": body}
+
     def web_tasks() -> dict:
         """Snapshot do Kanban (Todoist) pro painel: colunas TO-DO/DOING/DONE com
         suas tarefas. Getter thread-safe — não bloqueia o frame."""
@@ -906,6 +927,7 @@ def build_initial(app: App):
                             list_mics=voice.list_input_devices,
                             on_set_config=web_set_config, on_memory=web_memory,
                             get_brain=web_brain, on_brain_search=web_brain_search,
+                            on_brain_note=web_brain_note,
                             camera=camera, on_mic=web_mic,
                             get_tasks=web_tasks, on_tasks=web_tasks_action,
                             get_agenda=web_agenda,

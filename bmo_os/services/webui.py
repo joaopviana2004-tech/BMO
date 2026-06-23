@@ -190,7 +190,7 @@ class WebUIServer:
 
     def __init__(self, *, on_chat=None, get_state=None, list_mics=None,
                  on_set_config=None, on_memory=None, get_brain=None,
-                 on_brain_search=None, camera=None, on_mic=None,
+                 on_brain_search=None, on_brain_note=None, camera=None, on_mic=None,
                  get_tasks=None, on_tasks=None, get_agenda=None,
                  get_smarthome=None, on_smarthome=None, on_update=None,
                  port: int | None = None) -> None:
@@ -201,6 +201,7 @@ class WebUIServer:
         self.on_memory = on_memory
         self.get_brain = get_brain            # snapshot do cérebro (RAG/notas)
         self.on_brain_search = on_brain_search  # roda knowledge.search pro painel
+        self.on_brain_note = on_brain_note    # conteúdo integral de 1 nota (.md)
         self.camera = camera                  # serviço de câmera (acquire/jpeg/release)
         self.on_mic = on_mic                  # push-to-talk remoto (start/stop)
         self.get_tasks = get_tasks            # snapshot do Kanban (Todoist)
@@ -254,6 +255,8 @@ class WebUIServer:
                     self._call_get(srv.get_brain, "cerebro")
                 elif path == "/api/brain/search":
                     self._api_brain_search()
+                elif path == "/api/brain/note":
+                    self._api_brain_note()
                 elif path == "/api/tasks":
                     self._call_get(srv.get_tasks, "tarefas")
                 elif path == "/api/agenda":
@@ -358,6 +361,16 @@ class WebUIServer:
                 q = (parse_qs(urlparse(self.path).query).get("q", [""]) or [""])[0]
                 try:
                     self._send(200, srv.on_brain_search(q) or {})
+                except Exception as e:
+                    self._send(500, {"error": str(e)[:80]})
+
+            def _api_brain_note(self) -> None:
+                if srv.on_brain_note is None:
+                    self._send(503, {"error": "nota indisponivel"})
+                    return
+                nid = (parse_qs(urlparse(self.path).query).get("id", [""]) or [""])[0]
+                try:
+                    self._send(200, srv.on_brain_note(nid) or {})
                 except Exception as e:
                     self._send(500, {"error": str(e)[:80]})
 
