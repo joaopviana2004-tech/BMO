@@ -440,7 +440,10 @@ class CalendarService:
             return {"ok": False, "error": f"HTTP {e.code} ao criar evento"}
         except Exception as e:
             return {"ok": False, "error": str(e)[:80]}
-        self.trigger_refresh()
+        try:
+            self.trigger_refresh()   # já criou; refresh é best-effort
+        except Exception:
+            pass
         return {"ok": True, "id": created.get("id", ""), "title": title,
                 "date": d.isoformat(), "time": time}
 
