@@ -61,13 +61,19 @@ def main() -> int:
     ap.add_argument("--write", action="store_true",
                     help="pede tambem permissao de ESCRITA (criar eventos). "
                          "Use na conta pessoal; a profissional deixe sem (so leitura).")
+    ap.add_argument("--client-id", default="",
+                    help="client_id desta conta (sobrescreve GCAL_CLIENT_ID do .env). "
+                         "Use quando cada conta tem seu proprio cliente OAuth.")
+    ap.add_argument("--client-secret", default="",
+                    help="client_secret desta conta (sobrescreve o do .env).")
     args = ap.parse_args()
     scope = SCOPE_WRITE if args.write else SCOPE_READ
 
-    cid = os.environ.get("GCAL_CLIENT_ID", "").strip()
-    csec = os.environ.get("GCAL_CLIENT_SECRET", "").strip()
+    cid = (args.client_id or os.environ.get("GCAL_CLIENT_ID", "")).strip()
+    csec = (args.client_secret or os.environ.get("GCAL_CLIENT_SECRET", "")).strip()
     if not cid or not csec:
-        print("ERRO: defina GCAL_CLIENT_ID e GCAL_CLIENT_SECRET no .env primeiro.")
+        print("ERRO: passe --client-id/--client-secret ou defina GCAL_CLIENT_ID e "
+              "GCAL_CLIENT_SECRET no .env primeiro.")
         print("Veja as instruções no topo deste arquivo.")
         return 1
     print(f"Modo: {'LER + ESCREVER (criar eventos)' if args.write else 'somente LEITURA'}")
@@ -172,7 +178,8 @@ def main() -> int:
             data = {"accounts": []}
     accounts = [a for a in data.get("accounts", []) if a.get("label") != label]
     accounts.append({"label": label, "refresh_token": refresh,
-                     "calendar_id": "primary", "write": bool(args.write)})
+                     "calendar_id": "primary", "write": bool(args.write),
+                     "client_id": cid, "client_secret": csec})
     data["accounts"] = accounts
     TOKENS_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 

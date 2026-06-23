@@ -143,9 +143,9 @@ def _oauth_creds() -> tuple[str, str]:
 
 
 def _resolve_oauth_accounts() -> list[dict]:
-    """Contas OAuth salvas em gcal_tokens.json (vazio se sem client/credenciais)."""
-    if not _oauth_creds()[0]:
-        return []
+    """Contas OAuth salvas em gcal_tokens.json. Cada conta pode trazer seu próprio
+    client_id/client_secret (multi-cliente: pessoal e empresa têm clientes
+    diferentes); cai pro GCAL_CLIENT_ID global do .env se a conta não tiver."""
     if not TOKENS_PATH.exists():
         return []
     try:
@@ -153,7 +153,8 @@ def _resolve_oauth_accounts() -> list[dict]:
     except Exception:
         return []
     accounts = data.get("accounts", []) if isinstance(data, dict) else []
-    return [a for a in accounts if a.get("refresh_token")]
+    return [a for a in accounts
+            if a.get("refresh_token") and (a.get("client_id") or _oauth_creds()[0])]
 
 
 def _parse_api_dt(node: dict):
@@ -320,13 +321,17 @@ class CalendarService:
 
     # ---------- OAuth ----------
 
-    def _access_token(self, refresh_token: str) -> str:
-        """Troca o refresh token por um access token (cacheado até expirar)."""
+    def _access_token(self, account: dict) -> str:
+        """Troca o refresh token por um access token (cacheado até expirar).
+        Usa o client_id/secret DA CONTA (cada conta pode ter o seu); cai pro
+        global do .env se a conta não trouxer."""
+        refresh_token = account["refresh_token"]
         now = time.time()
         cached = self._token_cache.get(refresh_token)
         if cached and cached[1] - 60 > now:
             return cached[0]
-        cid, csec = _oauth_creds()
+        cid = account.get("client_id") or _oauth_creds()[0]
+        csec = account.get("client_secret") or _oauth_creds()[1]
         body = urllib.parse.urlencode({
             "client_id": cid,
             "client_secret": csec,
@@ -342,7 +347,7 @@ class CalendarService:
         return access
 
     def _fetch_oauth(self, account: dict, label: str, color, start, end) -> list[CalEvent]:
-        token = self._access_token(account["refresh_token"])
+        token = self._access_token(account)
         cal_id = account.get("calendar_id") or "primary"
         params = urllib.parse.urlencode({
             "timeMin": start.isoformat(),
@@ -419,7 +424,7 @@ class CalendarService:
             body["start"] = {"date": d.isoformat()}
             body["end"] = {"date": (d + dt.timedelta(days=1)).isoformat()}
         try:
-            token = self._access_token(acc["refresh_token"])
+            token = self._access_token(acc)
         except Exception as e:
             return {"ok": False, "error": "auth: " + str(e)[:70]}
         cal_id = acc.get("calendar_id") or "primary"
