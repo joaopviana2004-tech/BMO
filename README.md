@@ -325,6 +325,10 @@ TODOIST_TOKEN=xxxxxxxx                  # token da REST API v1 do Todoist
 # SMARTHOME_T1_ID=eb9ee0b5867f260c61hvbq
 # SMARTHOME_T1_IP=192.168.0.107
 # SMARTHOME_T1_KEY=<local_key crua, sem aspas>     # SMARTHOME_T1_VER=3.4 (opcional)
+# --- LLM local / embeddings (no PC; a Rasp alcança pela LAN) ---
+# LOCAL_LLM_URL=jp-predator.local:8080   # chat local (llama.cpp); host/URL
+# EMBED_URL=jp-predator.local:11434      # RAG vetorial: endpoint /v1/embeddings (Ollama bge-m3)
+# EMBED_MODEL=bge-m3                      # (opcional) modelo de embedding
 ```
 
 Veja `.env.example` (commitado) pra docs completas. Env vars já no shell têm
@@ -446,7 +450,7 @@ CONTA" entra como **convidado** (local, sem sync).
 Sem `GOOGLE_CLIENT_ID/SECRET` no `.env`, o login fica indisponível e o BMO roda
 em modo local (convidado/legado) — tudo funciona, só não sincroniza.
 
-## Segundo Cérebro (grafo de conhecimento)
+## Segundo Cérebro (grafo de conhecimento + RAG)
 
 A tela **CÉREBRO** é o "Oráculo Visual": um grafo força-dirigido (estilo
 Obsidian/matrix) das suas notas `.md`, que **respira** e se organiza sozinho.
@@ -457,9 +461,37 @@ Obsidian/matrix) das suas notas `.md`, que **respira** e se organiza sozinho.
   arrastar o vazio dá **pan**, **pinça** dá zoom, **2 toques** num nó abrem o
   **split** (grafo à esquerda, a nota inteira à direita).
 - Fonte: as notas são espelhadas do **Drive** (`Bimo/Conhecimento` →
-  `knowledge/` do perfil, bidirecional). É a base do **RAG local** — o chat usa
-  essas notas como contexto e o agente pode **criar/editar notas** (tool
-  `notes_write`), que sobem pro Drive e o PC puxa pro Obsidian.
+  `knowledge/` do perfil, bidirecional). O agente pode **criar/editar notas**
+  (tool `notes_write`), que sobem pro Drive e o PC puxa pro Obsidian.
+
+No **painel web** (aba Cérebro) o grafo é o mesmo (vivo, arrastável) e ainda dá pra:
+**criar / editar / excluir** memórias e inserir `[[links]]` por chip; **editar a
+nota com o BMO** (provedor/modelo próprios da edição, texto livre); ver a **prévia
+de chunks ao vivo** (linha ondulada por seção); e, ao excluir um nó referenciado,
+**repontar os backlinks** pra outra nota (ex.: `joao_pessoa` → `Joao Pessoa`).
+
+### RAG híbrido (vetorial + léxico + grafo)
+
+A busca no Segundo Cérebro é um **RAG híbrido autêntico**:
+
+- **Chunking por seção** (`##`, nível configurável em `rag_chunk_level`): cada
+  chunk vai pro LLM com a **seção + o nome da memória**.
+- **Busca densa (vetorial):** embeddings **bge-m3** (1024-dim) via **Ollama**.
+  Mecânica: o embedding (caro) é gerado **no PC** e o **índice pronto vai pra
+  Rasp**, que só faz **cosseno** (leve, numpy). A *query* é 1 embedding que a Rasp
+  pede ao Ollama do PC pela LAN (`EMBED_URL`).
+- **Busca léxica** (palavra-chave, ótima pra nomes/termos exatos) + **fusão por
+  RRF** + **expansão pelo grafo** de `[[links]]` (puxa vizinhos a 1 hop).
+- Degrada sozinho: sem índice/Ollama, cai pro léxico puro.
+
+Pra (re)indexar, rode **no PC** (com Ollama + `ollama pull bge-m3`):
+
+```bash
+python scripts/build_rag_index.py --pi 192.168.0.109:8000
+```
+
+> Detalhes completos (arquitetura, pipeline, endpoints, tuning, setup do Ollama):
+> **[`tecnologia_rag_bmo.md`](tecnologia_rag_bmo.md)**.
 
 ## Dev Hub (dashboard de programação)
 
