@@ -286,3 +286,20 @@ class KnowledgeService:
         with self._lock:
             self._sig = ()   # força re-scan do grafo
         return {"ok": True, "title": path.stem, "path": path}
+
+    def delete(self, title: str) -> dict:
+        """Apaga uma nota local pelo título OU id (stem). Retorna
+        {ok, title, name, path, error?}. Invalida o cache do grafo. A exclusão
+        no Drive é feita por quem chama (drive_sync.delete_note) pra a nota não
+        voltar no próximo sync."""
+        path = self._find_path(title)
+        if path is None or not path.exists():
+            return {"ok": False, "error": "nota nao encontrada"}
+        name, stem = path.name, path.stem
+        try:
+            path.unlink()
+        except OSError as e:
+            return {"ok": False, "error": str(e)[:80]}
+        with self._lock:
+            self._sig = ()   # força re-scan do grafo
+        return {"ok": True, "title": stem, "name": name, "path": path}

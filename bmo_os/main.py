@@ -815,12 +815,54 @@ def build_initial(app: App):
                 "tags": list(n.tags), "links": g.degree(n.id),
                 "preview": " ".join(n.preview)[:160], "mtime": n.mtime,
             })
+        # arestas pro grafo: TODO link (inclui alvos fantasma), id->id
+        edges = [{"source": n.id, "target": t}
+                 for n in g.notes.values() for t in n.links]
         return {
             "summary": {"notes": len(g.notes), "links": len(g.edges),
                         "ghosts": len(g.ghosts)},
             "notes": notes,
+            "edges": edges,
+            "ghosts": sorted(g.ghosts),
             "last_rag": getattr(chat, "last_rag", []),
         }
+
+    def web_brain_save(payload: dict) -> dict:
+        """Cria/edita uma nota do cérebro pelo painel. {title, body, mode}
+        (mode: create|append|replace). Grava local e sobe pro Drive (igual à
+        tool notes_write do chat). Links são [[wikilinks]] no próprio corpo."""
+        title = str(payload.get("title", "")).strip()
+        if not title:
+            return {"ok": False, "error": "titulo vazio"}
+        body = str(payload.get("body", ""))
+        mode = str(payload.get("mode", "create")).strip().lower() or "create"
+        res = knowledge.write(title, body, mode=mode)
+        if not res.get("ok"):
+            return {"ok": False, "error": res.get("error", "?")}
+        synced = False
+        try:
+            synced = _push_note_to_drive(res["path"])
+        except Exception:
+            synced = False
+        return {"ok": True, "id": res["title"].lower(), "title": res["title"],
+                "synced": synced}
+
+    def web_brain_delete(payload: dict) -> dict:
+        """Exclui uma nota do cérebro pelo painel ({id} ou {title}). Apaga local
+        e na lixeira do Drive (senão o sync re-baixa)."""
+        ident = str(payload.get("id") or payload.get("title") or "").strip()
+        if not ident:
+            return {"ok": False, "error": "sem id"}
+        res = knowledge.delete(ident)
+        if not res.get("ok"):
+            return {"ok": False, "error": res.get("error", "?")}
+        svc = _drive_sync.get("svc")
+        if svc is not None:
+            try:
+                svc.delete_note(res.get("name", ""))
+            except Exception:
+                pass
+        return {"ok": True, "title": res.get("title", "")}
 
     def web_brain_search(query: str) -> dict:
         """Roda a MESMA busca do RAG (knowledge.search) pro dono testar o que o
@@ -973,6 +1015,7 @@ def build_initial(app: App):
                             on_set_config=web_set_config, on_memory=web_memory,
                             get_brain=web_brain, on_brain_search=web_brain_search,
                             on_brain_note=web_brain_note,
+                            on_brain_save=web_brain_save, on_brain_delete=web_brain_delete,
                             camera=camera, on_mic=web_mic,
                             get_tasks=web_tasks, on_tasks=web_tasks_action,
                             get_agenda=web_agenda, on_agenda_create=web_agenda_create,

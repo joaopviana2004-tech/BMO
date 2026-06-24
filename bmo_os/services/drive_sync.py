@@ -151,6 +151,31 @@ class DriveSync:
                     pass
         return ok
 
+    def delete_note(self, name: str) -> bool:
+        """Manda pra lixeira um .md de Bimo/Conhecimento pelo nome do arquivo.
+        Necessário ao excluir do painel: sem isso o PULL do _sync_knowledge
+        re-baixaria a nota e ela 'voltaria'. Best-effort (offline = no-op)."""
+        if not name:
+            return False
+        if not name.lower().endswith(".md"):
+            name += ".md"
+        folder = self._ensure_knowledge_folder()
+        if not folder:
+            return False
+        remote = self._list_remote_notes(folder)
+        if remote is None:
+            return False
+        ok = False
+        for f in remote:
+            if f.get("name") == name:
+                # DELETE manda pra lixeira; _request engole erro (volta None no 204)
+                self._request(f"{FILES_URL}/{f['id']}", method="DELETE")
+                ok = True
+        if ok:
+            self.knowledge_sync_at = time.time()
+            self.knowledge_status = f"nota {name[:-3]} removida do Drive"
+        return ok
+
     def push_model(self, path: Path) -> bool:
         """Sobe UM modelo (.json de cérebro treinado) pra Bimo/Modelos/ — backup
         'bem seguro' do treino. Cria ou atualiza pelo nome. Síncrono (a tela de
