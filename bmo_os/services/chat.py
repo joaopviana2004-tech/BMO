@@ -478,7 +478,7 @@ class ChatService:
         if self.knowledge is None or not query:
             return ""
         try:
-            hits = self.knowledge.search(query, k=3)
+            hits = self.knowledge.search_hybrid(query, k=3)
         except Exception:
             return ""
         self._log_notes("tool", query, hits)
@@ -515,13 +515,15 @@ class ChatService:
 
     def _auto_notes(self, text: str) -> str:
         """RAG automático: busca os termos da mensagem nas notas ANTES de
-        chamar o LLM. Só injeta matches fortes (título/tag, score >= 4) pra
-        não poluir conversa fiada com nota aleatória."""
+        chamar o LLM. Só injeta matches FORTES (título/tag léxico score >= 4 OU
+        similaridade densa alta) pra não poluir conversa fiada com nota aleatória.
+        Usa o híbrido (vetorial + léxico + grafo); cai pro léxico sozinho se o
+        endpoint de embedding/índice faltar."""
         if self.knowledge is None:
             return ""
         try:
-            hits = [h for h in self.knowledge.search(text, k=2)
-                    if h.get("score", 0) >= 4]
+            hits = [h for h in self.knowledge.search_hybrid(text, k=3)
+                    if h.get("score", 0) >= 4 or h.get("dense", 0) >= 0.6]
         except Exception:
             return ""
         if not hits:

@@ -20,6 +20,8 @@ pasta do perfil (mesmo esquema do espelho Drive/Obsidian).
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import threading
 import unicodedata
@@ -27,6 +29,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..core import config
+
+
+def chunk_hash(text: str) -> str:
+    """Hash curto do texto do chunk — chave de cache do embedding (build) e
+    detecção de chunk alterado (runtime). Igual no builder e na Rasp."""
+    return hashlib.sha1((text or "").encode("utf-8", "ignore")).hexdigest()[:16]
 
 # caracteres proibidos em nome de arquivo (Windows/Linux)
 _UNSAFE_NAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -152,6 +160,10 @@ class KnowledgeService:
         self._lock = threading.Lock()
         self._sig: tuple = ()
         self._graph = Graph(notes={}, edges=[], ghosts=set())
+        # índice vetorial (RAG denso) — carregado de .rag_index/index.json,
+        # gerado no PC e entregue à Rasp (ver vector_index.py / build_rag_index.py)
+        self._vindex = None
+        self._vindex_mtime = -1.0
 
     def _signature(self, files: list[Path]) -> tuple:
         try:
@@ -214,72 +226,237 @@ class KnowledgeService:
         nfkd = unicodedata.normalize("NFKD", s.lower())
         return "".join(c for c in nfkd if not unicodedata.combining(c))
 
-    def search(self, query: str, k: int = 3, snippet_chars: int = 600) -> list[dict]:
-        """Busca por palavras-chave, agora no nível de CHUNK (seção "##").
+    # ---------- helpers de busca (compartilhados léxico + híbrido) ----------
 
-        Cada nota é quebrada por `rag_chunk_level` (config) e cada chunk é
-        pontuado: título da nota (4/termo), tags (3), nome da seção (2) e
-        conteúdo do chunk (1 por ocorrência, com teto). Retorna o MELHOR chunk
-        de cada uma das k melhores notas: [{title, section, tags, snippet,
-        score}]. snippet = janela em volta do 1º termo DENTRO do chunk, então o
-        que vai pro LLM é a seção certa (não a nota toda). score >= 4 = bateu em
-        título/tag (match forte, usado pelo RAG automático). level 0 = nota
-        inteira (1 chunk, section="")."""
+    def _terms(self, query: str) -> list[str]:
+        return [t for t in re.split(r"\W+", self._fold(query))
+                if len(t) >= 2 and t not in self._STOPWORDS]
+
+    @staticmethod
+    def _chunk_level() -> int:
+        try:
+            return int(config.get("rag_chunk_level"))
+        except (TypeError, ValueError):
+            return 2
+
+    def _note_base(self, note: "Note", terms: list[str]) -> tuple[str, float]:
+        """(título folded, bônus de nota) — título 4/termo, tags 3/termo."""
+        ftitle = self._fold(note.title)
+        ftags = [self._fold(t) for t in note.tags]
+        base = 0.0
+        for term in terms:
+            if term in ftitle:
+                base += 4.0
+            if any(term in tg for tg in ftags):
+                base += 3.0
+        return ftitle, base
+
+    def _chunk_score(self, ftitle: str, base: float, ftext: str, fsec: str,
+                     terms: list[str]) -> tuple[float, int]:
+        """Pontua 1 chunk. Termo FORA do título discrimina (peso 3x); bater no
+        NOME da seção pesa 5x — senão a intro (que repete o título) ganha sempre.
+        Retorna (score, posição do 1º termo no texto)."""
+        score = base
+        first = -1
+        for term in terms:
+            weight = 1.0 if term in ftitle else 3.0
+            if fsec and term in fsec:
+                score += 5.0 * weight
+            n = ftext.count(term)
+            if n:
+                score += min(n, 5) * weight
+                pos = ftext.find(term)
+                if first < 0 or pos < first:
+                    first = pos
+        return score, first
+
+    def _make_hit(self, note: "Note", section: str, text: str, score: float,
+                  first: int, source: str, snippet_chars: int = 600) -> dict:
+        start = max(0, (first if first >= 0 else 0) - snippet_chars // 3)
+        snippet = " ".join(text[start:start + snippet_chars].split())
+        return {"title": note.title, "section": section, "tags": note.tags,
+                "snippet": snippet, "score": round(float(score), 1), "source": source}
+
+    def _score_note(self, note: "Note", terms: list[str], level: int,
+                    source: str = "lexico") -> dict | None:
+        """Melhor chunk da nota pros termos (hit padrão) ou None."""
+        try:
+            text = note.path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return None
+        ftitle, base = self._note_base(note, terms)
+        best = None
+        for ch in chunk_markdown(text, level):
+            score, first = self._chunk_score(
+                ftitle, base, self._fold(ch["text"]), self._fold(ch["section"]), terms)
+            if score <= 0:
+                continue
+            if best is None or score > best[0]:
+                best = (score, ch["section"], ch["text"], first)
+        if best is None:
+            return None
+        return self._make_hit(note, best[1], best[2], best[0], best[3], source)
+
+    def search(self, query: str, k: int = 3) -> list[dict]:
+        """Busca LÉXICA por chunk (palavra-chave): o melhor chunk de cada uma das
+        k melhores notas, com `section`. Ver search_hybrid pra denso+grafo."""
         graph = self.scan()
-        terms = [t for t in re.split(r"\W+", self._fold(query))
-                 if len(t) >= 2 and t not in self._STOPWORDS]
+        terms = self._terms(query)
         if not terms or graph.empty:
             return []
+        level = self._chunk_level()
+        hits = [h for h in (self._score_note(n, terms, level)
+                            for n in graph.notes.values()) if h]
+        hits.sort(key=lambda h: -h["score"])
+        return hits[:k]
+
+    # ---------- busca HÍBRIDA (vetorial + léxico + grafo) ----------
+
+    def _load_vindex(self):
+        """Carrega o índice vetorial de .rag_index/index.json (recarrega quando o
+        arquivo muda — o PC manda um novo). None se não existe/corrompido."""
+        path = self.dir / ".rag_index" / "index.json"
         try:
-            level = int(config.get("rag_chunk_level"))
-        except (TypeError, ValueError):
-            level = 2
-        scored = []
-        for note in graph.notes.values():
-            try:
-                text = note.path.read_text(encoding="utf-8", errors="ignore")
-            except OSError:
+            mt = path.stat().st_mtime
+        except OSError:
+            self._vindex, self._vindex_mtime = None, -1.0
+            return None
+        if self._vindex is not None and mt == self._vindex_mtime:
+            return self._vindex
+        try:
+            from .vector_index import VectorIndex
+            d = json.loads(path.read_text(encoding="utf-8"))
+            self._vindex = VectorIndex.from_dict(d)
+        except Exception:  # noqa: BLE001
+            self._vindex = None
+        self._vindex_mtime = mt
+        return self._vindex
+
+    def _note_chunks_map(self, note: "Note") -> dict:
+        """{seção: texto} dos chunks da nota (pra mapear hit denso -> texto)."""
+        try:
+            text = note.path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return {}
+        m: dict = {}
+        for ch in chunk_markdown(text, self._chunk_level()):
+            m.setdefault(ch["section"], ch["text"])
+        return m
+
+    def _dense_search(self, query: str, terms: list[str], level: int, graph) -> list[dict]:
+        vindex = self._load_vindex()
+        if vindex is None or not vindex.ready:
+            return []
+        from . import embeddings
+        qv = embeddings.embed_one(query)
+        if not qv:
+            return []
+        out = []
+        dense_k = int(config.get("rag_dense_k") or 6)
+        for d in vindex.search(qv, k=dense_k):
+            note = graph.notes.get(d["note_id"])
+            if note is None:
                 continue
-            title = self._fold(note.title)
-            tags = [self._fold(t) for t in note.tags]
-            base = 0.0
-            for term in terms:
-                if term in title:
-                    base += 4.0
-                if any(term in tg for tg in tags):
-                    base += 3.0
-            best = None   # (score, hit) — só o melhor chunk da nota
-            for ch in chunk_markdown(text, level):
-                folded = self._fold(ch["text"])
-                fsec = self._fold(ch["section"])
-                score = base
-                first_hit = -1
-                for term in terms:
-                    # termo que NÃO está no título DISCRIMINA o chunk (ex.: "membros"
-                    # numa nota "ADCR Bela Vista"); termo que já está no título é
-                    # generico p/ a nota toda e não deve decidir QUAL chunk vence —
-                    # senão o chunk de intro, que repete o título, ganha sempre.
-                    weight = 1.0 if term in title else 3.0
-                    if fsec and term in fsec:
-                        score += 5.0 * weight   # bater no NOME da seção (heading) é forte
-                    n = folded.count(term)
-                    if n:
-                        score += min(n, 5) * weight   # conteúdo (teto p/ repetição não dominar)
-                        pos = folded.find(term)
-                        if first_hit < 0 or pos < first_hit:
-                            first_hit = pos
-                if score <= 0:
+            txt = self._note_chunks_map(note).get(d["section"])
+            if txt is None:
+                continue
+            ftitle, base = self._note_base(note, terms)
+            score, first = self._chunk_score(
+                ftitle, base, self._fold(txt), self._fold(d["section"]), terms)
+            hit = self._make_hit(note, d["section"], txt, score, first, "denso")
+            hit["dense"] = float(d["score"])
+            out.append(hit)
+        return out
+
+    @staticmethod
+    def _hit_key(hit: dict) -> tuple:
+        return (hit["title"].lower(), hit.get("section", ""))
+
+    def _rrf(self, lists: list[list[dict]], c: int = 60) -> list[dict]:
+        """Reciprocal Rank Fusion das listas (léxico + denso) por chunk."""
+        agg: dict = {}
+        for lst in lists:
+            for rank, h in enumerate(lst):
+                key = self._hit_key(h)
+                rr = 1.0 / (c + rank)
+                e = agg.get(key)
+                if e is None:
+                    agg[key] = {"hit": dict(h), "rrf": rr}
+                else:
+                    e["rrf"] += rr
+                    hit = e["hit"]
+                    if h.get("score", 0) > hit.get("score", 0):
+                        hit["score"] = h["score"]
+                    if h.get("dense", 0) > hit.get("dense", 0):
+                        hit["dense"] = h.get("dense", 0)
+                    if h.get("source") and hit.get("source") != h["source"]:
+                        hit["source"] = "hibrido"
+        out = []
+        for e in agg.values():
+            h = e["hit"]
+            h["rrf"] = round(e["rrf"], 4)
+            h.setdefault("dense", 0.0)
+            out.append(h)
+        out.sort(key=lambda h: -h["rrf"])
+        return out
+
+    def _graph_neighbors(self, seeds: list[dict], terms: list[str], level: int,
+                         graph, max_add: int = 2) -> list[dict]:
+        """Expansão de grafo: puxa o melhor chunk dos VIZINHOS ([[links]], 1 hop)
+        das notas-semente — contexto relacional que vetor/léxico não dão."""
+        if not seeds or int(config.get("rag_graph_hops") or 0) <= 0:
+            return []
+        adj: dict = {}
+        for a, b in graph.edges:
+            adj.setdefault(a, set()).add(b)
+            adj.setdefault(b, set()).add(a)
+        have = {self._hit_key(h) for h in seeds}
+        seed_notes = [h["title"].lower() for h in seeds]
+        added: list[dict] = []
+        for nid in seed_notes:
+            for nb in adj.get(nid, ()):
+                note = graph.notes.get(nb)
+                if note is None:
                     continue
-                start = max(0, (first_hit if first_hit >= 0 else 0) - snippet_chars // 3)
-                snippet = " ".join(ch["text"][start:start + snippet_chars].split())
-                if best is None or score > best[0]:
-                    best = (score, {"title": note.title, "section": ch["section"],
-                                    "tags": note.tags, "snippet": snippet,
-                                    "score": score})
-            if best is not None:
-                scored.append(best)
-        scored.sort(key=lambda x: -x[0])
-        return [hit for _, hit in scored[:k]]
+                hit = self._score_note(note, terms, level, source="grafo")
+                if hit is None or self._hit_key(hit) in have:
+                    continue
+                hit.setdefault("dense", 0.0)
+                hit["rrf"] = 0.0
+                have.add(self._hit_key(hit))
+                added.append(hit)
+                if len(added) >= max_add:
+                    return added
+        return added
+
+    def search_hybrid(self, query: str, k: int = 3) -> list[dict]:
+        """RAG híbrido: funde busca LÉXICA + DENSA (vetorial, cosseno) por RRF e
+        EXPANDE pelo grafo de [[links]]. Cai pro léxico se faltar índice/endpoint
+        de embedding. Cada hit ganha `score` (léxico), `dense` (cosseno 0-1),
+        `source` (lexico|denso|hibrido|grafo) e `rrf`. Devolve k principais +
+        alguns vizinhos de grafo como contexto extra."""
+        graph = self.scan()
+        terms = self._terms(query)
+        if not terms or graph.empty:
+            return []
+        level = self._chunk_level()
+
+        lex = [h for h in (self._score_note(n, terms, level)
+                           for n in graph.notes.values()) if h]
+        lex.sort(key=lambda h: -h["score"])
+        lex = lex[:8]
+
+        dense = self._dense_search(query, terms, level, graph) \
+            if config.get("rag_hybrid") else []
+
+        if not dense:
+            for h in lex:
+                h.setdefault("dense", 0.0)
+            return lex[:k]
+
+        fused = self._rrf([lex, dense])
+        top = fused[:k]
+        return top + self._graph_neighbors(top, terms, level, graph, max_add=2)
 
     # ---------- escrita (tool notes_write do chat) ----------
 

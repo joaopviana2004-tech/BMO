@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import subprocess
 import sys
@@ -834,7 +835,24 @@ def build_initial(app: App):
                            for p in config.LLM_PROVIDERS},
                 "presets": config.LLM_MODELS,
             },
+            "rag": _rag_status(),
             "last_rag": getattr(chat, "last_rag", []),
+        }
+
+    def _rag_status() -> dict:
+        """Estado do RAG vetorial pro painel: se o índice está carregado, qtos
+        chunks, o modelo e o endpoint de embedding (PC)."""
+        vi = None
+        try:
+            vi = knowledge._load_vindex()
+        except Exception:
+            vi = None
+        from bmo_os.services import embeddings
+        return {
+            "hybrid": bool(config.get("rag_hybrid")),
+            "indexed": (vi.count if vi else 0),
+            "model": (vi.model if (vi and vi.model) else config.get("embed_model")),
+            "embed_url": embeddings.embed_url(),
         }
 
     def web_brain_save(payload: dict) -> dict:
@@ -898,20 +916,51 @@ def build_initial(app: App):
         return {"ok": True, "title": res.get("title", ""), "relinked": relinked}
 
     def web_brain_search(query: str) -> dict:
-        """Roda a MESMA busca do RAG (knowledge.search) pro dono testar o que o
-        BMO acharia — mostra título, score e trecho de cada acerto."""
+        """Roda o MESMO RAG (híbrido: vetorial+léxico+grafo) pro dono testar o
+        que o BMO acharia — título, seção, score léxico, similaridade densa,
+        origem e trecho de cada acerto."""
         q = (query or "").strip()
         if not q:
             return {"query": "", "hits": []}
         try:
-            hits = knowledge.search(q, k=6)
+            hits = knowledge.search_hybrid(q, k=6)
         except Exception as e:
             return {"query": q, "hits": [], "error": str(e)[:80]}
         return {"query": q, "hits": [
             {"title": h["title"], "section": h.get("section", ""),
              "score": round(float(h.get("score", 0)), 1),
+             "dense": round(float(h.get("dense", 0)), 3),
+             "source": h.get("source", "lexico"),
              "tags": h.get("tags", []), "snippet": (h.get("snippet", "") or "")[:300]}
             for h in hits]}
+
+    def web_brain_export() -> dict:
+        """Dump das notas (id, título, conteúdo) pro builder de índice no PC
+        (scripts/build_rag_index.py) — ele chunka, embeda e devolve o índice."""
+        g = knowledge.scan()
+        notes = []
+        for n in g.notes.values():
+            try:
+                body = n.path.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                body = ""
+            notes.append({"id": n.id, "title": n.title, "body": body})
+        return {"notes": notes, "chunk_level": config.get("rag_chunk_level")}
+
+    def web_brain_index(payload: dict) -> dict:
+        """Recebe o índice vetorial PRONTO (gerado no PC) e salva no perfil
+        (.rag_index/index.json). A Rasp só faz cosseno depois."""
+        if not isinstance(payload, dict) or "vectors" not in payload:
+            return {"ok": False, "error": "indice invalido"}
+        d = knowledge.dir / ".rag_index"
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "index.json").write_text(json.dumps(payload), encoding="utf-8")
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:80]}
+        knowledge._vindex_mtime = -1.0   # força recarregar no próximo uso
+        return {"ok": True, "count": payload.get("count"),
+                "model": payload.get("model")}
 
     def web_brain_note(note_id: str) -> dict:
         """Conteúdo integral de UMA nota do cérebro pro painel (visualização
@@ -1051,6 +1100,7 @@ def build_initial(app: App):
                             on_brain_note=web_brain_note,
                             on_brain_save=web_brain_save, on_brain_delete=web_brain_delete,
                             on_brain_ai_edit=web_brain_ai_edit,
+                            get_brain_export=web_brain_export, on_brain_index=web_brain_index,
                             camera=camera, on_mic=web_mic,
                             get_tasks=web_tasks, on_tasks=web_tasks_action,
                             get_agenda=web_agenda, on_agenda_create=web_agenda_create,

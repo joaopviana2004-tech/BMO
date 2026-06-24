@@ -69,6 +69,16 @@ DEFAULTS: dict = {
     # a unidade de busca e vai pro LLM com a SEÇÃO + o nome da memória. 0 =
     # desliga (nota inteira, comportamento antigo). Configurável no painel.
     "rag_chunk_level": 2,
+    # --- RAG HÍBRIDO (vetorial + léxico + grafo) ---
+    # Embeddings são gerados no PC (caro) e o índice pronto vai pra Rasp (leve:
+    # só cosseno). A query (1 embedding) a Rasp pede ao endpoint do PC.
+    "rag_hybrid": True,             # liga a busca densa + expansão de grafo (cai pro léxico se faltar índice/endpoint)
+    "embed_model": os.environ.get("EMBED_MODEL", "").strip() or "bge-m3",
+    # endpoint /v1/embeddings (OpenAI-compatível: Ollama 11434 / llama.cpp).
+    # "" = AUTO: env EMBED_URL > padrão 127.0.0.1:11434. Na Rasp, aponta pro PC.
+    "embed_url": "",
+    "rag_dense_k": 6,               # quantos chunks a busca densa traz pra fusão
+    "rag_graph_hops": 1,            # quantos saltos de [[link]] expandir a partir das sementes
     # --- LLM do chat (BMO responde) — escolhível em SETTINGS -> IA ---
     # provedor: "openrouter" | "nvidia" | "grok" | "local" (todos OpenAI-compatíveis)
     "llm_provider": "openrouter",

@@ -226,3 +226,6 @@ knowledge/
 deploy.local.*
 *.local.sh
 hosts.local
+
+# cache local do builder de RAG (embeddings)
+scripts/.rag_cache.json
