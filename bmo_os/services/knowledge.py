@@ -255,11 +255,16 @@ class KnowledgeService:
                 score = base
                 first_hit = -1
                 for term in terms:
+                    # termo que NÃO está no título DISCRIMINA o chunk (ex.: "membros"
+                    # numa nota "ADCR Bela Vista"); termo que já está no título é
+                    # generico p/ a nota toda e não deve decidir QUAL chunk vence —
+                    # senão o chunk de intro, que repete o título, ganha sempre.
+                    weight = 1.0 if term in title else 3.0
                     if fsec and term in fsec:
-                        score += 2.0
+                        score += 5.0 * weight   # bater no NOME da seção (heading) é forte
                     n = folded.count(term)
                     if n:
-                        score += min(n, 6)   # teto: chunk gigante não domina
+                        score += min(n, 5) * weight   # conteúdo (teto p/ repetição não dominar)
                         pos = folded.find(term)
                         if first_hit < 0 or pos < first_hit:
                             first_hit = pos
