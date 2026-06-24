@@ -26,6 +26,8 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..core import config
+
 # caracteres proibidos em nome de arquivo (Windows/Linux)
 _UNSAFE_NAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -34,6 +36,48 @@ WIKILINK_RE = re.compile(r"\[\[([^\]\|#]+)(?:[#\|][^\]]*)?\]\]")
 # #tag no meio do texto (evita # de heading markdown exigindo não-espaço depois)
 TAG_RE = re.compile(r"(?:^|\s)#([\w\-/]+)", re.UNICODE)
 MAX_PREVIEW_LINES = 3
+
+
+def _strip_frontmatter(lines: list[str]) -> list[str]:
+    """Remove o bloco --- ... --- do topo (frontmatter YAML do Obsidian)."""
+    if lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                return lines[i + 1:]
+    return lines
+
+
+def chunk_markdown(text: str, level: int = 2) -> list[dict]:
+    """Quebra o markdown em CHUNKS por headings do nível `level` (2 = "##").
+
+    Cada chunk é a unidade de busca/RAG: {"section": titulo do heading,
+    "text": corpo}. O trecho ANTES do 1º heading do nível vira um chunk de
+    seção "" (intro). level <= 0 (ou nota sem headings desse nível) => 1 chunk
+    com a nota inteira (comportamento antigo). Mantida em sincronia com a
+    prévia do painel web (ChunkPreview no app.tsx)."""
+    lines = _strip_frontmatter((text or "").splitlines())
+    if level <= 0:
+        body = "\n".join(lines).strip()
+        return [{"section": "", "text": body}] if body else []
+    prefix = "#" * level + " "      # "## " casa só o nível exato (### não bate)
+    chunks: list[dict] = []
+    section = ""
+    buf: list[str] = []
+
+    def flush() -> None:
+        body = "\n".join(buf).strip()
+        if body or section:
+            chunks.append({"section": section, "text": body})
+
+    for raw in lines:
+        if raw.lstrip().startswith(prefix):
+            flush()
+            section = raw.lstrip()[level:].strip()
+            buf = []
+        else:
+            buf.append(raw)
+    flush()
+    return chunks or [{"section": "", "text": "\n".join(lines).strip()}]
 
 
 @dataclass
@@ -171,46 +215,64 @@ class KnowledgeService:
         return "".join(c for c in nfkd if not unicodedata.combining(c))
 
     def search(self, query: str, k: int = 3, snippet_chars: int = 600) -> list[dict]:
-        """Busca por palavras-chave nas notas: título (peso 4), tags (3) e
-        conteúdo (1 por ocorrência, com teto). Sem embeddings de propósito —
-        roda em milissegundos na rasp e não depende de nada externo.
+        """Busca por palavras-chave, agora no nível de CHUNK (seção "##").
 
-        Retorna [{title, tags, snippet, score}] das k melhores notas; snippet
-        é a janela de texto em volta do primeiro termo achado. score >= 4
-        significa que bateu em título ou tag (match forte)."""
+        Cada nota é quebrada por `rag_chunk_level` (config) e cada chunk é
+        pontuado: título da nota (4/termo), tags (3), nome da seção (2) e
+        conteúdo do chunk (1 por ocorrência, com teto). Retorna o MELHOR chunk
+        de cada uma das k melhores notas: [{title, section, tags, snippet,
+        score}]. snippet = janela em volta do 1º termo DENTRO do chunk, então o
+        que vai pro LLM é a seção certa (não a nota toda). score >= 4 = bateu em
+        título/tag (match forte, usado pelo RAG automático). level 0 = nota
+        inteira (1 chunk, section="")."""
         graph = self.scan()
         terms = [t for t in re.split(r"\W+", self._fold(query))
                  if len(t) >= 2 and t not in self._STOPWORDS]
         if not terms or graph.empty:
             return []
+        try:
+            level = int(config.get("rag_chunk_level"))
+        except (TypeError, ValueError):
+            level = 2
         scored = []
         for note in graph.notes.values():
             try:
                 text = note.path.read_text(encoding="utf-8", errors="ignore")
             except OSError:
                 continue
-            folded = self._fold(text)
             title = self._fold(note.title)
             tags = [self._fold(t) for t in note.tags]
-            score = 0.0
-            first_hit = -1
+            base = 0.0
             for term in terms:
                 if term in title:
-                    score += 4.0
+                    base += 4.0
                 if any(term in tg for tg in tags):
-                    score += 3.0
-                n = folded.count(term)
-                if n:
-                    score += min(n, 6)   # teto: nota gigante não domina tudo
-                    pos = folded.find(term)
-                    if first_hit < 0 or pos < first_hit:
-                        first_hit = pos
-            if score <= 0:
-                continue
-            start = max(0, (first_hit if first_hit >= 0 else 0) - snippet_chars // 3)
-            snippet = " ".join(text[start:start + snippet_chars].split())
-            scored.append((score, {"title": note.title, "tags": note.tags,
-                                   "snippet": snippet, "score": score}))
+                    base += 3.0
+            best = None   # (score, hit) — só o melhor chunk da nota
+            for ch in chunk_markdown(text, level):
+                folded = self._fold(ch["text"])
+                fsec = self._fold(ch["section"])
+                score = base
+                first_hit = -1
+                for term in terms:
+                    if fsec and term in fsec:
+                        score += 2.0
+                    n = folded.count(term)
+                    if n:
+                        score += min(n, 6)   # teto: chunk gigante não domina
+                        pos = folded.find(term)
+                        if first_hit < 0 or pos < first_hit:
+                            first_hit = pos
+                if score <= 0:
+                    continue
+                start = max(0, (first_hit if first_hit >= 0 else 0) - snippet_chars // 3)
+                snippet = " ".join(ch["text"][start:start + snippet_chars].split())
+                if best is None or score > best[0]:
+                    best = (score, {"title": note.title, "section": ch["section"],
+                                    "tags": note.tags, "snippet": snippet,
+                                    "score": score})
+            if best is not None:
+                scored.append(best)
         scored.sort(key=lambda x: -x[0])
         return [hit for _, hit in scored[:k]]
 
@@ -303,3 +365,42 @@ class KnowledgeService:
         with self._lock:
             self._sig = ()   # força re-scan do grafo
         return {"ok": True, "title": stem, "name": name, "path": path}
+
+    def relink(self, old: str, new: str) -> dict:
+        """Reaponta os [[old]] -> [[new]] em TODAS as notas (útil ao excluir/
+        renomear um nó referenciado: quem apontava pro antigo passa a apontar
+        pro novo). Preserva alias e seção ([[old|x]] -> [[new|x]]). Casa o alvo
+        por id (case-insensitive). Retorna {ok, count, changed:[paths]}."""
+        old_id = (old or "").strip().lower()
+        if old_id.endswith(".md"):
+            old_id = old_id[:-3]
+        new_title = (new or "").strip()
+        if not old_id or not new_title:
+            return {"ok": False, "error": "old/new vazio"}
+        link_re = re.compile(r"\[\[([^\]\|#]+)((?:[#\|][^\]]*)?)\]\]")
+
+        def repl(m: "re.Match") -> str:
+            if m.group(1).strip().lower() == old_id:
+                return f"[[{new_title}{m.group(2) or ''}]]"
+            return m.group(0)
+
+        changed: list[Path] = []
+        try:
+            files = [f for f in self.dir.glob("*.md") if f.is_file()]
+        except OSError:
+            files = []
+        for p in files:
+            try:
+                text = p.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            new_text = link_re.sub(repl, text)
+            if new_text != text:
+                try:
+                    p.write_text(new_text, encoding="utf-8")
+                    changed.append(p)
+                except OSError:
+                    pass
+        with self._lock:
+            self._sig = ()
+        return {"ok": True, "count": len(changed), "changed": changed}

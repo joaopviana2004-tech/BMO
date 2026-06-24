@@ -824,6 +824,16 @@ def build_initial(app: App):
             "notes": notes,
             "edges": edges,
             "ghosts": sorted(g.ghosts),
+            "chunk_level": config.get("rag_chunk_level"),
+            # provedor/modelo da EDIÇÃO de nota com BMO (separado do chat/visão)
+            "noteedit": {
+                "provider": config.get("noteedit_provider"),
+                "providers": config.LLM_PROVIDERS,
+                "labels": config.LLM_PROVIDER_LABELS,
+                "models": {p: config.get(f"{p}_noteedit_model")
+                           for p in config.LLM_PROVIDERS},
+                "presets": config.LLM_MODELS,
+            },
             "last_rag": getattr(chat, "last_rag", []),
         }
 
@@ -847,22 +857,45 @@ def build_initial(app: App):
         return {"ok": True, "id": res["title"].lower(), "title": res["title"],
                 "synced": synced}
 
+    def web_brain_ai_edit(payload: dict) -> dict:
+        """Edita o corpo de uma nota com o BMO ({body, instruction}) usando o
+        provedor/modelo PRÓPRIOS de edição. Só devolve o texto novo — o painel
+        mostra pro dono revisar e salvar (não grava aqui)."""
+        body = str(payload.get("body", ""))
+        instruction = str(payload.get("instruction", "")).strip()
+        if not instruction:
+            return {"ok": False, "error": "instrucao vazia"}
+        return chat.edit_note(body, instruction)
+
     def web_brain_delete(payload: dict) -> dict:
         """Exclui uma nota do cérebro pelo painel ({id} ou {title}). Apaga local
-        e na lixeira do Drive (senão o sync re-baixa)."""
+        e na lixeira do Drive (senão o sync re-baixa). OPCIONAL: {relink_to} —
+        antes de apagar, reaponta os [[backlinks]] que iam pra esta nota pra
+        essa outra (ex.: renomeou joao_pessoa -> Joao Pessoa)."""
         ident = str(payload.get("id") or payload.get("title") or "").strip()
         if not ident:
             return {"ok": False, "error": "sem id"}
+        relink_to = str(payload.get("relink_to") or "").strip()
+        relinked = 0
+        if relink_to:
+            rl = knowledge.relink(ident, relink_to)
+            if rl.get("ok"):
+                relinked = rl.get("count", 0)
+                for pth in rl.get("changed", []):
+                    try:
+                        _push_note_to_drive(pth)
+                    except Exception:
+                        pass
         res = knowledge.delete(ident)
         if not res.get("ok"):
-            return {"ok": False, "error": res.get("error", "?")}
+            return {"ok": False, "error": res.get("error", "?"), "relinked": relinked}
         svc = _drive_sync.get("svc")
         if svc is not None:
             try:
                 svc.delete_note(res.get("name", ""))
             except Exception:
                 pass
-        return {"ok": True, "title": res.get("title", "")}
+        return {"ok": True, "title": res.get("title", ""), "relinked": relinked}
 
     def web_brain_search(query: str) -> dict:
         """Roda a MESMA busca do RAG (knowledge.search) pro dono testar o que o
@@ -875,7 +908,8 @@ def build_initial(app: App):
         except Exception as e:
             return {"query": q, "hits": [], "error": str(e)[:80]}
         return {"query": q, "hits": [
-            {"title": h["title"], "score": round(float(h.get("score", 0)), 1),
+            {"title": h["title"], "section": h.get("section", ""),
+             "score": round(float(h.get("score", 0)), 1),
              "tags": h.get("tags", []), "snippet": (h.get("snippet", "") or "")[:300]}
             for h in hits]}
 
@@ -1016,6 +1050,7 @@ def build_initial(app: App):
                             get_brain=web_brain, on_brain_search=web_brain_search,
                             on_brain_note=web_brain_note,
                             on_brain_save=web_brain_save, on_brain_delete=web_brain_delete,
+                            on_brain_ai_edit=web_brain_ai_edit,
                             camera=camera, on_mic=web_mic,
                             get_tasks=web_tasks, on_tasks=web_tasks_action,
                             get_agenda=web_agenda, on_agenda_create=web_agenda_create,

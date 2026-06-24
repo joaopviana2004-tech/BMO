@@ -203,7 +203,8 @@ class WebUIServer:
     def __init__(self, *, on_chat=None, get_state=None, list_mics=None,
                  on_set_config=None, on_memory=None, get_brain=None,
                  on_brain_search=None, on_brain_note=None,
-                 on_brain_save=None, on_brain_delete=None, camera=None, on_mic=None,
+                 on_brain_save=None, on_brain_delete=None, on_brain_ai_edit=None,
+                 camera=None, on_mic=None,
                  get_tasks=None, on_tasks=None, get_agenda=None, on_agenda_create=None,
                  get_smarthome=None, on_smarthome=None, on_update=None,
                  get_notifications=None, on_notification_read=None,
@@ -219,6 +220,7 @@ class WebUIServer:
         self.on_brain_note = on_brain_note    # conteúdo integral de 1 nota (.md)
         self.on_brain_save = on_brain_save    # cria/edita nota do cérebro
         self.on_brain_delete = on_brain_delete  # exclui nota do cérebro
+        self.on_brain_ai_edit = on_brain_ai_edit  # edita a nota com o BMO (modelo próprio)
         self.camera = camera                  # serviço de câmera (acquire/jpeg/release)
         self.on_mic = on_mic                  # push-to-talk remoto (start/stop)
         self.get_tasks = get_tasks            # snapshot do Kanban (Todoist)
@@ -311,6 +313,8 @@ class WebUIServer:
                     self._call_post(srv.on_brain_save, "cerebro")
                 elif path == "/api/brain/delete":
                     self._call_post(srv.on_brain_delete, "cerebro")
+                elif path == "/api/brain/ai_edit":
+                    self._call_post(srv.on_brain_ai_edit, "cerebro")
                 elif path == "/api/tasks":
                     self._call_post(srv.on_tasks, "tarefas")
                 elif path == "/api/agenda":

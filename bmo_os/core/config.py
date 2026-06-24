@@ -65,6 +65,10 @@ DEFAULTS: dict = {
     "webui_enabled": True,          # painel web no localhost (ajustes/espaço interno/chat) — porta via BMO_WEB_PORT
     "briefing_enabled": True,       # secretária: briefing matinal + cutucadas de prazo/rotina (aba HOJE)
     "briefing_time": "08:00",       # horário do briefing diário (HH:MM, 24h)
+    # RAG: nível de heading que QUEBRA a nota em chunks (2 = "##"). O chunk vira
+    # a unidade de busca e vai pro LLM com a SEÇÃO + o nome da memória. 0 =
+    # desliga (nota inteira, comportamento antigo). Configurável no painel.
+    "rag_chunk_level": 2,
     # --- LLM do chat (BMO responde) — escolhível em SETTINGS -> IA ---
     # provedor: "openrouter" | "nvidia" | "grok" | "local" (todos OpenAI-compatíveis)
     "llm_provider": "openrouter",
@@ -94,6 +98,18 @@ DEFAULTS: dict = {
         or "grok-2-vision-1212",
     "local_vision_model": os.environ.get("LOCAL_LLM_VISION_MODEL", "").strip()
         or "llava",
+    # --- Edição de notas com o BMO (painel) — provedor/modelo PRÓPRIOS ---
+    # (separado do chat/fala e da visão; o usuário pede pra editar a nota e o
+    # BMO reescreve. Texto livre como os outros, escolhível no editor.)
+    "noteedit_provider": "openrouter",
+    "openrouter_noteedit_model": os.environ.get("OPENROUTER_NOTEEDIT_MODEL", "").strip()
+        or "deepseek/deepseek-chat-v3-0324:free",
+    "nvidia_noteedit_model": os.environ.get("NVIDIA_NOTEEDIT_MODEL", "").strip()
+        or "moonshotai/kimi-k2.6",
+    "grok_noteedit_model": os.environ.get("GROK_NOTEEDIT_MODEL", "").strip()
+        or "grok-3",
+    "local_noteedit_model": os.environ.get("LOCAL_LLM_NOTEEDIT_MODEL", "").strip()
+        or "local-model",
     # --- Modelo PERSONALIZADO (digitado livremente no painel web) por slot ---
     # O painel do PC deixa escrever QUALQUER nome de modelo; o último digitado
     # fica guardado aqui por provedor+tipo, pra o cycler do device oferecer ele
@@ -106,6 +122,10 @@ DEFAULTS: dict = {
     "nvidia_vision_model_custom": "",
     "grok_vision_model_custom": "",
     "local_vision_model_custom": "",
+    "openrouter_noteedit_model_custom": "",
+    "nvidia_noteedit_model_custom": "",
+    "grok_noteedit_model_custom": "",
+    "local_noteedit_model_custom": "",
 }
 
 IDLE_TIMEOUT_OPTIONS = [5, 10, 15, 30, 60, 120]
@@ -193,9 +213,10 @@ LLM_VISION_MODELS = {
     ],
 }
 
-# Chaves de modelo ATIVO (o que o chat.py lê) por provedor — chat e visão.
-MODEL_KEYS = ({f"{p}_model" for p in LLM_PROVIDERS}
-              | {f"{p}_vision_model" for p in LLM_PROVIDERS})
+# Chaves de modelo ATIVO (o que o chat.py lê) por provedor — chat, visão e
+# edição de notas (todas usam os mesmos provedores).
+_KIND_SUFFIX = {"chat": "_model", "vision": "_vision_model", "noteedit": "_noteedit_model"}
+MODEL_KEYS = {f"{p}{sfx}" for p in LLM_PROVIDERS for sfx in _KIND_SUFFIX.values()}
 
 
 def custom_model_key(model_key: str) -> str:
@@ -205,7 +226,18 @@ def custom_model_key(model_key: str) -> str:
     return f"{model_key}_custom"
 
 
+def _split_model_key(model_key: str) -> tuple[str, str]:
+    """('openrouter_vision_model') -> ('openrouter', 'vision'). Checa os
+    sufixos mais longos primeiro (noteedit/vision antes de model)."""
+    for kind in ("noteedit", "vision", "chat"):
+        sfx = _KIND_SUFFIX[kind]
+        if model_key.endswith(sfx):
+            return model_key[: -len(sfx)], kind
+    return model_key, "chat"
+
+
 def _presets_for(provider: str, kind: str = "chat") -> list:
+    # visão tem lista própria; chat e edição de notas reutilizam os mesmos presets
     table = LLM_VISION_MODELS if kind == "vision" else LLM_MODELS
     return list(table.get(provider, []))
 
@@ -213,9 +245,8 @@ def _presets_for(provider: str, kind: str = "chat") -> list:
 def model_options(provider: str, kind: str = "chat") -> list:
     """Opções do cycler de modelo no device: o modelo personalizado (digitado
     no painel web, se houver) PRIMEIRO + os presets, sem duplicar.
-    kind = 'chat' | 'vision'."""
-    suffix = "_vision_model" if kind == "vision" else "_model"
-    custom = (get(custom_model_key(f"{provider}{suffix}")) or "").strip()
+    kind = 'chat' | 'vision' | 'noteedit'."""
+    custom = (get(custom_model_key(f"{provider}{_KIND_SUFFIX.get(kind, '_model')}")) or "").strip()
     opts = _presets_for(provider, kind)
     if custom and custom not in opts:
         opts = [custom] + opts
@@ -232,9 +263,7 @@ def remember_custom_model(model_key: str, value) -> None:
     value = (value or "").strip()
     if not value:
         return
-    kind = "vision" if model_key.endswith("_vision_model") else "chat"
-    suffix = "_vision_model" if kind == "vision" else "_model"
-    provider = model_key[: -len(suffix)]
+    provider, kind = _split_model_key(model_key)
     if value in _presets_for(provider, kind):
         return
     set_value(custom_model_key(model_key), value)

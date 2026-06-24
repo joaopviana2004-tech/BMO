@@ -59,6 +59,7 @@ PROVIDERS = {
         "key_env": "OPENROUTER_API_KEY",
         "model_key": "openrouter_model",
         "vision_model_key": "openrouter_vision_model",
+        "noteedit_model_key": "openrouter_noteedit_model",
         "json_mode": True,
         "extra_headers": {"HTTP-Referer": "https://bmo.local", "X-Title": "BMO OS"},
     },
@@ -67,6 +68,7 @@ PROVIDERS = {
         "key_env": "NVIDIA_API_KEY",
         "model_key": "nvidia_model",
         "vision_model_key": "nvidia_vision_model",
+        "noteedit_model_key": "nvidia_noteedit_model",
         "json_mode": False,
         "extra_headers": {},
     },
@@ -75,6 +77,7 @@ PROVIDERS = {
         "key_env": "XAI_API_KEY",
         "model_key": "grok_model",
         "vision_model_key": "grok_vision_model",
+        "noteedit_model_key": "grok_noteedit_model",
         "json_mode": True,
         "extra_headers": {},
     },
@@ -86,6 +89,7 @@ PROVIDERS = {
         "key_env": "",
         "model_key": "local_model",
         "vision_model_key": "local_vision_model",
+        "noteedit_model_key": "local_noteedit_model",
         "json_mode": False,
         "extra_headers": {},
     },
@@ -224,6 +228,34 @@ def _fmt_http_error(e: "urllib.error.HTTPError") -> str:
     except Exception:
         pass
     return f"HTTP {e.code}: {(msg or '').strip()[:90]}"
+
+
+def _strip_code_fence(text: str) -> str:
+    """Tira cercas ```...``` que envolvem a resposta inteira (modelos teimam em
+    embrulhar markdown em bloco de código)."""
+    t = (text or "").strip()
+    if t.startswith("```"):
+        lines = t.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        t = "\n".join(lines).strip()
+    return t
+
+
+def _fmt_hit(h: dict) -> str:
+    """Formata um acerto do RAG pro prompt do LLM: cabeçalho com o NOME da
+    memória + a SEÇÃO (chunk) + tags, e o trecho embaixo. Assim o modelo sabe
+    de qual nota E de qual seção veio o contexto."""
+    head = "### " + str(h.get("title", "")).strip()
+    section = str(h.get("section", "")).strip()
+    if section:
+        head += " > " + section          # nota > seção (chunk)
+    tags = " ".join("#" + t for t in (h.get("tags") or [])[:3])
+    if tags:
+        head += " " + tags
+    return f"{head}\n{h.get('snippet', '')}"
 
 # Telas que o BMO pode abrir. A chave é o que o LLM deve devolver em "screen";
 # o main.py mapeia cada chave pra navegação. Mantenha as duas listas em sincronia.
@@ -434,8 +466,10 @@ class ChatService:
         self.last_notes.append(entry)
         self.last_rag.append({
             "kind": kind, "query": query,
-            "hits": [{"title": h["title"],
-                      "score": round(float(h.get("score", 0)), 1)} for h in hits],
+            "hits": [{"title": h["title"], "section": h.get("section", ""),
+                      "score": round(float(h.get("score", 0)), 1),
+                      # trecho do chunk que REALMENTE foi pro LLM (pro painel mostrar)
+                      "snippet": (h.get("snippet", "") or "")[:400]} for h in hits],
         })
         print(f"[chat] notas {entry}", flush=True)
 
@@ -452,8 +486,7 @@ class ChatService:
             return "(nenhuma nota encontrada para essa busca)"
         parts = []
         for h in hits:
-            tags = " ".join("#" + t for t in h.get("tags", [])[:3])
-            parts.append(f"### {h['title']} {tags}\n{h['snippet']}")
+            parts.append(_fmt_hit(h))
         return "\n\n".join(parts)
 
     def _exec_notes_write(self, spec: dict) -> str:
@@ -496,8 +529,7 @@ class ChatService:
         self._log_notes("auto", text, hits)
         parts = []
         for h in hits:
-            tags = " ".join("#" + t for t in h.get("tags", [])[:3])
-            parts.append(f"### {h['title']} {tags}\n{h['snippet']}")
+            parts.append(_fmt_hit(h))
         return ("NOTAS DO USUARIO (do Obsidian dele, achadas agora — use como "
                 "fonte da verdade):\n" + "\n\n".join(parts))
 
@@ -669,6 +701,60 @@ class ChatService:
             self.last_vision_error = f"erro: {str(e)[:70]}"
             self.last_vision = ""
             return ""
+
+    # ---------- edição de nota assistida (painel web; modelo próprio) ----------
+
+    NOTE_EDIT_SYSTEM = (
+        "Voce e o BMO editando uma NOTA em markdown do Segundo Cerebro do dono. "
+        "Aplique a instrucao do usuario e devolva A NOTA INTEIRA ja editada, em "
+        "markdown, em portugues do Brasil. Mantenha o que nao foi pedido pra "
+        "mudar; preserve os [[links]] e #tags que ainda fizerem sentido. Use "
+        "headings (##) pra estruturar em secoes quando ajudar. Responda SOMENTE "
+        "com o markdown final da nota — sem comentarios, sem cercas ``` e sem "
+        "explicacao antes ou depois.")
+
+    def edit_note(self, body: str, instruction: str) -> dict:
+        """Reescreve o corpo da nota conforme `instruction`, usando o provedor/
+        modelo PRÓPRIOS de edição (noteedit_provider / *_noteedit_model) — sep.
+        do chat e da visão. Retorna {ok, body, provider, model} ou {ok, error}.
+        Não grava nada: quem chama mostra o resultado pro dono revisar e salvar."""
+        provider, spec, url, api_key, model = _resolve("noteedit_provider",
+                                                       "noteedit_model_key")
+        if not api_key:
+            return {"ok": False, "error": ("configure LOCAL_LLM_HOST no .env"
+                                           if provider == "local"
+                                           else f"falta {spec['key_env']}")}
+        if not model:
+            return {"ok": False, "error": f"sem modelo de edicao p/ {provider}"}
+        if not (instruction or "").strip():
+            return {"ok": False, "error": "instrucao vazia"}
+        messages = [
+            {"role": "system", "content": self.NOTE_EDIT_SYSTEM},
+            {"role": "user", "content":
+                f"NOTA ATUAL:\n\n{(body or '').strip() or '(vazia)'}\n\n"
+                f"INSTRUCAO: {instruction.strip()}"},
+        ]
+        payload = {"model": model, "messages": messages,
+                   "temperature": 0.4, "max_tokens": 4096}
+        try:
+            data = _http_post_json(url, api_key, spec["extra_headers"], payload,
+                                   timeout=90)
+            content = (data["choices"][0]["message"].get("content") or "")
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+            content = _strip_code_fence(content)
+            if not content.strip():
+                finish = data["choices"][0].get("finish_reason", "")
+                return {"ok": False, "error": "resposta vazia"
+                        + (f" ({finish})" if finish else "")
+                        + " - troque o modelo de edicao p/ um nao-reasoning"}
+            return {"ok": True, "body": content.strip(),
+                    "provider": provider, "model": model}
+        except urllib.error.HTTPError as e:
+            return {"ok": False, "error": _fmt_http_error(e)}
+        except urllib.error.URLError as e:
+            return {"ok": False, "error": f"rede: {str(e.reason)[:70]}"}
+        except Exception as e:
+            return {"ok": False, "error": f"erro: {str(e)[:70]}"}
 
     # chaves de tela aceitas (espelha SCREENS_DOC e o registro do main.py)
     _SCREENS = {"agenda", "tarefas", "foco", "sistema", "foto", "gravador",
