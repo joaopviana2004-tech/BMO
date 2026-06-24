@@ -1,0 +1,23 @@
+B=http://127.0.0.1:8000
+J="Content-Type: application/json"
+echo "=== restart ==="
+curl -s -m12 -X POST $B/api/update -H "$J" -d "{}"; echo ""
+for i in $(seq 1 25); do sleep 3; curl -s -m4 $B/api/state >/dev/null 2>&1 && { echo "webui ~$((i*3))s"; break; }; done
+echo "=== git HEAD ==="; git -C /home/gravae/BMO rev-parse --short HEAD
+echo "=== /api/brain (chunk_level + noteedit + grafo) ==="
+curl -s -m10 $B/api/brain | python3 -c "import sys,json;d=json.load(sys.stdin);print('chunk_level',d.get('chunk_level'));ne=d.get('noteedit',{});print('noteedit provider',ne.get('provider'),'| model',ne.get('models',{}).get(ne.get('provider')));print('edges',len(d.get('edges',[])),'ghosts',len(d.get('ghosts',[])))"
+echo "=== cria nota com 2 secoes (##) ==="
+curl -s -m10 -X POST $B/api/brain/save -H "$J" -d '{"title":"BMO Teste Chunk","body":"## Uno\nconteudo da secao um\n\n## Dois\nconteudo da secao dois aqui","mode":"create"}'; echo ""
+echo "=== busca 'secao dois' -> deve vir section=Dois ==="
+curl -s -m10 "$B/api/brain/search?q=secao%20dois" | python3 -c "import sys,json;d=json.load(sys.stdin);[print('  title',h['title'],'| section',repr(h.get('section')),'| snippet',h.get('snippet','')[:40]) for h in d.get('hits',[])]"
+echo "=== cria fonte que linka a nota ==="
+curl -s -m10 -X POST $B/api/brain/save -H "$J" -d '{"title":"BMO Src Teste","body":"ver [[BMO Teste Chunk]] aqui","mode":"create"}'; echo ""
+echo "=== delete a nota REPONTANDO pra 'BMO Renomeada' ==="
+curl -s -m10 -X POST $B/api/brain/delete -H "$J" -d '{"id":"bmo teste chunk","relink_to":"BMO Renomeada"}'; echo ""
+echo "=== a fonte deve ter [[BMO Renomeada]] agora ==="
+curl -s -m10 "$B/api/brain/note?id=bmo%20src%20teste" | python3 -c "import sys,json;d=json.load(sys.stdin);print('  body:',repr(d.get('body','')))"
+echo "=== editar com BMO (ai_edit) ==="
+curl -s -m90 -X POST $B/api/brain/ai_edit -H "$J" -d '{"title":"x","body":"itens: maca, banana, uva","instruction":"transforme em lista de bullets markdown, nada alem disso"}' | python3 -c "import sys,json;d=json.load(sys.stdin);print('  ok',d.get('ok'),'| provider',d.get('provider'),'| model',d.get('model'));print('  body:',repr((d.get('body') or d.get('error'))[:160]))"
+echo "=== limpeza (apaga as notas de teste) ==="
+curl -s -m10 -X POST $B/api/brain/delete -H "$J" -d '{"id":"bmo src teste"}'; echo ""
+echo "=== FIM ==="

@@ -103,7 +103,7 @@ DEFAULTS: dict = {
     # BMO reescreve. Texto livre como os outros, escolhível no editor.)
     "noteedit_provider": "openrouter",
     "openrouter_noteedit_model": os.environ.get("OPENROUTER_NOTEEDIT_MODEL", "").strip()
-        or "deepseek/deepseek-chat-v3-0324:free",
+        or "meta-llama/llama-3.3-70b-instruct:free",
     "nvidia_noteedit_model": os.environ.get("NVIDIA_NOTEEDIT_MODEL", "").strip()
         or "moonshotai/kimi-k2.6",
     "grok_noteedit_model": os.environ.get("GROK_NOTEEDIT_MODEL", "").strip()
