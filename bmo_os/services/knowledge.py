@@ -454,7 +454,11 @@ class KnowledgeService:
                 h.setdefault("dense", 0.0)
             return lex[:k]
 
-        fused = self._rrf([lex, dense])
+        # na FUSÃO, o léxico entra só com matches FORTES (score >= 4: título, nome
+        # da seção ou termo discriminante). Score 3 (1 termo genérico no corpo) é
+        # ruído e empata com o acerto denso real — aí o denso cuida da semântica.
+        lex_strong = [h for h in lex if h["score"] >= 4.0]
+        fused = self._rrf([lex_strong, dense])
         top = fused[:k]
         return top + self._graph_neighbors(top, terms, level, graph, max_add=2)
 
