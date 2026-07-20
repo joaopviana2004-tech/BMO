@@ -394,12 +394,12 @@ class TasksScreen:
     def _draw_empty_message(self, surface, error: str) -> None:
         cx = LOGICAL_SIZE[0] // 2
         cy = LOGICAL_SIZE[1] // 2
-        if "TOKEN" in error.upper():
-            msg = render_text("Configure TODOIST_TOKEN", 12, CRT_WHITE, pixel=False)
-            hint = render_text("env var ou bmo_config.json", 10, CRT_DIM, pixel=False)
-        elif "secao" in error or "projeto" in error:
-            msg = render_text(error, 11, CRT_WHITE, pixel=False)
-            hint = render_text("Crie projeto BMO com 3 secoes", 10, CRT_DIM, pixel=False)
+        if "TOKEN" in error.upper() or "401" in error:
+            msg = render_text("Configure a Plataforma", 12, CRT_WHITE, pixel=False)
+            hint = render_text("PLATAFORMA_URL + TOKEN no .env", 10, CRT_DIM, pixel=False)
+        elif "offline" in error.lower():
+            msg = render_text("Plataforma offline", 12, CRT_WHITE, pixel=False)
+            hint = render_text("ligue o PC / abra a plataforma", 10, CRT_DIM, pixel=False)
         else:
             msg = render_text("Sem conexao", 12, CRT_WHITE, pixel=False)
             hint = render_text(error or "tente SYNC", 10, CRT_DIM, pixel=False)

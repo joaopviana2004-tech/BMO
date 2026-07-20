@@ -52,8 +52,15 @@ DEFAULTS: dict = {
     "brightness": 100,              # 0-100 — overlay de dimming no canvas
     "volume": 100,                  # 0-100 — multiplicado em cada Sound.play()
     "camera_face_tracking": False,  # BMO Face usa câmera pra seguir rosto? (off por padrão p/ não esquentar)
-    "todoist_token": "",            # token da REST API v2 do Todoist (env TODOIST_TOKEN ganha)
-    "todoist_project": "BMO",       # nome do projeto que vira o board
+    "todoist_token": "",            # token da REST API v2 do Todoist (env TODOIST_TOKEN ganha) — legado
+    "todoist_project": "BMO",       # nome do projeto que vira o board — legado
+    # --- Plataforma Central (Secretaria Pessoal no PC) — fonte de tarefas+agenda ---
+    # Substitui o Todoist como board e alimenta a agenda. Env PLATAFORMA_* ganha.
+    "plataforma_url": "",           # ex "http://192.168.0.10:8080" ("" = http://localhost:8080)
+    "plataforma_token": "",         # Bearer da Plataforma (.store/mcp-config.json)
+    "plataforma_assunto": "pessoal",  # assunto default ao criar tarefa/evento pelo BMO
+    "plataforma_ntfy_topic": "",    # tópico ntfy p/ avisos em tempo real (.store/notify.json)
+    "plataforma_ntfy_server": "",   # servidor ntfy ("" = https://ntfy.sh)
     "gcal_ics_urls": "",            # URLs secretas iCal (env GCAL_ICS_URLS ganha) — "Rotulo=url,url2"
     "event_warning_min": 10,        # antecedência (min) do aviso de evento próximo (tela AGENDA)
     "cooler_enabled": False,        # override manual dos coolers (GPIO 17/23) — auto >60°C sempre vale

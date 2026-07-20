@@ -82,7 +82,10 @@ from bmo_os.services.pet_state import PetState
 from bmo_os.services.sysinfo import SysInfoService
 from bmo_os.services.reminders import ReminderService
 from bmo_os.services.routines import due_today as routines_due_today, load_routines
-from bmo_os.services.todoist import SECTION_LABELS, SECTION_NAMES, TodoistService
+from bmo_os.services.todoist import SECTION_LABELS, SECTION_NAMES
+from bmo_os.services.plataforma import (
+    MergedCalendar, PlataformaBoard, PlataformaCalendar, PlataformaNotify, PlataformaService,
+)
 from bmo_os.services.tts import SCREEN_PHRASES, TTSService
 from bmo_os.services.voice import VoiceService
 from bmo_os.services.webui import WebUIServer
@@ -176,14 +179,25 @@ def build_initial(app: App):
     # uma WeatherService nova (e portanto uma thread) toda vez que a home volta.
     ambient_cache: dict = {}
 
-    # Singleton de Todoist (thread + cache vivem aqui)
-    todoist = TodoistService()
+    # --- Plataforma Central (a "Secretaria Pessoal" no PC) ---------------------
+    # Fonte única de tarefas E compromissos do BMO. O board de tarefas e a agenda
+    # passam a espelhar a Plataforma (substituindo o Todoist); ela roda no PC e
+    # tudo degrada sozinho quando o PC está desligado. Ver services/plataforma.py.
+    plataforma = PlataformaService()
+    # `todoist` = board GLOBAL da Plataforma (3 colunas, REVISÃO dobra em CONCLUÍDO).
+    # Mantém o nome pra não tocar nos ~10 consumidores (telas/pomodoro/brain/painel/IA);
+    # é um drop-in com a MESMA interface do antigo TodoistService.
+    todoist = PlataformaBoard(plataforma)
+    # Avisos da Plataforma em tempo real (ntfy) — os mesmos pushes do celular.
+    plataforma_notify = PlataformaNotify()
     # Detector de git updates (só usado pelo clock pra mostrar alerta)
     git_updates = GitUpdatesService()
     # Câmera (AI Camera no Pi). is_available=False quando offline (dev no PC)
     camera = CameraService()
-    # Google Calendar (URLs secretas iCal) + disparador de avisos de evento
-    calendar = CalendarService()
+    # Agenda = compromissos da Plataforma + Google (se configurado), sem duplicar
+    # os eventos que a Plataforma já espelha no Google. `calendar` continua sendo
+    # a interface CalendarService que todo o resto consome.
+    calendar = MergedCalendar(PlataformaCalendar(plataforma), [CalendarService()])
     alerter = EventAlerter()
     # Telemetria de hardware (tela SISTEMA). No PC mostra "--".
     sysinfo = SysInfoService()
@@ -1281,6 +1295,20 @@ def build_initial(app: App):
                         phrase = None
                     if phrase:
                         bmo_say(phrase)
+        # 2.7) avisos da Plataforma (ntfy) em tempo real -> AlertScreen + voz.
+        # São os MESMOS pushes que vão pro celular (lembrete de evento, prazo,
+        # resumo do dia). Não empilha sobre um alerta já aberto.
+        if plataforma_notify.enabled and not isinstance(app.manager.current, AlertScreen):
+            notice = plataforma_notify.pop()
+            if notice is not None:
+                spoken = f"{notice.get('title', '')}. {notice.get('body', '')}"
+                bmo_say(" ".join(spoken.split()))
+                app.manager.push(AlertScreen(
+                    notice={"title": notice.get("title", "Plataforma"),
+                            "body": notice.get("body", ""), "label": "PLATAFORMA"},
+                    on_dismiss=app.manager.pop))
+                return   # deixa o alerta de evento (abaixo) pro próximo frame
+
         # 3) se um evento está próximo, empilha a AlertScreen por cima de
         # qualquer tela (relógio, jogo, suspended...)
         if isinstance(app.manager.current, AlertScreen):
