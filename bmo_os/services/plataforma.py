@@ -73,6 +73,15 @@ def _default_assunto() -> str:
     return _cfg("PLATAFORMA_ASSUNTO", "plataforma_assunto", "pessoal")
 
 
+def _agenda_dias() -> int:
+    """Quantos dias à frente a agenda mostra (hoje + N). Compromissos costumam ser
+    futuros, então mostrar só HOJE deixava a agenda vazia."""
+    try:
+        return max(0, int(_cfg("PLATAFORMA_AGENDA_DIAS", "plataforma_agenda_dias", "14")))
+    except Exception:
+        return 14
+
+
 def _local_tz() -> dt.tzinfo:
     return dt.datetime.now().astimezone().tzinfo or dt.timezone.utc
 
@@ -228,10 +237,11 @@ class PlataformaService:
         return True
 
     def _fetch_events(self, base: str, token: str, board_ok: bool) -> None:
-        today = _today_iso()
+        today = dt.date.today()
+        ate = (today + dt.timedelta(days=_agenda_dias())).isoformat()
         try:
             status, body = _request(
-                "GET", f"{base}/api/events?de={today}&ate={today}", token)
+                "GET", f"{base}/api/events?de={today.isoformat()}&ate={ate}", token)
         except Exception as e:
             self._set_events_error(_neterr(e))
             return

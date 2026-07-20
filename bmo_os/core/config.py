@@ -59,6 +59,7 @@ DEFAULTS: dict = {
     "plataforma_url": "",           # ex "http://192.168.0.10:8080" ("" = http://localhost:8080)
     "plataforma_token": "",         # Bearer da Plataforma (.store/mcp-config.json)
     "plataforma_assunto": "pessoal",  # assunto default ao criar tarefa/evento pelo BMO
+    "plataforma_agenda_dias": 14,   # a agenda mostra hoje + N dias (compromissos costumam ser futuros)
     "plataforma_ntfy_topic": "",    # tópico ntfy p/ avisos em tempo real (.store/notify.json)
     "plataforma_ntfy_server": "",   # servidor ntfy ("" = https://ntfy.sh)
     "gcal_ics_urls": "",            # URLs secretas iCal (env GCAL_ICS_URLS ganha) — "Rotulo=url,url2"
