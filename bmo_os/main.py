@@ -480,7 +480,6 @@ def build_initial(app: App):
                 )),
                 on_dev=lambda: push(make_devhub_screen()),
                 on_smarthome=lambda: push(make_smarthome_screen()),
-                on_claude=lambda: push(make_claude_screen()),
                 on_settings=lambda: push(make_settings()),
                 on_sysinfo=lambda: push(make_sysinfo_screen()),
                 on_shutdown=confirm_shutdown,

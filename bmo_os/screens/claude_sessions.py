@@ -64,37 +64,53 @@ LIST_BOTTOM = LIST_TOP + LIST_H          # 212
 DRAG_LIMIAR_PX = 4
 TRILHO = pygame.Color(38, 38, 38)   # fundo da barra de rolagem (abaixo do DIM)
 PEGADOR = pygame.Color(165, 165, 165)   # o cursor dela: precisa saltar num 5"
+
+# Lado da célula do bichinho, em pixels lógicos. 1 mantém a arte pixel nítida
+# (cada célula vira 2px de verdade no 800x480) e o bicho cabe na linha do título.
+ESCALA_BICHO = 1
 ATRITO = 0.88          # por 1/60s — desacelera o embalo depois que solta
 VEL_MINIMA = 8.0       # px/s abaixo disso a inércia para (evita tremeliques)
 # Teto de velocidade: dois eventos de movimento no mesmo milissegundo dariam
 # uma divisão por ~0 e a lista dispararia até o fim num piscar.
 VEL_MAXIMA = 1200.0
 
-# Quantos raios tem a estrela do Claude. Oito é o que ainda se lê como a marca
-# num monitor de 400px de largura — onze (o logo real) vira borrão nesse tamanho.
-RAIOS_CLAUDE = 8
+# O bichinho do Claude Code, célula a célula. Os "." são buraco de verdade
+# (alpha zero): os olhos e os vãos entre as pernas mostram o fundo da linha,
+# que é o que dá a silhueta — pintar de preto quebraria em cima da faixa lateral.
+BICHO_CLAUDE = (
+    ".########.",
+    ".########.",
+    ".#.####.#.",   # olhos
+    "##########",   # bracinhos saindo dos dois lados
+    "##########",
+    ".########.",
+    ".##.##.##.",   # três perninhas
+    ".##.##.##.",
+)
+
+# Sprite pronto por (cor, escala): são ~60 quadradinhos por bicho e até 5 bichos
+# por quadro — no Pi 4 não vale redesenhar isso 30x por segundo.
+_sprites_bicho: dict[tuple, pygame.Surface] = {}
 
 
-def desenhar_marca_claude(surface: pygame.Surface, cx: int, cy: int,
-                          cor, raio: float = 5.5) -> None:
-    """A estrela do Claude, desenhada à mão em vetor.
+def sprite_bicho_claude(cor, escala: int = 1) -> pygame.Surface:
+    chave = (cor.r, cor.g, cor.b, escala)
+    img = _sprites_bicho.get(chave)
+    if img is None:
+        larg = len(BICHO_CLAUDE[0]) * escala
+        alt = len(BICHO_CLAUDE) * escala
+        img = pygame.Surface((larg, alt), pygame.SRCALPHA)
+        for ly, linha in enumerate(BICHO_CLAUDE):
+            for lx, c in enumerate(linha):
+                if c == "#":
+                    img.fill(cor, (lx * escala, ly * escala, escala, escala))
+        _sprites_bicho[chave] = img
+    return img
 
-    Cada raio é um triângulo (largo no miolo, fino na ponta) — é o que dá a
-    silhueta de "sunburst" da marca em vez de um asterisco de fonte. A cor vem
-    do status, então o símbolo continua carregando a informação que o glifo
-    ASCII carregava antes.
-    """
-    passo = math.tau / RAIOS_CLAUDE
-    for i in range(RAIOS_CLAUDE):
-        ang = i * passo - math.pi / 2      # começa apontando pra cima
-        perp = ang + math.pi / 2
-        bx, by = math.cos(perp) * 1.4, math.sin(perp) * 1.4
-        px, py = math.cos(ang) * raio, math.sin(ang) * raio
-        pygame.draw.polygon(surface, cor, [
-            (cx + bx, cy + by),
-            (cx - bx, cy - by),
-            (cx + px, cy + py),
-        ])
+
+def desenhar_bicho_claude(surface: pygame.Surface, x: int, y: int,
+                          cor, escala: int = 1) -> None:
+    surface.blit(sprite_bicho_claude(cor, escala), (x, y))
 
 
 def _mmss(seconds: float) -> str:
@@ -396,10 +412,8 @@ class ClaudeSessionsScreen:
         fg = CRT_WHITE
         dim = CRT_DIM
 
-        # linha 1: marca do Claude + pasta ......... cronômetro
-        # a estrela pulsa junto com a moldura quando a sessão cobra resposta
-        raio = 6.0 if (alert and pulso) else 5.0
-        desenhar_marca_claude(surface, rect.left + 12, rect.top + 9, cor, raio)
+        # linha 1: o bichinho do Claude + pasta ......... cronômetro
+        desenhar_bicho_claude(surface, rect.left + 6, rect.top + 5, cor, ESCALA_BICHO)
 
         folder = render_text(_fit(s.folder, 24), FONT_FOLDER, fg, pixel=False)
         surface.blit(folder, folder.get_rect(topleft=(rect.left + 20, rect.top + 3)))
