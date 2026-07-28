@@ -25,7 +25,14 @@ from ..core import config
 
 POLL_INTERVAL_S = 2.0
 TIMEOUT_S = 3.0
-DEFAULT_URL = "http://192.168.0.109:4747"
+
+# Sem config explícita, tenta nesta ordem. O nome mDNS vem primeiro de
+# propósito: o IP do PC muda quando o DHCP resolve mudar, o nome não.
+# O IP fica como rede de segurança pra quando o mDNS não estiver de pé.
+DEFAULT_URLS = (
+    "http://NBK-JP.local:4747",
+    "http://192.168.0.109:4747",
+)
 
 # Status que o servidor manda -> rótulo curto pra tela (ASCII, cabe em 400px)
 LABELS = {
@@ -106,6 +113,7 @@ def _folder_of(cwd: str) -> str:
 class ClaudeSessionsService:
     def __init__(self) -> None:
         self.snapshot = ClaudeSnapshot()
+        self._url_ok = ""   # última URL que respondeu (evita re-varrer a lista)
         self._lock = threading.Lock()
         # Acorda o loop na hora quando a tela pede refresh (botão SYNC).
         self._wake = threading.Event()
@@ -114,12 +122,18 @@ class ClaudeSessionsService:
 
     # ---------- config ----------
 
-    def base_url(self) -> str:
+    def candidatos(self) -> tuple[str, ...]:
+        """URLs a tentar. Config explícita manda; senão, os defaults em ordem."""
         import os
         url = (os.environ.get("CLAUDE_PAINEL_URL")
-               or config.get("claude_painel_url")
-               or DEFAULT_URL)
-        return str(url).strip().rstrip("/")
+               or config.get("claude_painel_url"))
+        if url:
+            return (str(url).strip().rstrip("/"),)
+        return DEFAULT_URLS
+
+    def base_url(self) -> str:
+        """A que está funcionando (ou a primeira da fila, pra exibir na tela)."""
+        return self._url_ok or self.candidatos()[0]
 
     # ---------- thread ----------
 
@@ -133,15 +147,28 @@ class ClaudeSessionsService:
         self._wake.set()
 
     def _fetch(self) -> None:
-        url = f"{self.base_url()}/estado"
-        try:
-            with urllib.request.urlopen(url, timeout=TIMEOUT_S) as resp:
-                raw = json.load(resp)
-        except urllib.error.URLError as exc:
-            self._fail(f"painel offline ({getattr(exc, 'reason', exc)})")
-            return
-        except Exception as exc:
-            self._fail(str(exc)[:60] or "falha na leitura")
+        # Tenta a que funcionou da última vez primeiro; só varre a lista quando
+        # ela falha. Assim o caso normal é uma requisição só.
+        fila = list(self.candidatos())
+        if self._url_ok in fila:
+            fila.remove(self._url_ok)
+            fila.insert(0, self._url_ok)
+
+        raw = None
+        erro = "painel offline"
+        for base in fila:
+            try:
+                with urllib.request.urlopen(f"{base}/estado", timeout=TIMEOUT_S) as resp:
+                    raw = json.load(resp)
+                self._url_ok = base
+                break
+            except urllib.error.URLError as exc:
+                erro = f"sem resposta ({getattr(exc, 'reason', exc)})"
+            except Exception as exc:
+                erro = str(exc)[:60] or "falha na leitura"
+        if raw is None:
+            self._url_ok = ""
+            self._fail(erro)
             return
 
         if not isinstance(raw, list):
