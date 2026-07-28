@@ -15,9 +15,11 @@ O servidor precisa estar escutando na rede, não só em loopback:
 from __future__ import annotations
 
 import json
+import socket
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
@@ -25,6 +27,7 @@ from ..core import config
 
 POLL_INTERVAL_S = 2.0
 TIMEOUT_S = 3.0
+DNS_TIMEOUT_S = 2.0
 
 # Sem config explícita, tenta nesta ordem. O nome mDNS vem primeiro de
 # propósito: o IP do PC muda quando o DHCP resolve mudar, o nome não.
@@ -104,6 +107,35 @@ class ClaudeSnapshot:
         return sum(1 for s in self.sessions if s.status == status)
 
 
+def resolver_ip(host: str, timeout_s: float = 2.0) -> str:
+    """Resolve um nome em IP com prazo de verdade.
+
+    O `timeout` do urlopen cobre só o socket, NÃO a resolução de nome: um
+    getaddrinfo em cima de mDNS pode travar sem limite e pendurar a thread
+    de consulta pra sempre — a tela congelaria em dados velhos, calada.
+    Resolvemos numa thread descartável; se ela não responder a tempo, o
+    candidato fica de fora desta rodada e o ciclo segue vivo.
+    """
+    try:
+        socket.inet_aton(host)
+        return host          # já é IPv4, não há o que resolver
+    except OSError:
+        pass
+
+    achado: dict[str, str] = {}
+
+    def alvo() -> None:
+        try:
+            achado["ip"] = socket.getaddrinfo(host, None, socket.AF_INET)[0][4][0]
+        except Exception:
+            achado["ip"] = ""
+
+    t = threading.Thread(target=alvo, daemon=True)
+    t.start()
+    t.join(timeout_s)
+    return achado.get("ip", "")
+
+
 def _folder_of(cwd: str) -> str:
     """basename do cwd — o painel manda caminho do Windows ou do Linux."""
     parts = [p for p in cwd.replace("\\", "/").split("/") if p]
@@ -139,7 +171,14 @@ class ClaudeSessionsService:
 
     def _loop(self) -> None:
         while True:
-            self._fetch()
+            # Esta thread NAO pode morrer: se ela cai, a tela congela em dados
+            # velhos sem avisar ninguem — o pior comportamento possivel num
+            # monitor. Qualquer excecao vira estado de erro visivel e o ciclo
+            # continua.
+            try:
+                self._fetch()
+            except Exception as exc:
+                self._fail(f"erro interno: {exc}"[:60])
             self._wake.wait(POLL_INTERVAL_S)
             self._wake.clear()
 
@@ -157,8 +196,17 @@ class ClaudeSessionsService:
         raw = None
         erro = "painel offline"
         for base in fila:
+            partes = urllib.parse.urlsplit(base)
+            ip = resolver_ip(partes.hostname or "", DNS_TIMEOUT_S)
+            if not ip:
+                erro = f"nome nao resolve ({partes.hostname})"
+                continue
+            # conecta pelo IP já resolvido: assim o timeout do urlopen cobre
+            # de ponta a ponta, sem DNS escondido no meio do caminho
+            porta = f":{partes.port}" if partes.port else ""
             try:
-                with urllib.request.urlopen(f"{base}/estado", timeout=TIMEOUT_S) as resp:
+                with urllib.request.urlopen(f"{partes.scheme}://{ip}{porta}/estado",
+                                            timeout=TIMEOUT_S) as resp:
                     raw = json.load(resp)
                 self._url_ok = base
                 break
