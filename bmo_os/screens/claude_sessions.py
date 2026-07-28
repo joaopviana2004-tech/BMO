@@ -24,6 +24,22 @@ from ..core.widgets import CRT_BLACK, CRT_DIM, CRT_WHITE, SAFE_INSET
 from ..services import audio
 from ..services.claude_sessions import ClaudeSession, ClaudeSessionsService
 
+# Paleta curta de propósito: cor só onde ela carrega informação (o estado da
+# sessão e o resultado de cada ferramenta). Texto e moldura seguem CRT — é o
+# que impede a tela de virar um papagaio.
+LARANJA = pygame.Color(232, 150, 42)    # trabalhando
+VERMELHO = pygame.Color(226, 74, 62)    # precisa de você / falhou
+VERDE = pygame.Color(64, 198, 148)      # concluída
+
+COR_STATUS = {
+    "working": LARANJA,
+    "waiting": VERMELHO,
+    "error": VERMELHO,
+    "done": VERDE,
+    "idle": CRT_DIM,
+    "ended": CRT_DIM,
+}
+
 HEADER_Y = SAFE_INSET                    # 14
 ROWS_TOP = HEADER_Y + 30                 # 44
 ROW_H = 42
@@ -169,14 +185,28 @@ class ClaudeSessionsScreen:
         title = render_text("CLAUDE", FONT_TITLE, CRT_WHITE)
         surface.blit(title, title.get_rect(midtop=(LOGICAL_SIZE[0] // 2, HEADER_Y + 1)))
 
-        # contadores: trabalhando / esperando / prontas
-        trab = snap.count("working")
-        esp = snap.count("waiting")
-        ok = snap.count("done")
-        line = f"{trab} ativas   {esp} esperando   {ok} prontas"
-        color = CRT_WHITE if esp else CRT_DIM
-        img = render_text(line, FONT_LINE, color, pixel=False)
-        surface.blit(img, img.get_rect(midtop=(LOGICAL_SIZE[0] // 2, HEADER_Y + 16)))
+        # contadores coloridos pelo próprio status — a cor vira vocabulário:
+        # a mesma que aparece na faixa lateral de cada linha.
+        partes = [
+            (str(snap.count("working")), " ativas", LARANJA),
+            (str(snap.count("waiting")), " esperando", VERMELHO),
+            (str(snap.count("done")), " prontas", VERDE),
+        ]
+        n_erro = snap.count("error")
+        if n_erro:   # só aparece quando existe — senão é ruído fixo no topo
+            partes.append((str(n_erro), " com erro", VERMELHO))
+        larguras = []
+        for num, rotulo, _ in partes:
+            larguras.append(render_text(num, FONT_LINE, CRT_WHITE, pixel=False).get_width()
+                            + render_text(rotulo + "   ", FONT_LINE, CRT_DIM, pixel=False).get_width())
+        x = LOGICAL_SIZE[0] // 2 - sum(larguras) // 2
+        for (num, rotulo, cor), _w in zip(partes, larguras):
+            n_img = render_text(num, FONT_LINE, cor, pixel=False)
+            surface.blit(n_img, (x, HEADER_Y + 16))
+            x += n_img.get_width()
+            r_img = render_text(rotulo + "   ", FONT_LINE, CRT_DIM, pixel=False)
+            surface.blit(r_img, (x, HEADER_Y + 16))
+            x += r_img.get_width()
 
         if self.ambient:
             clock = render_text(time.strftime("%H:%M"), FONT_LINE, CRT_DIM, pixel=False)
@@ -214,33 +244,37 @@ class ClaudeSessionsScreen:
 
     def _draw_row(self, surface, y: int, s: ClaudeSession, fetched_at: float) -> None:
         rect = pygame.Rect(SAFE_INSET, y, LOGICAL_SIZE[0] - SAFE_INSET * 2, ROW_H - 4)
+        cor = COR_STATUS.get(s.status, CRT_DIM)
 
-        # "precisa de você" pisca invertido — é o único estado que cobra ação.
+        # "precisa de você" pulsa em vermelho — é o único estado que cobra ação.
         alert = s.status == "waiting"
-        blink = alert and (math.sin(self._t * BLINK_HZ * math.pi * 2) > -0.3)
-        if blink:
-            pygame.draw.rect(surface, CRT_WHITE, rect)
-            fg, dim = CRT_BLACK, CRT_BLACK
-        else:
-            pygame.draw.rect(surface, CRT_BLACK, rect)
-            pygame.draw.rect(surface, CRT_WHITE if alert else CRT_DIM, rect, 1)
-            fg = CRT_WHITE
-            dim = CRT_WHITE if alert else CRT_DIM
+        pulso = alert and (math.sin(self._t * BLINK_HZ * math.pi * 2) > -0.3)
+
+        pygame.draw.rect(surface, CRT_BLACK, rect)
+        pygame.draw.rect(surface, cor if (alert and pulso) else CRT_DIM,
+                         rect, 2 if alert else 1)
+        # faixa lateral: o sinal que se lê de longe, sem precisar ler texto
+        pygame.draw.rect(surface, cor, (rect.left, rect.top, 3, rect.height))
+        fg = CRT_WHITE
+        dim = CRT_DIM
 
         # linha 1: marcador + pasta ......... cronômetro
-        glyph = render_text(GLYPH.get(s.status, "-"), FONT_FOLDER, fg)
-        surface.blit(glyph, glyph.get_rect(topleft=(rect.left + 5, rect.top + 4)))
+        glyph = render_text(GLYPH.get(s.status, "-"), FONT_FOLDER, cor)
+        surface.blit(glyph, glyph.get_rect(topleft=(rect.left + 7, rect.top + 4)))
 
         folder = render_text(_fit(s.folder, 24), FONT_FOLDER, fg, pixel=False)
-        surface.blit(folder, folder.get_rect(topleft=(rect.left + 18, rect.top + 3)))
+        surface.blit(folder, folder.get_rect(topleft=(rect.left + 20, rect.top + 3)))
 
         elapsed = s.elapsed_s
         if s.running and fetched_at:
             # o snapshot pode ter até POLL_INTERVAL_S de idade: completa o
             # tempo decorrido desde o fetch pra o cronômetro não travar
             elapsed += max(0.0, time.time() - fetched_at)
+        # o cronômetro também assume a cor do status: reforça o sinal sem
+        # inventar cor nova (a linha concluída ficava verde de menos)
+        cor_relogio = cor if s.status in ("working", "waiting", "done", "error") else fg
         clock = render_text(_mmss(elapsed) if s.elapsed_s or s.running else "--:--",
-                            FONT_CLOCK, fg, pixel=False)
+                            FONT_CLOCK, cor_relogio, pixel=False)
         surface.blit(clock, clock.get_rect(topright=(rect.right - 5, rect.top + 2)))
 
         # linha 2: o que importa agora, por status
@@ -256,37 +290,66 @@ class ClaudeSessionsScreen:
             info = "> pensando"
         else:
             info = s.prompt or "aguardando prompt"
-        img = render_text(_fit(info, 56), FONT_LINE, fg if alert else CRT_WHITE, pixel=False)
-        surface.blit(img, img.get_rect(topleft=(rect.left + 18, rect.top + 17)))
+        cor_info = cor if s.status in ("waiting", "error") else CRT_WHITE
+        img = render_text(_fit(info, 55), FONT_LINE, cor_info, pixel=False)
+        surface.blit(img, img.get_rect(topleft=(rect.left + 20, rect.top + 17)))
 
         # linha 3: um traço por ferramenta + barra indeterminada enquanto roda
         self._draw_tools(surface, rect, s, fg, dim)
 
     def _draw_tools(self, surface, rect: pygame.Rect, s: ClaudeSession, fg, dim) -> None:
+        """Um pontinho por ferramenta executada, e cada um diz o que aconteceu:
+
+            vermelho = a ferramenta falhou
+            âmbar    = mexeu em alguma coisa (Write/Edit/Bash)
+            cinza    = só leu (Read/Grep/Glob)
+
+        É a contagem real de tool calls — nunca uma estimativa de progresso.
+        """
         ty = rect.top + 30
-        x = rect.left + 18
-        # cada traço = uma tool call de verdade; sem estimativa de progresso
-        max_tracos = 44
-        n = min(s.tool_count, max_tracos)
-        ok_n = max(0, n - min(s.fail_count, n))
-        for i in range(n):
-            color = fg if i < ok_n else (CRT_BLACK if fg == CRT_BLACK else CRT_WHITE)
-            pygame.draw.rect(surface, color, (x + i * 5, ty, 3, 4))
-        if s.tool_count > max_tracos:
-            more = render_text(f"+{s.tool_count - max_tracos}", 8, dim, pixel=False)
-            surface.blit(more, more.get_rect(midleft=(x + n * 5 + 3, ty + 2)))
-        elif s.tool_count:
-            cnt = render_text(str(s.tool_count), 8, dim, pixel=False)
-            surface.blit(cnt, cnt.get_rect(midleft=(x + n * 5 + 3, ty + 2)))
+        x = rect.left + 20
+        max_tracos = 40
+        # mostra as ÚLTIMAS, não as primeiras: o que importa é o agora
+        ticks = s.ticks[-max_tracos:] if len(s.ticks) > max_tracos else s.ticks
+
+        for i, t in enumerate(ticks):
+            px = x + i * 5
+            if t.failed:
+                # falha ganha um pontinho mais alto pra destacar no relevo
+                pygame.draw.rect(surface, VERMELHO, (px, ty - 1, 3, 6))
+            elif t.kind == "acao":
+                pygame.draw.rect(surface, LARANJA, (px, ty, 3, 4))
+            else:
+                pygame.draw.rect(surface, CRT_DIM, (px, ty + 1, 3, 2))
+
+        fim_x = x + len(ticks) * 5
+
+        # ferramenta rodando agora: contorno pulsando na ponta da fila
+        if s.current_tool:
+            pulso = (math.sin(self._t * 5.0) * 0.5 + 0.5)
+            if pulso > 0.35:
+                pygame.draw.rect(surface, CRT_WHITE, (fim_x, ty - 1, 3, 6), 1)
+            fim_x += 6
+
+        # resumo numérico: total, e as falhas em vermelho se houver
+        if s.tool_count:
+            cortadas = s.tool_count - len(ticks)
+            txt = f"{s.tool_count}" + (f"  (+{cortadas})" if cortadas > 0 else "")
+            cnt = render_text(txt, 8, CRT_DIM, pixel=False)
+            surface.blit(cnt, cnt.get_rect(midleft=(fim_x + 4, ty + 2)))
+            fim_x += 4 + cnt.get_width()
+        if s.fail_count:
+            err = render_text(f"{s.fail_count} erro" + ("s" if s.fail_count > 1 else ""),
+                              8, VERMELHO, pixel=False)
+            surface.blit(err, err.get_rect(midleft=(fim_x + 5, ty + 2)))
 
         # barra indeterminada: NÃO existe percentual real de conclusão, então
         # ela só diz "ainda está rodando" — nunca "falta tanto".
         if s.running and s.status == "working":
-            bar = pygame.Rect(rect.right - 74, ty + 1, 60, 3)
-            pygame.draw.rect(surface, dim, bar, 1)
-            span = bar.width - 16
+            bar = pygame.Rect(rect.right - 66, ty + 1, 52, 3)
+            span = bar.width - 14
             off = int((math.sin(self._t * 2.2) * 0.5 + 0.5) * span)
-            pygame.draw.rect(surface, fg, (bar.left + 1 + off, bar.top + 1, 14, 1))
+            pygame.draw.rect(surface, LARANJA, (bar.left + off, bar.top + 1, 14, 1))
 
     def _draw_scroll_hints(self, surface, total: int) -> None:
         if self.ambient or total <= MAX_VISIBLE:
@@ -323,11 +386,27 @@ class ClaudeSessionsScreen:
 
     def _draw_footer(self, surface, snap) -> None:
         if not snap.ok:
-            txt = "sem contato com o painel do PC"
-        elif self.ambient:
-            txt = "toque para abrir o menu"
-        else:
-            idade = max(0, int(time.time() - snap.fetched_at)) if snap.fetched_at else 0
-            txt = f"atualizado ha {idade}s    HOME / SYNC nos cantos"
+            img = render_text("sem contato com o painel do PC", FONT_HINT,
+                              VERMELHO, pixel=False)
+            surface.blit(img, img.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, FOOTER_Y)))
+            return
+
+        # legenda dos pontinhos: sem isso a cor é enfeite, com isso é vocabulário
+        if snap.sessions:
+            itens = [(LARANJA, "mexeu"), (CRT_DIM, "leu"), (VERMELHO, "falhou")]
+            larg = sum(14 + render_text(t, FONT_HINT, CRT_DIM, pixel=False).get_width()
+                       for _, t in itens)
+            x = LOGICAL_SIZE[0] // 2 - larg // 2
+            ly = FOOTER_Y - 6
+            for cor, texto in itens:
+                pygame.draw.rect(surface, cor, (x, ly - 2, 3, 4))
+                img = render_text(texto, FONT_HINT, CRT_DIM, pixel=False)
+                surface.blit(img, img.get_rect(midleft=(x + 6, ly)))
+                x += 14 + img.get_width()
+            return
+
+        idade = max(0, int(time.time() - snap.fetched_at)) if snap.fetched_at else 0
+        txt = ("toque para abrir o menu" if self.ambient
+               else f"atualizado ha {idade}s    HOME / SYNC nos cantos")
         img = render_text(txt, FONT_HINT, CRT_DIM, pixel=False)
         surface.blit(img, img.get_rect(midbottom=(LOGICAL_SIZE[0] // 2, FOOTER_Y)))

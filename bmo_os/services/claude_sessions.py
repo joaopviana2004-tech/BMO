@@ -38,6 +38,30 @@ LABELS = {
 }
 
 
+# Ferramentas que MUDAM alguma coisa vs. as que só olham. A distinção é o que
+# dá pra ler nos pontinhos de longe: "essa sessão está escrevendo" contra
+# "essa sessão só está vasculhando o repo".
+FERRAMENTAS_ACAO = {
+    "write", "edit", "multiedit", "notebookedit",
+    "bash", "powershell", "killshell",
+}
+
+
+def classificar_ferramenta(nome: str) -> str:
+    n = (nome or "").strip().lower()
+    if n.startswith("mcp__"):
+        return "acao"   # tool externa: assume efeito colateral
+    return "acao" if n in FERRAMENTAS_ACAO else "leitura"
+
+
+@dataclass
+class ToolTick:
+    """Uma ferramenta executada — vira um pontinho na tela."""
+    name: str = "?"
+    kind: str = "leitura"   # "acao" | "leitura"
+    failed: bool = False
+
+
 @dataclass
 class ClaudeSession:
     id: str
@@ -51,10 +75,15 @@ class ClaudeSession:
     last_message: str = ""
     elapsed_s: float = 0.0
     running: bool = False
+    ticks: list[ToolTick] = field(default_factory=list)
 
     @property
     def label(self) -> str:
         return LABELS.get(self.status, self.status)
+
+    @property
+    def acoes(self) -> int:
+        return sum(1 for t in self.ticks if t.kind == "acao" and not t.failed)
 
 
 @dataclass
@@ -124,7 +153,18 @@ class ClaudeSessionsService:
             if not isinstance(item, dict):
                 continue
             tools = item.get("tools") or []
+            ticks = []
+            for t in tools:
+                if not isinstance(t, dict):
+                    continue
+                nome = str(t.get("name", "?"))
+                ticks.append(ToolTick(
+                    name=nome,
+                    kind=classificar_ferramenta(nome),
+                    failed=bool(t.get("failed")),
+                ))
             sessions.append(ClaudeSession(
+                ticks=ticks,
                 id=str(item.get("id", "")),
                 folder=_folder_of(str(item.get("cwd", ""))),
                 status=str(item.get("status", "idle")),
@@ -132,7 +172,7 @@ class ClaudeSessionsService:
                 notice=str(item.get("notice", "")).strip(),
                 current_tool=str(item.get("currentTool") or "").strip(),
                 tool_count=int(item.get("toolCount") or 0),
-                fail_count=sum(1 for t in tools if isinstance(t, dict) and t.get("failed")),
+                fail_count=sum(1 for t in ticks if t.failed),
                 last_message=str(item.get("lastMessage", "")).strip(),
                 # elapsedMs vem calculado pelo relógio do PC de propósito:
                 # a Raspberry pode estar com o relógio adiantado/atrasado e o
