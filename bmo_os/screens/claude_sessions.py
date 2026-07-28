@@ -54,15 +54,47 @@ FONT_HINT = 8
 
 BLINK_HZ = 1.6
 
-# Marcador ASCII por status (a fonte pixel não tem acento/símbolo)
-GLYPH = {
-    "idle": "-",
-    "working": ">",
-    "waiting": "!",
-    "done": "*",
-    "error": "X",
-    "ended": ".",
-}
+# Área rolável: começa embaixo do cabeçalho e vai até o rodapé.
+LIST_TOP = ROWS_TOP                      # 44
+LIST_H = MAX_VISIBLE * ROW_H             # 168
+LIST_BOTTOM = LIST_TOP + LIST_H          # 212
+
+# Arrasto com o dedo. O limiar separa "toquei" de "arrastei": sem ele, o
+# tremor natural do dedo ao tocar viraria rolagem e a tela sairia sozinha.
+DRAG_LIMIAR_PX = 4
+TRILHO = pygame.Color(38, 38, 38)   # fundo da barra de rolagem (abaixo do DIM)
+PEGADOR = pygame.Color(165, 165, 165)   # o cursor dela: precisa saltar num 5"
+ATRITO = 0.88          # por 1/60s — desacelera o embalo depois que solta
+VEL_MINIMA = 8.0       # px/s abaixo disso a inércia para (evita tremeliques)
+# Teto de velocidade: dois eventos de movimento no mesmo milissegundo dariam
+# uma divisão por ~0 e a lista dispararia até o fim num piscar.
+VEL_MAXIMA = 1200.0
+
+# Quantos raios tem a estrela do Claude. Oito é o que ainda se lê como a marca
+# num monitor de 400px de largura — onze (o logo real) vira borrão nesse tamanho.
+RAIOS_CLAUDE = 8
+
+
+def desenhar_marca_claude(surface: pygame.Surface, cx: int, cy: int,
+                          cor, raio: float = 5.5) -> None:
+    """A estrela do Claude, desenhada à mão em vetor.
+
+    Cada raio é um triângulo (largo no miolo, fino na ponta) — é o que dá a
+    silhueta de "sunburst" da marca em vez de um asterisco de fonte. A cor vem
+    do status, então o símbolo continua carregando a informação que o glifo
+    ASCII carregava antes.
+    """
+    passo = math.tau / RAIOS_CLAUDE
+    for i in range(RAIOS_CLAUDE):
+        ang = i * passo - math.pi / 2      # começa apontando pra cima
+        perp = ang + math.pi / 2
+        bx, by = math.cos(perp) * 1.4, math.sin(perp) * 1.4
+        px, py = math.cos(ang) * raio, math.sin(ang) * raio
+        pygame.draw.polygon(surface, cor, [
+            (cx + bx, cy + by),
+            (cx - bx, cy - by),
+            (cx + px, cy + py),
+        ])
 
 
 def _mmss(seconds: float) -> str:
@@ -77,6 +109,19 @@ def _fit(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text
     return text[: max(1, max_chars - 1)] + "."
+
+
+def _to_logical(pos: tuple[int, int]) -> tuple[int, int]:
+    """Pixel físico da janela -> canvas lógico 400x240.
+
+    Os eventos crus do pygame (MOUSEMOTION etc.) chegam na tela SEM passar
+    pelo App._to_logical — só o ACTION_EVENT vem convertido. Mesmo helper do
+    tasks.py, que também precisa dos eventos crus pra arrastar card.
+    """
+    w, h = pygame.display.get_window_size()
+    if w <= 0 or h <= 0:
+        return pos
+    return (pos[0] * LOGICAL_SIZE[0] // w, pos[1] * LOGICAL_SIZE[1] // h)
 
 
 class ClaudeSessionsScreen:
@@ -94,34 +139,77 @@ class ClaudeSessionsScreen:
         self.on_back = on_open_home or on_back
         self.claude = claude
         self.ambient = ambient
-        self.scroll = 0
+        self.scroll = 0.0        # deslocamento em PIXELS (não em linhas)
         self._t = 0.0
         self._sync_flash_until = 0.0
+        # arrasto
+        self._arrastando = False
+        self._ultimo_y = 0
+        self._y0 = 0
+        self._andou = False
+        self._vel = 0.0
+        self._t_arrasto = 0.0
 
     def enter(self) -> None:
         self.claude.trigger_refresh()
+        self.scroll = 0.0
+        self._vel = 0.0
 
     def exit(self) -> None: ...
+
+    # ---------- rolagem ----------
+
+    def _max_scroll(self) -> float:
+        n = len(self.claude.get().sessions)
+        return max(0.0, n * ROW_H - LIST_H)
+
+    def _clamp(self) -> None:
+        teto = self._max_scroll()
+        if self.scroll < 0.0:
+            self.scroll = 0.0
+            self._vel = 0.0
+        elif self.scroll > teto:
+            self.scroll = teto
+            self._vel = 0.0
 
     # ---------- update ----------
 
     def update(self, dt: float) -> None:
         self._t += dt
-        n = len(self.claude.get().sessions)
-        max_scroll = max(0, n - MAX_VISIBLE)
-        self.scroll = min(self.scroll, max_scroll)
+        # embalo: depois que o dedo sai, a lista segue e vai parando
+        if not self._arrastando and abs(self._vel) > VEL_MINIMA:
+            self.scroll += self._vel * dt
+            self._vel *= ATRITO ** max(1.0, dt * 60.0)
+        elif not self._arrastando:
+            self._vel = 0.0
+        self._clamp()
 
     # ---------- input ----------
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        # Eventos CRUS primeiro: são os únicos que dão o arrasto (o ACTION_EVENT
+        # só existe no toque inicial, não no movimento do dedo).
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            self._iniciar_arrasto(_to_logical(event.pos))
+            return
+        if event.type == pygame.MOUSEMOTION:
+            if self._arrastando and pygame.mouse.get_pressed()[0]:
+                self._mover_arrasto(_to_logical(event.pos))
+            return
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self._soltar_arrasto()
+            return
+
         if event.type != bmo_input.ACTION_EVENT:
             return
         action = event.action
         pos = getattr(event, "pos", None)
 
         if self.ambient:
-            if action in (bmo_input.Action.TAP, bmo_input.Action.A,
-                          bmo_input.Action.MENU):
+            # O TAP nasce no APERTAR do dedo — sair aqui mataria toda rolagem
+            # antes do primeiro pixel. Quem decide é o soltar, que já sabe se
+            # o dedo andou. Teclado (A/MENU) não arrasta, então sai na hora.
+            if action in (bmo_input.Action.A, bmo_input.Action.MENU) and pos is None:
                 audio.play("select")
                 self.on_back()
             return
@@ -140,14 +228,56 @@ class ClaudeSessionsScreen:
             audio.play("back")
             self.on_back()
         elif action == bmo_input.Action.UP:
-            self.scroll = max(0, self.scroll - 1)
+            self.scroll -= ROW_H
+            self._vel = 0.0
+            self._clamp()
         elif action == bmo_input.Action.DOWN:
-            n = len(self.claude.get().sessions)
-            self.scroll = min(max(0, n - MAX_VISIBLE), self.scroll + 1)
+            self.scroll += ROW_H
+            self._vel = 0.0
+            self._clamp()
         elif action == bmo_input.Action.A:
             audio.play("tick")
             self.claude.trigger_refresh()
             self._sync_flash_until = self._t + 0.4
+
+    # ---------- arrasto com o dedo ----------
+
+    def _iniciar_arrasto(self, pos) -> None:
+        if not self.ambient and (self._back_btn().collidepoint(pos)
+                                 or self._sync_btn().collidepoint(pos)):
+            return                      # botão do cabeçalho não rola a lista
+        self._arrastando = True
+        self._andou = False
+        self._y0 = pos[1]
+        self._ultimo_y = pos[1]
+        self._vel = 0.0
+        self._t_arrasto = time.monotonic()
+
+    def _mover_arrasto(self, pos) -> None:
+        dy = pos[1] - self._ultimo_y
+        self._ultimo_y = pos[1]
+        if abs(pos[1] - self._y0) >= DRAG_LIMIAR_PX:
+            self._andou = True
+        if dy == 0:
+            return
+        agora = time.monotonic()
+        dt = max(1e-3, agora - self._t_arrasto)
+        self._t_arrasto = agora
+        # dedo sobe => conteúdo sobe => scroll aumenta
+        self.scroll -= dy
+        self._vel = max(-VEL_MAXIMA, min(VEL_MAXIMA, -dy / dt))
+        self._clamp()
+
+    def _soltar_arrasto(self) -> None:
+        if not self._arrastando:
+            return                      # arrasto nem chegou a começar
+        self._arrastando = False
+        if self._andou:
+            return                      # foi rolagem: deixa a inércia correr
+        self._vel = 0.0
+        if self.ambient:                # toque limpo no descanso: volta pro menu
+            audio.play("select")
+            self.on_back()
 
     # ---------- hitboxes ----------
 
@@ -167,11 +297,19 @@ class ClaudeSessionsScreen:
         if not snap.sessions:
             self._draw_empty(surface, snap)
         else:
-            visible = snap.sessions[self.scroll: self.scroll + MAX_VISIBLE]
-            for i, sess in enumerate(visible):
-                y = ROWS_TOP + i * ROW_H
+            # recorte: a linha que entra/sai é cortada na borda da área, senão
+            # ela invadiria o cabeçalho e o rodapé durante o arrasto
+            area = pygame.Rect(0, LIST_TOP, LOGICAL_SIZE[0], LIST_H)
+            antigo = surface.get_clip()
+            surface.set_clip(area)
+            desloc = int(self.scroll)
+            for i, sess in enumerate(snap.sessions):
+                y = LIST_TOP + i * ROW_H - desloc
+                if y > LIST_BOTTOM or y + ROW_H < LIST_TOP:
+                    continue                  # fora da vista: nem desenha
                 self._draw_row(surface, y, sess, snap.fetched_at)
-            self._draw_scroll_hints(surface, len(snap.sessions))
+            surface.set_clip(antigo)
+            self._draw_scrollbar(surface, len(snap.sessions))
 
         self._draw_footer(surface, snap)
 
@@ -258,9 +396,10 @@ class ClaudeSessionsScreen:
         fg = CRT_WHITE
         dim = CRT_DIM
 
-        # linha 1: marcador + pasta ......... cronômetro
-        glyph = render_text(GLYPH.get(s.status, "-"), FONT_FOLDER, cor)
-        surface.blit(glyph, glyph.get_rect(topleft=(rect.left + 7, rect.top + 4)))
+        # linha 1: marca do Claude + pasta ......... cronômetro
+        # a estrela pulsa junto com a moldura quando a sessão cobra resposta
+        raio = 6.0 if (alert and pulso) else 5.0
+        desenhar_marca_claude(surface, rect.left + 12, rect.top + 9, cor, raio)
 
         folder = render_text(_fit(s.folder, 24), FONT_FOLDER, fg, pixel=False)
         surface.blit(folder, folder.get_rect(topleft=(rect.left + 20, rect.top + 3)))
@@ -288,6 +427,10 @@ class ClaudeSessionsScreen:
             info = f"> {s.current_tool}"
         elif s.status == "working":
             info = "> pensando"
+        elif s.status == "ended":
+            # sessão encerrada NÃO está esperando prompt nenhum — dizer isso
+            # era o que fazia toda linha morta parecer uma sessão ociosa viva
+            info = s.last_message or s.prompt or "sessao encerrada"
         else:
             info = s.prompt or "aguardando prompt"
         cor_info = cor if s.status in ("waiting", "error") else CRT_WHITE
@@ -351,22 +494,18 @@ class ClaudeSessionsScreen:
             off = int((math.sin(self._t * 2.2) * 0.5 + 0.5) * span)
             pygame.draw.rect(surface, LARANJA, (bar.left + off, bar.top + 1, 14, 1))
 
-    def _draw_scroll_hints(self, surface, total: int) -> None:
-        if self.ambient or total <= MAX_VISIBLE:
+    def _draw_scrollbar(self, surface, total: int) -> None:
+        """Barra fina na borda direita — com rolagem contínua, seta piscando
+        não diz mais nada: o que importa é ONDE você está na lista."""
+        if total <= MAX_VISIBLE:
             return
-        if self.scroll > 0:
-            pygame.draw.polygon(surface, CRT_DIM, [
-                (LOGICAL_SIZE[0] - 8, ROWS_TOP + 4),
-                (LOGICAL_SIZE[0] - 2, ROWS_TOP + 4),
-                (LOGICAL_SIZE[0] - 5, ROWS_TOP),
-            ])
-        if self.scroll + MAX_VISIBLE < total:
-            ybot = ROWS_TOP + MAX_VISIBLE * ROW_H - 8
-            pygame.draw.polygon(surface, CRT_DIM, [
-                (LOGICAL_SIZE[0] - 8, ybot),
-                (LOGICAL_SIZE[0] - 2, ybot),
-                (LOGICAL_SIZE[0] - 5, ybot + 4),
-            ])
+        teto = self._max_scroll()
+        x = LOGICAL_SIZE[0] - 7
+        pygame.draw.rect(surface, TRILHO, (x, LIST_TOP, 3, LIST_H))
+        altura = max(14, int(LIST_H * LIST_H / (total * ROW_H)))
+        frac = (self.scroll / teto) if teto > 0 else 0.0
+        y = LIST_TOP + int(frac * (LIST_H - altura))
+        pygame.draw.rect(surface, PEGADOR, (x, y, 3, altura))
 
     # ---------- vazio / rodapé ----------
 

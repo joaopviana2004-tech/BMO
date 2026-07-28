@@ -85,6 +85,9 @@ class ClaudeSession:
     last_message: str = ""
     elapsed_s: float = 0.0
     running: bool = False
+    # relógio do PAINEL (ms), não o da Raspberry. Só serve pra comparar sessões
+    # entre si — nunca contra time.time() daqui (os relógios divergem).
+    updated_at: float = 0.0
     ticks: list[ToolTick] = field(default_factory=list)
 
     @property
@@ -140,6 +143,66 @@ def _folder_of(cwd: str) -> str:
     """basename do cwd — o painel manda caminho do Windows ou do Linux."""
     parts = [p for p in cwd.replace("\\", "/").split("/") if p]
     return parts[-1] if parts else "?"
+
+
+# O painel guarda TODA sessão que já passou por ele e nunca descarta as
+# encerradas — abrir três vezes o mesmo repo deixa três linhas iguais na tela.
+# Isto aqui é um monitor do AGORA, não um histórico: sessão morta velha sai.
+ENDED_TTL_MS = 10 * 60 * 1000.0
+
+# Estados que sempre aparecem: ou pedem ação, ou acabaram de acontecer.
+VIVOS = frozenset({"waiting", "error", "working", "done"})
+
+# Ordem de urgência — quem cobra ação primeiro, pra "PRECISA DE VOCE" nunca
+# nascer fora da área visível.
+ORDEM_STATUS = {
+    "waiting": 0, "error": 1, "working": 2, "done": 3, "idle": 4, "ended": 5,
+}
+
+
+def organizar(sessions: list[ClaudeSession]) -> list[ClaudeSession]:
+    """Tira as repetições e ordena por urgência.
+
+    Três regras, nesta ordem:
+      1. id repetido some (defesa — o painel não deveria repetir, mas repete);
+      2. sessão morta (idle/ended) some se estiver velha, se a pasta já tem
+         sessão viva, ou se é a mais antiga entre as mortas daquela pasta;
+      3. o que sobra é ordenado por urgência e, dentro dela, pela mais recente.
+
+    A idade é medida contra o relógio do PRÓPRIO painel (o updatedAt mais novo
+    do lote), nunca contra o da Raspberry — os dois relógios divergem e usar o
+    daqui faria sessão viva sumir ou sessão velha ficar pra sempre.
+    """
+    unicas: dict[str, ClaudeSession] = {}
+    for s in sessions:
+        chave = s.id or f"_{len(unicas)}"
+        anterior = unicas.get(chave)
+        if anterior is None or s.updated_at >= anterior.updated_at:
+            unicas[chave] = s
+    itens = list(unicas.values())
+    if not itens:
+        return []
+
+    agora = max((s.updated_at for s in itens), default=0.0)
+    pastas_vivas = {s.folder for s in itens if s.status in VIVOS}
+
+    mantidas: list[ClaudeSession] = []
+    melhor_morta: dict[str, ClaudeSession] = {}
+    for s in itens:
+        if s.status in VIVOS:
+            mantidas.append(s)
+            continue
+        if agora and s.updated_at and (agora - s.updated_at) > ENDED_TTL_MS:
+            continue                      # encerrada e velha: é histórico
+        if s.folder in pastas_vivas:
+            continue                      # a pasta já tem sessão de verdade
+        atual = melhor_morta.get(s.folder)
+        if atual is None or s.updated_at > atual.updated_at:
+            melhor_morta[s.folder] = s    # uma linha por pasta, a mais nova
+
+    mantidas.extend(melhor_morta.values())
+    mantidas.sort(key=lambda s: (ORDEM_STATUS.get(s.status, 9), -s.updated_at))
+    return mantidas
 
 
 class ClaudeSessionsService:
@@ -254,9 +317,11 @@ class ClaudeSessionsService:
                 # cronômetro sairia errado se fosse calculado aqui.
                 elapsed_s=float(item.get("elapsedMs") or 0) / 1000.0,
                 running=bool(item.get("running")),
+                updated_at=float(item.get("updatedAt") or item.get("endedAt") or 0),
             ))
 
-        snap = ClaudeSnapshot(sessions=sessions, fetched_at=time.time(), ok=True)
+        snap = ClaudeSnapshot(sessions=organizar(sessions),
+                              fetched_at=time.time(), ok=True)
         with self._lock:
             self.snapshot = snap
 
