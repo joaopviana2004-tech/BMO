@@ -79,9 +79,8 @@ VEL_MAXIMA = 1200.0
 # que é o que dá a silhueta — pintar de preto quebraria em cima da faixa lateral.
 BICHO_CLAUDE = (
     ".########.",
-    ".#..##..#.",   # olhos 2x2 — ocupam duas linhas pra ler de longe
-    ".#..##..#.",
     ".########.",
+    ".#.####.#.",   # olhos de 1 célula: 2x2 deixava o bicho com cara de bravo
     "##########",   # bracinhos saindo dos dois lados
     "##########",
     ".########.",
