@@ -31,6 +31,7 @@ from bmo_os.screens.alert import AlertScreen
 from bmo_os.screens.bmo_face import BMOFaceScreen
 from bmo_os.screens.brain import BrainScreen
 from bmo_os.screens.confirm import ConfirmScreen
+from bmo_os.screens.claude_sessions import ClaudeSessionsScreen
 from bmo_os.screens.devhub import DevHubScreen
 from bmo_os.screens.clock import ClockScreen
 from bmo_os.screens.flappy import FlappyScreen
@@ -63,6 +64,8 @@ from bmo_os.services import audio
 from bmo_os.services import google_auth
 from bmo_os.services.camera import CameraService
 from bmo_os.services.chat import ChatService, probe_endpoint
+from bmo_os.services.chat import ChatService
+from bmo_os.services.claude_sessions import ClaudeSessionsService
 from bmo_os.services.cooler import CoolerService
 from bmo_os.services.dev_hub import DevHubService
 from bmo_os.services.github_dev import GitHubPoller
@@ -199,6 +202,9 @@ def build_initial(app: App):
     # a interface CalendarService que todo o resto consome.
     calendar = MergedCalendar(PlataformaCalendar(plataforma), [CalendarService()])
     alerter = EventAlerter()
+    # Sessões do Claude Code rodando no PC (tela CLAUDE). Lê o painel pela
+    # rede local; sem contato a tela mostra "Painel offline" e não quebra.
+    claude_sessions = ClaudeSessionsService()
     # Telemetria de hardware (tela SISTEMA). No PC mostra "--".
     sysinfo = SysInfoService()
     # Rede: detecção de internet (qualquer SO) + WiFi via nmcli (só no Pi).
@@ -327,6 +333,9 @@ def build_initial(app: App):
         if mode == "devhub":
             return DevHubScreen(on_open_home=open_home, dev_hub=_dev_hub,
                                 github=_github, ambient=True)
+        if mode == "claude":
+            return ClaudeSessionsScreen(on_open_home=open_home,
+                                        claude=claude_sessions, ambient=True)
         if mode == "brain":
             return BrainScreen(on_open_home=open_home, knowledge=knowledge,
                                get_sync=lambda: _drive_sync.get("svc"),
@@ -418,6 +427,9 @@ def build_initial(app: App):
     def make_devhub_screen() -> DevHubScreen:
         return DevHubScreen(on_back=app.manager.pop, dev_hub=_dev_hub, github=_github)
 
+    def make_claude_screen() -> ClaudeSessionsScreen:
+        return ClaudeSessionsScreen(on_back=app.manager.pop, claude=claude_sessions)
+
     def make_sysinfo_screen() -> SysInfoScreen:
         # tela SISTEMA: telemetria + controle dos coolers (atalhos de atualizar/
         # desligar ficam no grid de AJUSTES, não aqui)
@@ -468,6 +480,7 @@ def build_initial(app: App):
                 )),
                 on_dev=lambda: push(make_devhub_screen()),
                 on_smarthome=lambda: push(make_smarthome_screen()),
+                on_claude=lambda: push(make_claude_screen()),
                 on_settings=lambda: push(make_settings()),
                 on_sysinfo=lambda: push(make_sysinfo_screen()),
                 on_shutdown=confirm_shutdown,
@@ -585,6 +598,8 @@ def build_initial(app: App):
                            _cmd(lambda: app.manager.push(make_brain_screen())))
     voice.register_command(["dev", "dev hub", "programacao", "codigo", "git"],
                            _cmd(lambda: app.manager.push(make_devhub_screen())))
+    voice.register_command(["claude", "claudes", "sessao", "sessoes"],
+                           _cmd(lambda: app.manager.push(make_claude_screen())))
     voice.register_command(["configura", "ajuste", "settings"], _cmd(lambda: app.manager.push(make_settings())))
     voice.register_command(["menu", "inicio", "casa", "home"], _cmd(open_home))
     voice.register_command(["relogio", "horas", "tela inicial", "descanso"], _cmd(go_ambient))
@@ -642,6 +657,7 @@ def build_initial(app: App):
         "cerebro": lambda: app.manager.push(make_brain_screen()),
         "devhub": lambda: app.manager.push(make_devhub_screen()),
         "casa": lambda: app.manager.push(make_smarthome_screen()),
+        "claude": lambda: app.manager.push(make_claude_screen()),
         "configuracoes": lambda: app.manager.push(make_settings()),
         # relógio explícito (NÃO o ambient configurado, que pode ser face/pong)
         "relogio": lambda: app.manager.replace(_instantiate_ambient("clock")),

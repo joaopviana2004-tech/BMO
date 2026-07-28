@@ -20,12 +20,13 @@ from ..core.widgets import (
     LOGICAL_SIZE,
 )
 
-MODES = ["clock", "face", "brain", "devhub", "pong", "invaders", "shuffle"]
+MODES = ["clock", "face", "brain", "devhub", "claude", "pong", "invaders", "shuffle"]
 LABELS = {
     "clock": "CLOCK",
     "face": "BMO FACE",
     "brain": "CEREBRO",
     "devhub": "DEV HUB",
+    "claude": "CLAUDE",
     "pong": "PONG",
     "invaders": "INVADERS",
     "shuffle": "VARIADO",
@@ -152,6 +153,8 @@ class SleepScreen:
                 self._draw_invaders_preview(surface, rect, selected)
             elif mode == "devhub":
                 self._draw_devhub_preview(surface, rect, selected)
+            elif mode == "claude":
+                self._draw_claude_preview(surface, rect, selected)
             elif mode == "brain":
                 self._draw_brain_preview(surface, rect, selected)
             else:
@@ -214,6 +217,21 @@ class SleepScreen:
         pygame.draw.circle(surface, c, (rect.left + 10, rect.top + 12), 2)
         line = render_text("> git", 7, c, pixel=False)
         surface.blit(line, (rect.left + 14, rect.top + 8))
+
+    def _draw_claude_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
+        c = CRT_WHITE if bright else CRT_DIM
+        # 3 mini-linhas = 3 sessões; a do meio pisca invertida ("precisa de voce")
+        for i in range(3):
+            y = rect.top + 8 + i * 11
+            row = pygame.Rect(rect.left + 5, y, rect.width - 10, 9)
+            alerta = (i == 1) and (math.sin(self._t * 3.2) > -0.3)
+            if alerta:
+                pygame.draw.rect(surface, c, row)
+                pygame.draw.rect(surface, CRT_BLACK, (row.left + 2, row.centery - 1, 3, 3))
+            else:
+                pygame.draw.rect(surface, c, row, 1)
+                for t in range(3 - i):
+                    pygame.draw.rect(surface, c, (row.left + 3 + t * 4, row.centery - 1, 2, 3))
 
     def _draw_brain_preview(self, surface: pygame.Surface, rect: pygame.Rect, bright: bool) -> None:
         c = CRT_WHITE if bright else CRT_DIM

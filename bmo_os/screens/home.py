@@ -156,6 +156,21 @@ def _icon_devhub(surf: pygame.Surface, cx: int, cy: int) -> None:
                      (body.right - 10, body.top + 20), 1)
 
 
+def _icon_claude(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # três linhas (as sessões) + a faísca do Claude na primeira
+    for i, w in enumerate((26, 20, 23)):
+        y = cy - 10 + i * 9
+        color = CRT_WHITE if i == 0 else CRT_DIM
+        pygame.draw.rect(surf, color, (cx - 17, y, 3, 3))
+        pygame.draw.line(surf, color, (cx - 11, y + 1), (cx - 17 + w, y + 1), 2)
+    sx, sy = cx + 12, cy - 9
+    for i in range(4):
+        ang = i * math.pi / 2 + math.pi / 4
+        pygame.draw.line(surf, CRT_WHITE,
+                         (sx + int(math.cos(ang) * 2), sy + int(math.sin(ang) * 2)),
+                         (sx + int(math.cos(ang) * 6), sy + int(math.sin(ang) * 6)), 2)
+
+
 def _icon_brain(surf: pygame.Surface, cx: int, cy: int) -> None:
     nodes = [(cx, cy - 12), (cx - 14, cy + 2), (cx + 13, cy - 2),
              (cx - 6, cy + 13), (cx + 10, cy + 11)]
@@ -307,6 +322,7 @@ def build_categories(
     on_photo: Callable[[], None],
     on_dev: Callable[[], None],
     on_smarthome: Callable[[], None],
+    on_claude: Callable[[], None],
     on_settings: Callable[[], None],
     on_sysinfo: Callable[[], None],
     on_shutdown: Callable[[], None],
@@ -332,6 +348,7 @@ def build_categories(
             HubItem("JOGOS", _icon_games, on_games),
             HubItem("FOTO", _icon_photo, on_photo),
             HubItem("DEV", _icon_devhub, on_dev),
+            HubItem("CLAUDE", _icon_claude, on_claude),
         ]),
         HubCategory("CASA", _icon_cat_home, [
             HubItem("TOMADAS", _icon_smarthome, on_smarthome),
