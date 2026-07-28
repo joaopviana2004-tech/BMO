@@ -26,6 +26,7 @@ from ..core.widgets import (
     LOGICAL_SIZE,
 )
 from ..services import audio
+from ..services.pairing import local_ip
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SHUTDOWN_CONFIRM_S = 3.0
@@ -59,6 +60,15 @@ def _fmt_warn(v) -> str:
 
 def _fmt_provider(v) -> str:
     return config.LLM_PROVIDER_LABELS.get(v, str(v).upper())
+
+
+def _fmt_local_url(v) -> str:
+    """Rótulo curto do endpoint do LLM local pro display CRT (preset ou host)."""
+    v = (v or "").strip()
+    if v in config.LOCAL_LLM_URL_LABELS:
+        return config.LOCAL_LLM_URL_LABELS[v]
+    short = v.split("://")[-1].split("/")[0]   # tira esquema e caminho
+    return (short if len(short) <= 14 else short[:13] + ".").upper()
 
 
 def _short_model(m: str) -> str:
@@ -103,7 +113,7 @@ def _sistema_items():
 
 
 def _ia_items():
-    return [
+    items = [
         {"type": "cycle", "key": "llm_provider", "label": "IA provedor",
          "options": config.LLM_PROVIDERS, "format": _fmt_provider},
         {"type": "llm_model", "key": "llm_model", "label": "IA modelo",
@@ -112,6 +122,14 @@ def _ia_items():
          "options": config.LLM_PROVIDERS, "format": _fmt_provider},
         {"type": "llm_model", "key": "vision_model", "label": "Visao modelo",
          "provider_key": "vision_provider", "models": "vision"},
+    ]
+    # Só aparece quando o LLM local está em uso (chat ou visão), pra não lotar a
+    # lista. AUTO = llama.cpp no mesmo PC (8080); host livre fica no painel web.
+    if config.get("llm_provider") == "local" or config.get("vision_provider") == "local":
+        items.append(
+            {"type": "cycle", "key": "local_llm_url", "label": "IA local",
+             "options": config.LOCAL_LLM_URL_OPTIONS, "format": _fmt_local_url})
+    items += [
         {"type": "cycle", "key": "voice_enabled", "label": "BMO me ouve",
          "options": [False, True], "format": _fmt_onoff},
         {"type": "cycle", "key": "mic_button_enabled", "label": "Botao de fala",
@@ -122,7 +140,10 @@ def _ia_items():
         {"type": "cycle", "key": "camera_face_tracking", "label": "BMO te ve",
          "options": [False, True], "format": _fmt_onoff},
         {"type": "action", "key": "gen_voice_cache", "label": "Gerar vozes"},
+        # somente-leitura: endereço do painel web (abra do PC/celular na rede)
+        {"type": "info", "key": "webui", "label": "Painel"},
     ]
+    return items
 
 
 def _conta_items():
@@ -134,6 +155,15 @@ def _conta_items():
         {"type": "action", "key": "connect", "label": "Conectar conta"},
         {"type": "action", "key": "logout", "label": "Trocar usuario"},
     ]
+
+
+def _webui_display() -> str:
+    """Endereço do painel web pro display CRT (sem 'http://' pra caber). 'OFF'
+    se desligado na config; cai em 'localhost' se a LAN não resolver o IP."""
+    if not config.get("webui_enabled"):
+        return "OFF"
+    port = os.environ.get("BMO_WEB_PORT", "8000") or "8000"
+    return f"{local_ip() or 'localhost'}:{port}"
 
 
 def _account_display() -> str:
@@ -149,6 +179,9 @@ CATEGORIES = [
     ("SOM", _som_items),
     ("TELA", _tela_items),
     ("SISTEMA", _sistema_items),
+    # items_fn=None -> categoria com TELA PROPRIA (não é lista de cyclers):
+    # ativa o callback on_open_wifi (abre a WifiScreen).
+    ("INTERNET", None),
     ("IA", _ia_items),
     ("CONTA", _conta_items),
 ]
@@ -163,7 +196,7 @@ class SettingsScreen:
 
     def __init__(self, *, on_back, on_open, on_change=None, mic_options=None,
                  on_cleanup=None, tts=None, on_logout=None,
-                 on_connect=None) -> None:
+                 on_connect=None, on_open_wifi=None) -> None:
         self.on_back = on_back
         self.on_open = on_open          # push de uma sub-tela
         self.on_change = on_change
@@ -172,6 +205,7 @@ class SettingsScreen:
         self.tts = tts                  # serviço de voz (pra ação "Gerar vozes")
         self.on_logout = on_logout      # Wipe & Load (main.do_logout)
         self.on_connect = on_connect    # abre o LOGIN QR por cima (main.do_connect)
+        self.on_open_wifi = on_open_wifi  # abre a WifiScreen (categoria INTERNET)
         self._index = 0
         self._rows = [label for label, _ in CATEGORIES] + ["Voltar"]
 
@@ -204,6 +238,10 @@ class SettingsScreen:
             audio.play("back"); self.on_back(); return
         audio.play("select")
         label, items_fn = CATEGORIES[self._index]
+        if items_fn is None:   # categoria com tela própria (INTERNET -> WifiScreen)
+            if self.on_open_wifi is not None:
+                self.on_open_wifi()
+            return
         # on_back da sub = mesmo pop do menu: com a sub no topo, pop volta
         # pro menu; com o menu no topo, pop sai das configs.
         self.on_open(SettingsListScreen(
@@ -329,7 +367,9 @@ class SettingsListScreen:
         if item["type"] == "mic":
             return ["(padrao)"] + list(self.mic_options())
         if item["type"] == "llm_model":
-            return list(self._llm_table(item).get(self._llm_provider(item), []))
+            # personalizado (digitado no painel web) + presets do provedor
+            kind = "vision" if item.get("models") == "vision" else "chat"
+            return config.model_options(self._llm_provider(item), kind)
         return item["options"]
 
     def _mic_current_display(self):
@@ -440,7 +480,9 @@ class SettingsListScreen:
     def _row_rects(self):
         # passo/altura menores quando a categoria tem muitos itens (IA), pra caber tudo
         n = len(self._rows)
-        if n > 10:
+        if n > 11:
+            step, top, hgt = 16, 28, 14
+        elif n > 10:
             step, top, hgt = 17, 30, 15
         elif n > 9:
             step, top, hgt = 19, 32, 17
@@ -485,7 +527,12 @@ class SettingsListScreen:
             surface.blit(label, label.get_rect(midleft=(label_x, rect.centery)))
 
             if item["type"] == "info":
-                val = _account_display() if item["key"] == "account" else ""
+                if item["key"] == "account":
+                    val = _account_display()
+                elif item["key"] == "webui":
+                    val = _webui_display()
+                else:
+                    val = ""
                 val_img = render_text(val, 9, fg, pixel=False)
                 surface.blit(val_img, val_img.get_rect(midright=(rect.right - 8, rect.centery)))
             elif item["type"] in ("cycle", "mic", "llm_model"):

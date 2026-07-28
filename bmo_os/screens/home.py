@@ -156,6 +156,21 @@ def _icon_devhub(surf: pygame.Surface, cx: int, cy: int) -> None:
                      (body.right - 10, body.top + 20), 1)
 
 
+def _icon_claude(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # três linhas (as sessões) + a faísca do Claude na primeira
+    for i, w in enumerate((26, 20, 23)):
+        y = cy - 10 + i * 9
+        color = CRT_WHITE if i == 0 else CRT_DIM
+        pygame.draw.rect(surf, color, (cx - 17, y, 3, 3))
+        pygame.draw.line(surf, color, (cx - 11, y + 1), (cx - 17 + w, y + 1), 2)
+    sx, sy = cx + 12, cy - 9
+    for i in range(4):
+        ang = i * math.pi / 2 + math.pi / 4
+        pygame.draw.line(surf, CRT_WHITE,
+                         (sx + int(math.cos(ang) * 2), sy + int(math.sin(ang) * 2)),
+                         (sx + int(math.cos(ang) * 6), sy + int(math.sin(ang) * 6)), 2)
+
+
 def _icon_brain(surf: pygame.Surface, cx: int, cy: int) -> None:
     nodes = [(cx, cy - 12), (cx - 14, cy + 2), (cx + 13, cy - 2),
              (cx - 6, cy + 13), (cx + 10, cy + 11)]
@@ -178,6 +193,17 @@ def _icon_sysinfo(surf: pygame.Surface, cx: int, cy: int) -> None:
         pygame.draw.line(surf, CRT_WHITE, (body.right, body.top + 13 + off), (body.right + 4, body.top + 13 + off), 2)
 
 
+def _icon_smarthome(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # tomada na parede: placa + 2 furos + terra, com um "led" de ligado
+    body = pygame.Rect(0, 0, 28, 32)
+    body.center = (cx, cy + 1)
+    pygame.draw.rect(surf, CRT_WHITE, body, 2, border_radius=7)
+    pygame.draw.circle(surf, CRT_WHITE, (cx - 6, cy - 3), 2)
+    pygame.draw.circle(surf, CRT_WHITE, (cx + 6, cy - 3), 2)
+    pygame.draw.line(surf, CRT_DIM, (cx, cy + 4), (cx, cy + 9), 2)
+    pygame.draw.circle(surf, CRT_DIM, (cx, body.top - 3), 2)   # led
+
+
 def _icon_aitest(surf: pygame.Surface, cx: int, cy: int) -> None:
     cap = pygame.Rect(0, 0, 14, 22)
     cap.center = (cx, cy - 4)
@@ -186,6 +212,50 @@ def _icon_aitest(surf: pygame.Surface, cx: int, cy: int) -> None:
     pygame.draw.line(surf, CRT_WHITE, (cx, cy + 12), (cx, cy + 18), 2)
     pygame.draw.line(surf, CRT_WHITE, (cx - 7, cy + 18), (cx + 7, cy + 18), 2)
     pygame.draw.arc(surf, CRT_DIM, pygame.Rect(cx + 10, cy - 12, 10, 18), -1.0, 1.0, 2)
+
+
+def _icon_flappy_ai(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # pássaro + nós de rede neural (treino por neuroevolução)
+    nodes = [(cx - 15, cy - 8), (cx - 15, cy + 8), (cx - 2, cy)]
+    for a in (0, 1):
+        pygame.draw.line(surf, CRT_DIM, nodes[a], nodes[2], 1)
+    for x, y in nodes:
+        pygame.draw.circle(surf, CRT_WHITE, (x, y), 2)
+    # passarinho à direita
+    bx, by = cx + 10, cy
+    pygame.draw.rect(surf, CRT_WHITE, (bx - 5, by - 5, 10, 10))
+    pygame.draw.rect(surf, CRT_BLACK, (bx + 1, by - 2, 2, 2))      # olho
+    pygame.draw.rect(surf, CRT_DIM, (bx + 5, by, 3, 2))           # bico
+    pygame.draw.line(surf, CRT_DIM, nodes[2], (bx - 5, by), 1)
+
+
+def _icon_haxball_ai(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # mini campo + nós de rede (treino de IA do haxball)
+    pygame.draw.rect(surf, CRT_WHITE, (cx - 16, cy - 11, 32, 22), 1)
+    pygame.draw.line(surf, CRT_DIM, (cx, cy - 11), (cx, cy + 11), 1)
+    pygame.draw.circle(surf, (232, 84, 72), (cx - 9, cy), 2)   # disco esq
+    pygame.draw.circle(surf, (92, 152, 240), (cx + 9, cy), 2)  # disco dir
+    pygame.draw.circle(surf, CRT_WHITE, (cx, cy), 2)           # bola
+    for dy in (-6, 0, 6):                                       # nós (rede)
+        pygame.draw.circle(surf, CRT_DIM, (cx + 13, cy + dy), 1)
+
+
+def _icon_power(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # símbolo de power: anel com abertura no topo + traço vertical
+    pygame.draw.circle(surf, CRT_WHITE, (cx, cy + 1), 14, 2)
+    pygame.draw.rect(surf, CRT_BLACK, (cx - 4, cy - 16, 8, 9))   # abre o anel no topo
+    pygame.draw.line(surf, CRT_WHITE, (cx, cy - 13), (cx, cy + 1), 2)
+
+
+def _icon_update(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # setas circulares (refresh): anel com dois cortes + pontas de seta
+    pygame.draw.circle(surf, CRT_WHITE, (cx, cy), 13, 2)
+    pygame.draw.rect(surf, CRT_BLACK, (cx + 8, cy - 4, 10, 8))   # corte direito
+    pygame.draw.rect(surf, CRT_BLACK, (cx - 18, cy - 4, 10, 8))  # corte esquerdo
+    pygame.draw.polygon(surf, CRT_WHITE, [
+        (cx + 8, cy - 8), (cx + 8, cy + 2), (cx + 15, cy - 3)])
+    pygame.draw.polygon(surf, CRT_WHITE, [
+        (cx - 8, cy + 8), (cx - 8, cy - 2), (cx - 15, cy + 3)])
 
 
 # ── ícones das categorias (hub) ───────────────────────────────────
@@ -227,10 +297,21 @@ def _icon_cat_settings(surf: pygame.Surface, cx: int, cy: int) -> None:
     _icon_settings(surf, cx, cy)
 
 
+def _icon_cat_home(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # casinha: telhado + corpo + porta
+    pygame.draw.polygon(surf, CRT_WHITE, [
+        (cx, cy - 16), (cx - 19, cy - 1), (cx + 19, cy - 1)], 2)
+    body = pygame.Rect(cx - 13, cy - 1, 26, 17)
+    pygame.draw.rect(surf, CRT_WHITE, body, 2)
+    pygame.draw.rect(surf, CRT_DIM, (cx - 4, cy + 5, 8, 11))
+
+
 def build_categories(
     *,
     on_brain: Callable[[], None],
     on_aitest: Callable[[], None],
+    on_flappy_ai: Callable[[], None],
+    on_haxball_ai: Callable[[], None],
     on_sleep: Callable[[], None],
     on_suspend: Callable[[], None],
     on_tasks: Callable[[], None],
@@ -240,14 +321,20 @@ def build_categories(
     on_games: Callable[[], None],
     on_photo: Callable[[], None],
     on_dev: Callable[[], None],
+    on_smarthome: Callable[[], None],
+    on_claude: Callable[[], None],
     on_settings: Callable[[], None],
     on_sysinfo: Callable[[], None],
+    on_shutdown: Callable[[], None],
+    on_update: Callable[[], None],
 ) -> list[HubCategory]:
     """Monta as 4 categorias do hub a partir dos callbacks do main."""
     return [
         HubCategory("IA", _icon_cat_ia, [
             HubItem("CEREBRO", _icon_brain, on_brain),
             HubItem("TESTE IA", _icon_aitest, on_aitest),
+            HubItem("FLAPPY IA", _icon_flappy_ai, on_flappy_ai),
+            HubItem("HAXBALL IA", _icon_haxball_ai, on_haxball_ai),
         ]),
         HubCategory("REPOUSO", _icon_cat_rest, [
             HubItem("SLEEP", _icon_sleep, on_sleep),
@@ -261,10 +348,16 @@ def build_categories(
             HubItem("JOGOS", _icon_games, on_games),
             HubItem("FOTO", _icon_photo, on_photo),
             HubItem("DEV", _icon_devhub, on_dev),
+            HubItem("CLAUDE", _icon_claude, on_claude),
+        ]),
+        HubCategory("CASA", _icon_cat_home, [
+            HubItem("TOMADAS", _icon_smarthome, on_smarthome),
         ]),
         HubCategory("AJUSTES", _icon_cat_settings, [
             HubItem("SETTINGS", _icon_settings, on_settings),
             HubItem("SISTEMA", _icon_sysinfo, on_sysinfo),
+            HubItem("DESLIGAR", _icon_power, on_shutdown),
+            HubItem("ATUALIZAR", _icon_update, on_update),
         ]),
     ]
 

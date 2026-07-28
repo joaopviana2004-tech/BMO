@@ -7,6 +7,8 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import json
 import os
 import subprocess
 import sys
@@ -20,7 +22,7 @@ import pygame
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from bmo_os.core import config, session
+from bmo_os.core import config, session, theme_state
 from bmo_os.core.app import App
 from bmo_os.core.theme import Colors, LOGICAL_SIZE, render_text
 from bmo_os.screens.agenda import AgendaScreen
@@ -28,13 +30,18 @@ from bmo_os.screens.aitest import AITestScreen
 from bmo_os.screens.alert import AlertScreen
 from bmo_os.screens.bmo_face import BMOFaceScreen
 from bmo_os.screens.brain import BrainScreen
+from bmo_os.screens.confirm import ConfirmScreen
+from bmo_os.screens.claude_sessions import ClaudeSessionsScreen
 from bmo_os.screens.devhub import DevHubScreen
 from bmo_os.screens.clock import ClockScreen
 from bmo_os.screens.flappy import FlappyScreen
+from bmo_os.screens.flappy_train import FlappyTrainScreen
 from bmo_os.screens.games import (
-    GamesScreen, draw_flappy_icon, draw_pong_icon, draw_snake_icon,
-    draw_space_invaders_icon,
+    GamesScreen, draw_flappy_icon, draw_haxball_icon, draw_pong_icon,
+    draw_snake_icon, draw_space_invaders_icon,
 )
+from bmo_os.screens.haxball import HaxballScreen
+from bmo_os.screens.haxball_train import HaxballTrainScreen
 from bmo_os.screens.snake import SnakeScreen
 from bmo_os.screens.home import HomeScreen, build_categories
 from bmo_os.screens.gallery import GalleryScreen
@@ -45,6 +52,8 @@ from bmo_os.screens.pomodoro import PomodoroScreen
 from bmo_os.screens.pong import PongAmbientScreen, PongScreen
 from bmo_os.screens.recorder import RecorderScreen
 from bmo_os.screens.settings import SettingsScreen
+from bmo_os.screens.smarthome import SmartHomeScreen
+from bmo_os.screens.wifi import WifiScreen
 from bmo_os.screens.sysinfo import SysInfoScreen
 from bmo_os.screens.shuffler import ShufflingAmbientScreen
 from bmo_os.screens.sleep import SleepScreen
@@ -54,7 +63,9 @@ from bmo_os.screens.tasks import TasksScreen
 from bmo_os.services import audio
 from bmo_os.services import google_auth
 from bmo_os.services.camera import CameraService
+from bmo_os.services.chat import ChatService, probe_endpoint
 from bmo_os.services.chat import ChatService
+from bmo_os.services.claude_sessions import ClaudeSessionsService
 from bmo_os.services.cooler import CoolerService
 from bmo_os.services.dev_hub import DevHubService
 from bmo_os.services.github_dev import GitHubPoller
@@ -63,16 +74,24 @@ from bmo_os.services.gcalendar import CalendarService
 from bmo_os.services.gpio_button import GPIOButton
 from bmo_os.services.git_updates import GitUpdatesService
 from bmo_os.services.knowledge import KnowledgeService
+from bmo_os.services.network import NetworkService
 from bmo_os.services.notifications import EventAlerter
 from bmo_os.services.pairing import PairingServer, local_ip
 from bmo_os.services.pet_brain import PetBrain
 from bmo_os.services.recorder import RecorderService
+from bmo_os.services.smarthome import SmartHomeService
 from bmo_os.services.pet_memory import PetMemory
 from bmo_os.services.pet_state import PetState
 from bmo_os.services.sysinfo import SysInfoService
-from bmo_os.services.todoist import TodoistService
+from bmo_os.services.reminders import ReminderService
+from bmo_os.services.routines import due_today as routines_due_today, load_routines
+from bmo_os.services.todoist import SECTION_LABELS, SECTION_NAMES
+from bmo_os.services.plataforma import (
+    MergedCalendar, PlataformaBoard, PlataformaCalendar, PlataformaNotify, PlataformaService,
+)
 from bmo_os.services.tts import SCREEN_PHRASES, TTSService
 from bmo_os.services.voice import VoiceService
+from bmo_os.services.webui import WebUIServer
 
 # Sync das preferências do perfil com o Drive (None = guest/sem credencial).
 # Vive aqui pra o logout do SETTINGS conseguir dar o flush final.
@@ -163,17 +182,38 @@ def build_initial(app: App):
     # uma WeatherService nova (e portanto uma thread) toda vez que a home volta.
     ambient_cache: dict = {}
 
-    # Singleton de Todoist (thread + cache vivem aqui)
-    todoist = TodoistService()
+    # --- Plataforma Central (a "Secretaria Pessoal" no PC) ---------------------
+    # Fonte única de tarefas E compromissos do BMO. O board de tarefas e a agenda
+    # passam a espelhar a Plataforma (substituindo o Todoist); ela roda no PC e
+    # tudo degrada sozinho quando o PC está desligado. Ver services/plataforma.py.
+    plataforma = PlataformaService()
+    # `todoist` = board GLOBAL da Plataforma (3 colunas, REVISÃO dobra em CONCLUÍDO).
+    # Mantém o nome pra não tocar nos ~10 consumidores (telas/pomodoro/brain/painel/IA);
+    # é um drop-in com a MESMA interface do antigo TodoistService.
+    todoist = PlataformaBoard(plataforma)
+    # Avisos da Plataforma em tempo real (ntfy) — os mesmos pushes do celular.
+    plataforma_notify = PlataformaNotify()
     # Detector de git updates (só usado pelo clock pra mostrar alerta)
     git_updates = GitUpdatesService()
     # Câmera (AI Camera no Pi). is_available=False quando offline (dev no PC)
     camera = CameraService()
-    # Google Calendar (URLs secretas iCal) + disparador de avisos de evento
-    calendar = CalendarService()
+    # Agenda = compromissos da Plataforma + Google (se configurado), sem duplicar
+    # os eventos que a Plataforma já espelha no Google. `calendar` continua sendo
+    # a interface CalendarService que todo o resto consome.
+    calendar = MergedCalendar(PlataformaCalendar(plataforma), [CalendarService()])
     alerter = EventAlerter()
+    # Sessões do Claude Code rodando no PC (tela CLAUDE). Lê o painel pela
+    # rede local; sem contato a tela mostra "Painel offline" e não quebra.
+    claude_sessions = ClaudeSessionsService()
     # Telemetria de hardware (tela SISTEMA). No PC mostra "--".
     sysinfo = SysInfoService()
+    # Rede: detecção de internet (qualquer SO) + WiFi via nmcli (só no Pi).
+    # A status bar passa a mostrar "sem internet" quando offline.
+    network = NetworkService()
+    theme_state.set_online_getter(lambda: network.online)
+    # Casa inteligente (tela CASA): tomadas Tuya/JWcom controladas na LAN.
+    # Sem tinytuya (PC) ou sem tomadas no .env -> available=False (tela offline).
+    smarthome = SmartHomeService()
     # Coolers (2x) — refrigeração ativa via GPIO 17 (pino 11) e GPIO 23 (pino 16).
     # Liga no atalho da tela SISTEMA e sozinho acima de 60°C (lê a temp do sysinfo).
     cooler = CoolerService(get_temp=lambda: sysinfo.get().temp_c)
@@ -193,6 +233,10 @@ def build_initial(app: App):
     pet = PetState()
     memory = PetMemory()
     brain = PetBrain(pet, sysinfo=sysinfo, calendar=calendar, todoist=todoist)
+    # Secretária: central de lembretes proativos (briefing matinal + prazos +
+    # rotinas do Obsidian). Alimentada pelo secretary_tick (frame_hook); a aba
+    # HOJE do painel e a voz na telinha consomem daqui.
+    reminders = ReminderService()
     # BMO responde via LLM (OpenRouter ou NVIDIA NIM — escolhível em SETTINGS->IA).
     # Degrada sem a chave do provedor ativo (OPENROUTER_API_KEY / NVIDIA_API_KEY).
     # memory dá contexto (nome/fatos) e histórico entre conversas.
@@ -201,7 +245,7 @@ def build_initial(app: App):
         return bool(svc and svc.push_note(path))
 
     chat = ChatService(memory=memory, knowledge=knowledge,
-                       on_note_saved=_push_note_to_drive)
+                       on_note_saved=_push_note_to_drive, smarthome=smarthome)
     # Voz do BMO (TTS): Edge TTS (Francisca pt-BR) por padrão — incorporado do
     # módulo de laboratório bmo_voz.py. Degrada sem edge-tts/internet.
     # Volume separado em SETTINGS->IA ("Voz BMO" = tts_volume); 0 = mudo.
@@ -226,6 +270,11 @@ def build_initial(app: App):
         Sem isso, libs em C (libcamera, lgpio) deixam fds abertos que
         sobrevivem ao execv e o processo novo não reivindica câmera/botão."""
         try:
+            if webui is not None:   # fecha a porta do painel antes do novo bind
+                webui.stop()
+        except Exception:
+            pass
+        try:
             voice.set_enabled(False)
         except Exception:
             pass
@@ -239,6 +288,10 @@ def build_initial(app: App):
             pass
         try:
             camera.stop()
+        except Exception:
+            pass
+        try:
+            network.stop()   # encerra a thread de checagem de internet
         except Exception:
             pass
         try:
@@ -280,6 +333,9 @@ def build_initial(app: App):
         if mode == "devhub":
             return DevHubScreen(on_open_home=open_home, dev_hub=_dev_hub,
                                 github=_github, ambient=True)
+        if mode == "claude":
+            return ClaudeSessionsScreen(on_open_home=open_home,
+                                        claude=claude_sessions, ambient=True)
         if mode == "brain":
             return BrainScreen(on_open_home=open_home, knowledge=knowledge,
                                get_sync=lambda: _drive_sync.get("svc"),
@@ -346,6 +402,13 @@ def build_initial(app: App):
                         SnakeScreen(on_back=app.manager.pop)
                     ),
                 },
+                {
+                    "label": "Haxball",
+                    "draw_icon": draw_haxball_icon,
+                    "launch": lambda: app.manager.push(
+                        HaxballScreen(on_back=app.manager.pop)
+                    ),
+                },
             ],
         )
 
@@ -364,10 +427,29 @@ def build_initial(app: App):
     def make_devhub_screen() -> DevHubScreen:
         return DevHubScreen(on_back=app.manager.pop, dev_hub=_dev_hub, github=_github)
 
+    def make_claude_screen() -> ClaudeSessionsScreen:
+        return ClaudeSessionsScreen(on_back=app.manager.pop, claude=claude_sessions)
+
     def make_sysinfo_screen() -> SysInfoScreen:
-        # tela SISTEMA com controle dos coolers + atalhos de atualizar/desligar
-        return SysInfoScreen(on_back=app.manager.pop, sysinfo=sysinfo, cooler=cooler,
-                             on_update=do_update, on_shutdown=do_shutdown)
+        # tela SISTEMA: telemetria + controle dos coolers (atalhos de atualizar/
+        # desligar ficam no grid de AJUSTES, não aqui)
+        return SysInfoScreen(on_back=app.manager.pop, sysinfo=sysinfo, cooler=cooler)
+
+    def make_smarthome_screen() -> SmartHomeScreen:
+        # tela CASA: liga/desliga as tomadas Tuya/JWcom (controle local)
+        return SmartHomeScreen(on_back=app.manager.pop, smarthome=smarthome)
+
+    def confirm_shutdown() -> None:
+        # tile DESLIGAR do grid: um toque é destrutivo, então confirma antes
+        app.manager.push(ConfirmScreen(
+            title="DESLIGAR", message="Desligar o BMO agora?",
+            on_confirm=do_shutdown, on_cancel=app.manager.pop))
+
+    def confirm_update() -> None:
+        # tile ATUALIZAR do grid: baixa o origin/main e reinicia — confirma antes
+        app.manager.push(ConfirmScreen(
+            title="ATUALIZAR", message="Baixar a ultima versao e reiniciar?",
+            on_confirm=do_update, on_cancel=app.manager.pop))
 
     def make_home() -> HomeScreen:
         push = app.manager.push
@@ -380,6 +462,9 @@ def build_initial(app: App):
                     AITestScreen(on_back=pop, voice=voice, camera=camera,
                                  sysinfo=sysinfo, chat=chat, button=ptt_button,
                                  on_respond=handle_ai_response)),
+                on_flappy_ai=lambda: push(FlappyTrainScreen(on_back=pop)),
+                on_haxball_ai=lambda: push(HaxballTrainScreen(
+                    on_back=pop, get_sync=lambda: _drive_sync.get("svc"))),
                 on_sleep=lambda: push(
                     SleepScreen(on_back=pop, on_select_mode=select_ambient)),
                 on_suspend=open_suspend,
@@ -394,8 +479,12 @@ def build_initial(app: App):
                         GalleryScreen(on_back=pop, photos_dir=PHOTOS_DIR)),
                 )),
                 on_dev=lambda: push(make_devhub_screen()),
+                on_smarthome=lambda: push(make_smarthome_screen()),
+                on_claude=lambda: push(make_claude_screen()),
                 on_settings=lambda: push(make_settings()),
                 on_sysinfo=lambda: push(make_sysinfo_screen()),
+                on_shutdown=confirm_shutdown,
+                on_update=confirm_update,
             ),
         )
 
@@ -454,6 +543,11 @@ def build_initial(app: App):
         app.manager.push(LoginScreen(on_success=_ok, on_guest=app.manager.pop,
                                      pair_ip=local_ip(), guest_label="VOLTAR"))
 
+    def open_wifi() -> None:
+        app.manager.push(WifiScreen(
+            net=network, camera=camera,
+            on_back=app.manager.pop, push=app.manager.push, pop=app.manager.pop))
+
     def make_settings() -> SettingsScreen:
         return SettingsScreen(
             on_back=app.manager.pop,
@@ -464,6 +558,7 @@ def build_initial(app: App):
             tts=tts,
             on_logout=do_logout,
             on_connect=do_connect,
+            on_open_wifi=open_wifi,
         )
 
     # ---- comandos de voz -> navegação (executados no main thread) ----
@@ -478,6 +573,8 @@ def build_initial(app: App):
                            _cmd(lambda: app.manager.push(TasksScreen(on_back=app.manager.pop, todoist=todoist))))
     voice.register_command(["sistema", "hardware", "temperatura", "cpu"],
                            _cmd(lambda: app.manager.push(make_sysinfo_screen())))
+    voice.register_command(["casa", "tomada", "tomadas", "luz", "smart house"],
+                           _cmd(lambda: app.manager.push(make_smarthome_screen())))
     voice.register_command(["foto", "fotos", "camera"],
                            _cmd(lambda: app.manager.push(
                                PhotoScreen(on_back=app.manager.pop, camera=camera,
@@ -485,14 +582,24 @@ def build_initial(app: App):
                                                GalleryScreen(on_back=app.manager.pop, photos_dir=PHOTOS_DIR))))))
     voice.register_command(["flappy", "passarinho", "voar"],
                            _cmd(lambda: app.manager.push(FlappyScreen(on_back=app.manager.pop))))
+    voice.register_command(["treino", "treinar", "neuroevolucao", "flappy ia"],
+                           _cmd(lambda: app.manager.push(FlappyTrainScreen(on_back=app.manager.pop))))
     voice.register_command(["snake", "cobra", "cobrinha"],
                            _cmd(lambda: app.manager.push(SnakeScreen(on_back=app.manager.pop))))
+    voice.register_command(["haxball", "futebol", "bola", "gol"],
+                           _cmd(lambda: app.manager.push(HaxballScreen(on_back=app.manager.pop))))
+    voice.register_command(["treina time", "treino haxball", "treina futebol"],
+                           _cmd(lambda: app.manager.push(HaxballTrainScreen(
+                               on_back=app.manager.pop,
+                               get_sync=lambda: _drive_sync.get("svc")))))
     voice.register_command(["gravador", "gravar", "gravacao"],
                            _cmd(lambda: app.manager.push(make_recorder_screen())))
     voice.register_command(["cerebro", "conhecimento", "notas", "obsidian"],
                            _cmd(lambda: app.manager.push(make_brain_screen())))
     voice.register_command(["dev", "dev hub", "programacao", "codigo", "git"],
                            _cmd(lambda: app.manager.push(make_devhub_screen())))
+    voice.register_command(["claude", "claudes", "sessao", "sessoes"],
+                           _cmd(lambda: app.manager.push(make_claude_screen())))
     voice.register_command(["configura", "ajuste", "settings"], _cmd(lambda: app.manager.push(make_settings())))
     voice.register_command(["menu", "inicio", "casa", "home"], _cmd(open_home))
     voice.register_command(["relogio", "horas", "tela inicial", "descanso"], _cmd(go_ambient))
@@ -549,12 +656,32 @@ def build_initial(app: App):
         "gravador": lambda: app.manager.push(make_recorder_screen()),
         "cerebro": lambda: app.manager.push(make_brain_screen()),
         "devhub": lambda: app.manager.push(make_devhub_screen()),
+        "casa": lambda: app.manager.push(make_smarthome_screen()),
+        "claude": lambda: app.manager.push(make_claude_screen()),
         "configuracoes": lambda: app.manager.push(make_settings()),
         # relógio explícito (NÃO o ambient configurado, que pode ser face/pong)
         "relogio": lambda: app.manager.replace(_instantiate_ambient("clock")),
         "home": open_home,
         "atualizar": do_update,
     }
+
+    def _apply_power(power: dict) -> None:
+        """Executa a ação de tomada pedida pela IA (campo "power" do chat).
+        device: "tomadaN" ou "todas" (tolerante a variações); on liga/desliga.
+        smarthome.set/set_all são thread-safe (fila), então roda direto aqui."""
+        dev = (power.get("device") or "").strip().lower()
+        on = bool(power.get("on"))
+        if any(w in dev for w in ("tod", "all", "tudo", "amba")):
+            smarthome.set_all(on)
+        else:
+            digits = "".join(c for c in dev if c.isdigit())
+            if not digits:
+                return
+            smarthome.set(f"t{digits}", on)
+        # sem frase própria da IA? fala uma confirmação curta.
+        msg = (getattr(chat, "last_msg", "") or "").strip()
+        if not msg or msg == "...":
+            chat.last_msg = ("Ligando" if on else "Desligando") + " a tomada."
 
     def handle_ai_response(text: str) -> None:
         """Roda na thread de voz: manda o texto pro LLM e, conforme a resposta,
@@ -586,6 +713,27 @@ def build_initial(app: App):
                     tts.speak("Tarefa criada.")   # cacheado = instantâneo
             except Exception:
                 pass
+        # IA mandou ligar/desligar uma tomada? (campo "power" do JSON do chat)
+        power = getattr(chat, "last_power", None)
+        if power and getattr(smarthome, "available", False):
+            try:
+                _apply_power(power)
+            except Exception:
+                pass
+        # IA mandou criar um evento na agenda? (campo "event" do JSON do chat)
+        event = getattr(chat, "last_event", None)
+        if event:
+            try:
+                res = calendar.create_event(
+                    event.get("title", ""), event.get("date", ""),
+                    event.get("time", ""), event.get("duration_min", 60))
+                cur = (getattr(chat, "last_msg", "") or "").strip()
+                if not res.get("ok"):
+                    chat.last_msg = "Nao consegui criar o evento: " + (res.get("error") or "?")
+                elif not cur or cur == "...":
+                    chat.last_msg = "Evento criado na agenda."
+            except Exception:
+                pass
         action = screen_actions.get(screen_key)
         if action is not None:
             voice_enqueue(action)
@@ -605,14 +753,514 @@ def build_initial(app: App):
             "task": getattr(chat, "last_task", ""),
             "error": getattr(chat, "last_error", ""),
             "notes": getattr(chat, "last_notes", []),
+            "rag": getattr(chat, "last_rag", []),   # quais notas o LLM consultou
+            "event": getattr(chat, "last_event", None),  # evento criado na agenda
         }
 
     _remote_chat["fn"] = remote_chat
+
+    # ---- painel web (localhost temático): ajustes + espaço interno + chat ----
+    def web_state() -> dict:
+        """Snapshot do 'mundo interno' do BMO pro painel: humor/afeto/energia/
+        streak, o que ele lembra de você e a telemetria da Pi. Tudo via getters
+        thread-safe que já existem — nada bloqueia."""
+        snap = pet.get()
+        sysd = sysinfo.get()
+        try:
+            graph = knowledge.scan()
+            notes, links = len(graph.notes), len(graph.edges)
+        except Exception:
+            notes, links = 0, 0
+        last = (getattr(chat, "last_msg", "") or "").strip()
+        return {
+            "pet": {"mood": snap.mood, "energy": round(snap.energy, 3),
+                    "affection": round(snap.affection, 1), "streak": snap.streak,
+                    "idle_s": int(snap.idle_s), "present": snap.present},
+            "memory": {"name": memory.name, "facts": memory.facts()},
+            "sys": {"cpu": sysd.cpu_pct, "temp": sysd.temp_c, "ram_pct": sysd.ram_pct,
+                    "gpu": sysd.gpu_pct, "volts": sysd.volts, "ok": sysd.ok},
+            "knowledge": {"notes": notes, "links": links},
+            "bmo_says": "" if last == "..." else last,
+        }
+
+    def web_set_config(key: str, value) -> dict:
+        """Aplica uma config vinda do painel, espelhando os efeitos vivos do
+        SETTINGS (volume, voz, coolers). Só aceita chaves conhecidas e coage o
+        tipo pelo DEFAULT, então o painel não quebra a config."""
+        if key not in config.DEFAULTS:
+            return {"ok": False, "error": "config desconhecida"}
+        default = config.DEFAULTS[key]
+        try:
+            if isinstance(default, bool):
+                value = value in (True, "true", "True", 1, "1", "on")
+            elif isinstance(default, int):       # bool já tratado acima
+                value = int(value)
+            elif isinstance(default, float):
+                value = float(value)
+            else:
+                value = "" if value is None else str(value)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "valor invalido"}
+        config.set_value(key, value)
+        # Modelo de chat/visão digitado no painel: guarda como "personalizado"
+        # pra o cycler do device (SETTINGS -> IA) oferecer junto dos presets.
+        config.remember_custom_model(key, value)
+        if key == "volume":
+            audio.set_volume(value / 100)
+        elif key == "cooler_enabled":
+            try:
+                cooler.set_enabled(bool(value))
+            except Exception:
+                pass
+        try:
+            on_setting_change(key, value)   # reabre o mic em voice_enabled/mic_device
+        except Exception:
+            pass
+        return {"ok": True, "key": key, "value": config.get(key)}
+
+    def web_memory(payload: dict) -> dict:
+        """Edita a memória do BMO pelo painel (espaço interno): nome, fatos e
+        'esquecer tudo'. Usa a API thread-safe do PetMemory."""
+        action = (payload.get("action") or "").strip()
+        if action == "set_name":
+            memory.set_name(payload.get("name", ""))
+        elif action == "add_fact":
+            memory.add_facts([payload.get("fact", "")])
+        elif action == "del_fact":
+            memory.remove_fact(payload.get("fact", ""))
+        elif action == "clear":
+            memory.clear()
+        else:
+            return {"ok": False, "error": "acao invalida"}
+        return {"ok": True, "name": memory.name, "facts": memory.facts()}
+
+    def web_brain() -> dict:
+        """Snapshot do 'cérebro' (RAG do Obsidian) pro painel: resumo do grafo,
+        lista das notas (mais recentes primeiro) e o que o RAG consultou na
+        última resposta — pra o dono ver quais arquivos foram pro LLM."""
+        g = knowledge.scan()
+        notes = []
+        for n in sorted(g.notes.values(), key=lambda x: -x.mtime):
+            notes.append({
+                "id": n.id, "title": n.title,
+                "tags": list(n.tags), "links": g.degree(n.id),
+                "preview": " ".join(n.preview)[:160], "mtime": n.mtime,
+            })
+        # arestas pro grafo: TODO link (inclui alvos fantasma), id->id
+        edges = [{"source": n.id, "target": t}
+                 for n in g.notes.values() for t in n.links]
+        return {
+            "summary": {"notes": len(g.notes), "links": len(g.edges),
+                        "ghosts": len(g.ghosts)},
+            "notes": notes,
+            "edges": edges,
+            "ghosts": sorted(g.ghosts),
+            "chunk_level": config.get("rag_chunk_level"),
+            # provedor/modelo da EDIÇÃO de nota com BMO (separado do chat/visão)
+            "noteedit": {
+                "provider": config.get("noteedit_provider"),
+                "providers": config.LLM_PROVIDERS,
+                "labels": config.LLM_PROVIDER_LABELS,
+                "models": {p: config.get(f"{p}_noteedit_model")
+                           for p in config.LLM_PROVIDERS},
+                "presets": config.LLM_MODELS,
+            },
+            "rag": _rag_status(),
+            "last_rag": getattr(chat, "last_rag", []),
+        }
+
+    def _rag_status() -> dict:
+        """Estado do RAG vetorial pro painel: se o índice está carregado, qtos
+        chunks, o modelo e o endpoint de embedding (PC)."""
+        vi = None
+        try:
+            vi = knowledge._load_vindex()
+        except Exception:
+            vi = None
+        from bmo_os.services import embeddings
+        return {
+            "hybrid": bool(config.get("rag_hybrid")),
+            "indexed": (vi.count if vi else 0),
+            "model": (vi.model if (vi and vi.model) else config.get("embed_model")),
+            "embed_url": embeddings.embed_url(),
+        }
+
+    def web_brain_save(payload: dict) -> dict:
+        """Cria/edita uma nota do cérebro pelo painel. {title, body, mode}
+        (mode: create|append|replace). Grava local e sobe pro Drive (igual à
+        tool notes_write do chat). Links são [[wikilinks]] no próprio corpo."""
+        title = str(payload.get("title", "")).strip()
+        if not title:
+            return {"ok": False, "error": "titulo vazio"}
+        body = str(payload.get("body", ""))
+        mode = str(payload.get("mode", "create")).strip().lower() or "create"
+        res = knowledge.write(title, body, mode=mode)
+        if not res.get("ok"):
+            return {"ok": False, "error": res.get("error", "?")}
+        synced = False
+        try:
+            synced = _push_note_to_drive(res["path"])
+        except Exception:
+            synced = False
+        return {"ok": True, "id": res["title"].lower(), "title": res["title"],
+                "synced": synced}
+
+    def web_brain_ai_edit(payload: dict) -> dict:
+        """Edita o corpo de uma nota com o BMO ({body, instruction}) usando o
+        provedor/modelo PRÓPRIOS de edição. Só devolve o texto novo — o painel
+        mostra pro dono revisar e salvar (não grava aqui)."""
+        body = str(payload.get("body", ""))
+        instruction = str(payload.get("instruction", "")).strip()
+        if not instruction:
+            return {"ok": False, "error": "instrucao vazia"}
+        return chat.edit_note(body, instruction)
+
+    def web_brain_delete(payload: dict) -> dict:
+        """Exclui uma nota do cérebro pelo painel ({id} ou {title}). Apaga local
+        e na lixeira do Drive (senão o sync re-baixa). OPCIONAL: {relink_to} —
+        antes de apagar, reaponta os [[backlinks]] que iam pra esta nota pra
+        essa outra (ex.: renomeou joao_pessoa -> Joao Pessoa)."""
+        ident = str(payload.get("id") or payload.get("title") or "").strip()
+        if not ident:
+            return {"ok": False, "error": "sem id"}
+        relink_to = str(payload.get("relink_to") or "").strip()
+        relinked = 0
+        if relink_to:
+            rl = knowledge.relink(ident, relink_to)
+            if rl.get("ok"):
+                relinked = rl.get("count", 0)
+                for pth in rl.get("changed", []):
+                    try:
+                        _push_note_to_drive(pth)
+                    except Exception:
+                        pass
+        res = knowledge.delete(ident)
+        if not res.get("ok"):
+            return {"ok": False, "error": res.get("error", "?"), "relinked": relinked}
+        svc = _drive_sync.get("svc")
+        if svc is not None:
+            try:
+                svc.delete_note(res.get("name", ""))
+            except Exception:
+                pass
+        return {"ok": True, "title": res.get("title", ""), "relinked": relinked}
+
+    def web_brain_search(query: str) -> dict:
+        """Roda o MESMO RAG (híbrido: vetorial+léxico+grafo) pro dono testar o
+        que o BMO acharia — título, seção, score léxico, similaridade densa,
+        origem e trecho de cada acerto."""
+        q = (query or "").strip()
+        if not q:
+            return {"query": "", "hits": []}
+        try:
+            hits = knowledge.search_hybrid(q, k=6)
+        except Exception as e:
+            return {"query": q, "hits": [], "error": str(e)[:80]}
+        return {"query": q, "hits": [
+            {"title": h["title"], "section": h.get("section", ""),
+             "score": round(float(h.get("score", 0)), 1),
+             "dense": round(float(h.get("dense", 0)), 3),
+             "source": h.get("source", "lexico"),
+             "tags": h.get("tags", []), "snippet": (h.get("snippet", "") or "")[:300]}
+            for h in hits]}
+
+    def web_brain_export() -> dict:
+        """Dump das notas (id, título, conteúdo) pro builder de índice no PC
+        (scripts/build_rag_index.py) — ele chunka, embeda e devolve o índice."""
+        g = knowledge.scan()
+        notes = []
+        for n in g.notes.values():
+            try:
+                body = n.path.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                body = ""
+            notes.append({"id": n.id, "title": n.title, "body": body})
+        return {"notes": notes, "chunk_level": config.get("rag_chunk_level")}
+
+    def web_brain_index(payload: dict) -> dict:
+        """Recebe o índice vetorial PRONTO (gerado no PC) e salva no perfil
+        (.rag_index/index.json). A Rasp só faz cosseno depois."""
+        if not isinstance(payload, dict) or "vectors" not in payload:
+            return {"ok": False, "error": "indice invalido"}
+        d = knowledge.dir / ".rag_index"
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "index.json").write_text(json.dumps(payload), encoding="utf-8")
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:80]}
+        knowledge._vindex_mtime = -1.0   # força recarregar no próximo uso
+        return {"ok": True, "count": payload.get("count"),
+                "model": payload.get("model")}
+
+    def web_brain_note(note_id: str) -> dict:
+        """Conteúdo integral de UMA nota do cérebro pro painel (visualização
+        Obsidian). Aceita o id (stem minúsculo) OU o título; lê o .md direto
+        pelo path do grafo."""
+        g = knowledge.scan()
+        nid = (note_id or "").strip().lower()
+        note = g.notes.get(nid)
+        if note is None:
+            for n in g.notes.values():
+                if n.title.lower() == nid:
+                    note = n
+                    break
+        if note is None:
+            return {"error": "nota nao encontrada"}
+        try:
+            body = note.path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            body = ""
+        return {"id": note.id, "title": note.title, "tags": list(note.tags),
+                "links": g.degree(note.id), "mtime": note.mtime, "body": body}
+
+    def web_tasks() -> dict:
+        """Snapshot do Kanban (Todoist) pro painel: colunas TO-DO/DOING/DONE com
+        suas tarefas. Getter thread-safe — não bloqueia o frame."""
+        snap = todoist.get()
+        cols = todoist.by_section()
+        return {
+            "ok": bool(snap.ok), "error": snap.error,
+            "columns": [
+                {"key": k, "label": SECTION_LABELS.get(k, k.upper()),
+                 "tasks": [{"id": t.id, "content": t.content, "due": t.due}
+                           for t in cols.get(k, [])]}
+                for k in SECTION_NAMES
+            ],
+        }
+
+    def web_tasks_action(payload: dict) -> dict:
+        """Cria ou move uma tarefa do Kanban pelo painel. todoist.create/move já
+        rodam em thread própria (otimistas), então chamamos direto."""
+        action = (payload.get("action") or "").strip()
+        if action == "create":
+            ok = todoist.create(payload.get("content", ""),
+                                payload.get("section", "to-do") or "to-do")
+            return {"ok": bool(ok)}
+        if action == "move":
+            ok = todoist.move(payload.get("id", ""), payload.get("target", ""))
+            return {"ok": bool(ok)}
+        return {"ok": False, "error": "acao invalida"}
+
+    def web_agenda() -> dict:
+        """Eventos de HOJE (Calendar) pro painel. Snapshot thread-safe."""
+        snap = calendar.get()
+        events = []
+        for e in snap.events:
+            events.append({
+                "title": e.title, "all_day": bool(e.all_day),
+                "start": "" if e.all_day else e.start.strftime("%H:%M"),
+                "end": "" if e.all_day else e.end.strftime("%H:%M"),
+                "start_iso": e.start.isoformat(), "cal": e.cal_label,
+            })
+        return {"ok": bool(snap.ok), "error": snap.error, "events": events,
+                "can_write": calendar.can_write()}
+
+    def web_agenda_create(payload: dict) -> dict:
+        """Cria um evento na agenda (conta pessoal com escopo de escrita)."""
+        return calendar.create_event(
+            payload.get("title", ""), payload.get("date", ""),
+            payload.get("time", ""), payload.get("duration_min", 60))
+
+    def web_smarthome() -> dict:
+        """Estado das tomadas smart pro painel."""
+        if not getattr(smarthome, "available", False):
+            return {"ok": False, "error": getattr(smarthome, "status", "indisponivel"),
+                    "devices": []}
+        return {"ok": True, "devices": smarthome.get_devices()}
+
+    def web_smarthome_action(payload: dict) -> dict:
+        """Liga/desliga/toggle das tomadas pelo painel. Comandos thread-safe
+        (fila interna), refletem otimista na hora."""
+        if not getattr(smarthome, "available", False):
+            return {"ok": False, "error": "casa indisponivel"}
+        action = (payload.get("action") or "").strip()
+        key = (payload.get("key") or "").strip()
+        on = bool(payload.get("on"))
+        if action == "set":
+            smarthome.set(key, on)
+        elif action == "toggle":
+            smarthome.toggle(key)
+        elif action == "all":
+            smarthome.set_all(on)
+        else:
+            return {"ok": False, "error": "acao invalida"}
+        return {"ok": True, "devices": smarthome.get_devices()}
+
+    def web_mic(action: str) -> dict:
+        """Push-to-talk remoto: o painel segura o botão (start) e solta (stop);
+        o BMO ouve pelo PRÓPRIO mic e responde no aparelho (igual ao botão
+        físico). O on_done reaproveita o handler da IA."""
+        action = (action or "").strip()
+        if action == "start":
+            voice.ptt_begin(on_done=_ptt_done)
+        elif action == "stop":
+            voice.ptt_end()
+        else:
+            return {"ok": False, "error": "acao invalida"}
+        return {"ok": True}
+
+    def web_update() -> dict:
+        """Atualiza a versão (git reset --hard origin/main) e reinicia, igual ao
+        tile ATUALIZAR. Enfileira pro main thread: do_update libera o hardware e
+        chama execv — não pode rodar na thread do request."""
+        voice_enqueue(do_update)
+        return {"ok": True, "msg": "baixando a ultima versao e reiniciando..."}
+
+    def web_notifications() -> dict:
+        """Central de lembretes (aba HOJE): briefing + cutucadas de prazo/rotina."""
+        return reminders.snapshot()
+
+    def web_notification_read(payload: dict) -> dict:
+        """Marca um aviso (ou todos, {all:true}) como lido."""
+        if payload.get("all"):
+            reminders.mark_read(every=True)
+        else:
+            reminders.mark_read(str(payload.get("id", "")))
+        return reminders.snapshot()
+
+    # Sobe o painel (no-op se desligado na config ou porta ocupada). Reaproveita
+    # remote_chat: o chat web abre telas / cria tarefas / fala no aparelho, igual
+    # ao push-to-talk. Mesmo modelo de confiança da rede local (ver pairing.py).
+    webui = None
+    if config.get("webui_enabled"):
+        webui = WebUIServer(on_chat=remote_chat, get_state=web_state,
+                            list_mics=voice.list_input_devices,
+                            on_set_config=web_set_config, on_memory=web_memory,
+                            get_brain=web_brain, on_brain_search=web_brain_search,
+                            on_brain_note=web_brain_note,
+                            on_brain_save=web_brain_save, on_brain_delete=web_brain_delete,
+                            on_brain_ai_edit=web_brain_ai_edit,
+                            get_brain_export=web_brain_export, on_brain_index=web_brain_index,
+                            camera=camera, on_mic=web_mic,
+                            get_tasks=web_tasks, on_tasks=web_tasks_action,
+                            get_agenda=web_agenda, on_agenda_create=web_agenda_create,
+                            get_smarthome=web_smarthome, on_smarthome=web_smarthome_action,
+                            on_update=web_update,
+                            get_notifications=web_notifications,
+                            on_notification_read=web_notification_read,
+                            on_llm_ping=probe_endpoint)
+        if webui.start():
+            ip = local_ip()
+            extra = f"  (rede: http://{ip}:{webui.port})" if ip else ""
+            print(f"[webui] painel do BMO em {webui.url()}{extra}")
 
     # Telas onde o BMO pode falar sozinho (ambientes/descanso) — nunca durante
     # jogos ativos, menus ou suspensão (tela apagada).
     TALKATIVE_SCREENS = (BMOFaceScreen, ClockScreen, PongAmbientScreen,
                          SpaceInvadersAmbientScreen, ShufflingAmbientScreen)
+
+    # ---- secretária: briefing matinal + cutucadas de prazo/rotina ----
+    _secretary = {"last_tick": 0.0, "last_spoke": 0.0}
+    SECRETARY_TICK_S = 30.0       # recalcula os lembretes a cada 30s
+    SECRETARY_SPEAK_GAP_S = 25.0  # fala no máximo 1 lembrete a cada 25s
+
+    def _build_briefing(today: dt.date) -> str:
+        lines = [f"Resumo de hoje ({today.strftime('%d/%m')}):"]
+        try:
+            snap = calendar.get()
+            evs = list(getattr(snap, "events", []) or []) if getattr(snap, "ok", False) else []
+        except Exception:
+            evs = []
+        for e in evs[:6]:
+            when = "dia todo" if getattr(e, "all_day", False) else e.start.strftime("%H:%M")
+            lines.append(f"- {when}  {e.title}")
+        today_s = today.isoformat()
+        tom_s = (today + dt.timedelta(days=1)).isoformat()
+        try:
+            tsnap = todoist.get()
+            tasks = list(getattr(tsnap, "tasks", []) or []) if getattr(tsnap, "ok", False) else []
+        except Exception:
+            tasks = []
+        for t in tasks:
+            if getattr(t, "section_key", "") == "done":
+                continue
+            due = (getattr(t, "due", "") or "")[:10]
+            if due == today_s:
+                lines.append(f"- tarefa hoje: {t.content}")
+            elif due == tom_s:
+                lines.append(f"- tarefa amanhã: {t.content}")
+        try:
+            for it in routines_due_today(load_routines(knowledge.dir), today):
+                tag = f" #{it['area']}" if it["area"] else ""
+                if it["antec"] == 1:
+                    lines.append(f"- amanhã: {it['text']} (prepare hoje){tag}")
+                elif it["antec"] >= 2:
+                    lines.append(f"- em {it['antec']} dias: {it['text']}{tag}")
+                else:
+                    lines.append(f"- {it['text']}{tag}")
+        except Exception:
+            pass
+        if len(lines) == 1:
+            lines.append("- nada marcado. Dia livre.")
+        return "\n".join(lines)
+
+    def secretary_tick() -> None:
+        """Recalcula os lembretes proativos (rotinas + prazos + briefing) e os
+        joga na central. Roda no main thread (frame_hook), com throttle. Gated só
+        por briefing_enabled — independe do 'BMO fala sozinho' (que só controla a
+        VOZ; o painel sempre recebe)."""
+        if not config.get("briefing_enabled"):
+            return
+        today = dt.date.today()
+        # 1) rotinas que disparam hoje -> lembrete + auto-cria a task (1x/ocorrência)
+        try:
+            for it in routines_due_today(load_routines(knowledge.dir), today):
+                area = it["area"]
+                if it["antec"] == 1:
+                    txt = f"Amanhã: {it['text']} — prepare hoje"
+                elif it["antec"] >= 2:
+                    txt = f"Em {it['antec']} dias: {it['text']}"
+                else:
+                    txt = it["text"]
+                if area:
+                    txt += f"  ·  #{area}"
+                created = reminders.add(txt, area=area, kind="routine",
+                                        when=it["occur"],
+                                        key=f"rt:{it['key']}:{it['occur']}")
+                if created:
+                    try:
+                        todoist.create(it["text"])
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # 2) tarefas com prazo hoje/amanhã -> cutucada (1x/dia por task)
+        try:
+            tsnap = todoist.get()
+            if getattr(tsnap, "ok", False):
+                today_s = today.isoformat()
+                tom_s = (today + dt.timedelta(days=1)).isoformat()
+                for t in getattr(tsnap, "tasks", []) or []:
+                    if getattr(t, "section_key", "") == "done":
+                        continue
+                    due = (getattr(t, "due", "") or "")[:10]
+                    if due == today_s:
+                        reminders.add(f"Tarefa para hoje: {t.content}", kind="task",
+                                      when=due, key=f"due:{t.id}:{due}")
+                    elif due == tom_s:
+                        reminders.add(f"Tarefa para amanhã: {t.content}", kind="task",
+                                      when=due, key=f"due:{t.id}:{due}")
+        except Exception:
+            pass
+        # 3) briefing matinal — 1x/dia, a partir do horário configurado
+        bt = str(config.get("briefing_time") or "08:00")
+        try:
+            hh, mm = (int(x) for x in bt.split(":")[:2])
+        except Exception:
+            hh, mm = 8, 0
+        nowdt = dt.datetime.now()
+        bkey = f"briefing:{today.isoformat()}"
+        if (nowdt.hour, nowdt.minute) >= (hh, mm) and not reminders.fired_today(bkey):
+            reminders.add(_build_briefing(today), kind="briefing", key=bkey)
+
+    def _speak_reminder_text(item: dict) -> str:
+        """Texto pro TTS — tira bullets/símbolos (o motor de voz engasga neles)."""
+        t = (item.get("text") or "").replace("\n", ". ").replace("- ", "")
+        for ch in ("•", "#", "·"):
+            t = t.replace(ch, "")
+        if item.get("kind") == "briefing":
+            t = "Bom dia! " + t
+        return " ".join(t.split())
 
     def frame_hook(_dt: float) -> None:
         # Roda todo frame (main thread).
@@ -628,6 +1276,15 @@ def build_initial(app: App):
                 fn()
             except Exception:
                 pass
+        # 1.5) secretária: recalcula os lembretes (briefing/prazos/rotinas) com
+        # throttle. Sempre roda (independe do 'fala sozinho') pra o painel receber.
+        now_t = time.time()
+        if now_t - _secretary["last_tick"] >= SECRETARY_TICK_S:
+            _secretary["last_tick"] = now_t
+            try:
+                secretary_tick()
+            except Exception:
+                pass
         # 2) proatividade: o BMO puxa conversa sozinho (com parcimônia), só em
         # telas tagarelas e quando não está ocupado ouvindo/pensando/falando.
         if config.get("pet_proactive"):
@@ -635,12 +1292,39 @@ def build_initial(app: App):
             busy = (getattr(voice, "busy", False) or getattr(tts, "speaking", False)
                     or (getattr(chat, "last_msg", "") or "").strip() == "...")
             if isinstance(cur, TALKATIVE_SCREENS) and not busy:
-                try:
-                    phrase = brain.tick()
-                except Exception:
-                    phrase = None
-                if phrase:
-                    bmo_say(phrase)
+                said = False
+                # lembretes da secretária têm prioridade — fala 1 de cada vez
+                if now_t - _secretary["last_spoke"] >= SECRETARY_SPEAK_GAP_S:
+                    pend = reminders.unspoken()
+                    if pend:
+                        order = {"briefing": 0, "task": 1, "routine": 2}
+                        pend.sort(key=lambda r: order.get(r.get("kind"), 9))
+                        item = pend[0]
+                        bmo_say(_speak_reminder_text(item))
+                        reminders.mark_spoke(item["id"])
+                        _secretary["last_spoke"] = now_t
+                        said = True
+                if not said:
+                    try:
+                        phrase = brain.tick()
+                    except Exception:
+                        phrase = None
+                    if phrase:
+                        bmo_say(phrase)
+        # 2.7) avisos da Plataforma (ntfy) em tempo real -> AlertScreen + voz.
+        # São os MESMOS pushes que vão pro celular (lembrete de evento, prazo,
+        # resumo do dia). Não empilha sobre um alerta já aberto.
+        if plataforma_notify.enabled and not isinstance(app.manager.current, AlertScreen):
+            notice = plataforma_notify.pop()
+            if notice is not None:
+                spoken = f"{notice.get('title', '')}. {notice.get('body', '')}"
+                bmo_say(" ".join(spoken.split()))
+                app.manager.push(AlertScreen(
+                    notice={"title": notice.get("title", "Plataforma"),
+                            "body": notice.get("body", ""), "label": "PLATAFORMA"},
+                    on_dismiss=app.manager.pop))
+                return   # deixa o alerta de evento (abaixo) pro próximo frame
+
         # 3) se um evento está próximo, empilha a AlertScreen por cima de
         # qualquer tela (relógio, jogo, suspended...)
         if isinstance(app.manager.current, AlertScreen):

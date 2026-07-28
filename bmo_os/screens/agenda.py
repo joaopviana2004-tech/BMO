@@ -152,7 +152,7 @@ class AgendaScreen:
             self._draw_message(surface, snap.error)
             return
         if not snap.events:
-            self._draw_centered(surface, "SEM EVENTOS HOJE", "aproveita o dia :)")
+            self._draw_centered(surface, "SEM COMPROMISSOS", "proximos dias livres :)")
             return
         self._draw_events(surface, snap.events)
         self._draw_footer(surface)
@@ -169,6 +169,7 @@ class AgendaScreen:
 
     def _draw_events(self, surface, events) -> None:
         now = _local_now()
+        today = now.date()
         nxt = self._next_index(events)
         visible = events[self.scroll: self.scroll + MAX_VISIBLE]
         for vi, ev in enumerate(visible):
@@ -201,11 +202,15 @@ class AgendaScreen:
                 tag_w = tag.get_width() + 6
                 surface.blit(tag, tag.get_rect(midright=(rect.right - 6, rect.centery)))
 
-            # título truncado
+            # título truncado — com prefixo de data quando NÃO é hoje (a agenda
+            # mostra os próximos dias, não só hoje).
+            label = ev.title
+            if not ev.all_day and ev.start.date() != today:
+                label = f"{PT_WEEKDAYS[ev.start.weekday()]} {ev.start.day:02d} · {label}"
             title_x = rect.left + 46
             avail = rect.right - title_x - 6 - tag_w
             max_chars = max(4, avail // 6)
-            timg2 = render_text(self._fit(ev.title, max_chars), 11, fg, pixel=False)
+            timg2 = render_text(self._fit(label, max_chars), 11, fg, pixel=False)
             surface.blit(timg2, timg2.get_rect(midleft=(title_x, rect.centery)))
 
         # setas de scroll

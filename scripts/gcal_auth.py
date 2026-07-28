@@ -7,7 +7,8 @@ privada some. Você loga com a sua própria conta e o BMO lê os SEUS eventos.
 
 Rode no PC (precisa de navegador), uma vez por conta:
 
-    python scripts/gcal_auth.py
+    python scripts/gcal_auth.py            # só leitura (use na conta profissional)
+    python scripts/gcal_auth.py --write    # ler + criar eventos (use na pessoal)
 
 Pré-requisitos no .env (raiz do repo):
     GCAL_CLIENT_ID=...
@@ -29,6 +30,7 @@ em outra conta pra adicionar mais agendas (multi-conta).
 """
 from __future__ import annotations
 
+import argparse
 import http.server
 import json
 import os
@@ -45,7 +47,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from bmo_os.core import config  # noqa: E402  (importa só pra disparar o _load_dotenv)
 
-SCOPE = "https://www.googleapis.com/auth/calendar.readonly"
+SCOPE_READ = "https://www.googleapis.com/auth/calendar.readonly"
+SCOPE_WRITE = "https://www.googleapis.com/auth/calendar.events"
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 PRIMARY_URL = "https://www.googleapis.com/calendar/v3/calendars/primary"
@@ -53,12 +56,27 @@ TOKENS_PATH = ROOT / "gcal_tokens.json"
 
 
 def main() -> int:
-    cid = os.environ.get("GCAL_CLIENT_ID", "").strip()
-    csec = os.environ.get("GCAL_CLIENT_SECRET", "").strip()
+    ap = argparse.ArgumentParser(description="Autoriza uma conta Google pro BMO "
+                                 "ler (ou ler+escrever) o Calendar.")
+    ap.add_argument("--write", action="store_true",
+                    help="pede tambem permissao de ESCRITA (criar eventos). "
+                         "Use na conta pessoal; a profissional deixe sem (so leitura).")
+    ap.add_argument("--client-id", default="",
+                    help="client_id desta conta (sobrescreve GCAL_CLIENT_ID do .env). "
+                         "Use quando cada conta tem seu proprio cliente OAuth.")
+    ap.add_argument("--client-secret", default="",
+                    help="client_secret desta conta (sobrescreve o do .env).")
+    args = ap.parse_args()
+    scope = SCOPE_WRITE if args.write else SCOPE_READ
+
+    cid = (args.client_id or os.environ.get("GCAL_CLIENT_ID", "")).strip()
+    csec = (args.client_secret or os.environ.get("GCAL_CLIENT_SECRET", "")).strip()
     if not cid or not csec:
-        print("ERRO: defina GCAL_CLIENT_ID e GCAL_CLIENT_SECRET no .env primeiro.")
+        print("ERRO: passe --client-id/--client-secret ou defina GCAL_CLIENT_ID e "
+              "GCAL_CLIENT_SECRET no .env primeiro.")
         print("Veja as instruções no topo deste arquivo.")
         return 1
+    print(f"Modo: {'LER + ESCREVER (criar eventos)' if args.write else 'somente LEITURA'}")
 
     holder: dict = {}
 
@@ -88,7 +106,7 @@ def main() -> int:
         "client_id": cid,
         "redirect_uri": redirect,
         "response_type": "code",
-        "scope": SCOPE,
+        "scope": scope,
         "access_type": "offline",   # pede refresh token
         "prompt": "consent",        # garante que o refresh token venha
         "state": state,
@@ -159,7 +177,9 @@ def main() -> int:
         except Exception:
             data = {"accounts": []}
     accounts = [a for a in data.get("accounts", []) if a.get("label") != label]
-    accounts.append({"label": label, "refresh_token": refresh, "calendar_id": "primary"})
+    accounts.append({"label": label, "refresh_token": refresh,
+                     "calendar_id": "primary", "write": bool(args.write),
+                     "client_id": cid, "client_secret": csec})
     data["accounts"] = accounts
     TOKENS_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 

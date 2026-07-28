@@ -12,35 +12,24 @@ import pygame
 from ..core import input as bmo_input
 from ..core.theme import LOGICAL_SIZE, render_text
 from ..services import audio
+from ..services import flappy_ai as fai
+# física/arena: FONTE ÚNICA no serviço (mesmo mundo que o treino usa, pra o
+# cérebro salvo se comportar igual quando você "joga contra")
+from ..services.flappy_ai import (
+    W, H, GROUND_Y, CEIL_Y, GRAVITY, FLAP_V, MAX_FALL, BIRD_X, BIRD_R,
+    PIPE_W, PIPE_GAP, PIPE_SPEED, PIPE_SPACING, GAP_MARGIN,
+)
 
 # ---------- paleta ----------
 BG        = (8, 10, 24)
 WHITE     = (240, 240, 240)
 DIM       = (110, 120, 140)
-BIRD      = (250, 210, 70)    # amarelo
+BIRD      = (250, 210, 70)    # amarelo (jogador)
 BIRD_EYE  = (20, 20, 30)
+AI_BIRD   = (120, 200, 255)   # azul claro (adversário IA)
 PIPE      = (90, 200, 120)    # verde
 PIPE_DARK = (60, 150, 90)
 GROUND    = (40, 46, 64)
-
-# ---------- arena ----------
-W, H        = LOGICAL_SIZE
-GROUND_Y    = H - 14          # piso (colide aqui)
-CEIL_Y      = 0
-
-# ---------- física ----------
-GRAVITY   = 520.0             # px/s²
-FLAP_V    = -175.0            # impulso da asa (px/s)
-MAX_FALL  = 260.0
-BIRD_X    = 84
-BIRD_R    = 6                 # "raio" (meio-lado do quadradinho)
-
-# ---------- canos ----------
-PIPE_W      = 26
-PIPE_GAP    = 76             # vão vertical
-PIPE_SPEED  = 96.0          # px/s pra esquerda
-PIPE_SPACING = 150          # distância horizontal entre canos
-GAP_MARGIN  = 30            # quão perto da borda o vão pode chegar
 
 
 def _to_logical(pos: tuple[int, int]) -> tuple[int, int]:
@@ -53,6 +42,10 @@ def _to_logical(pos: tuple[int, int]) -> tuple[int, int]:
 class FlappyScreen:
     def __init__(self, on_back) -> None:
         self.on_back = on_back
+        # "jogar contra": se há um cérebro salvo (tela de TREINO IA), entra no
+        # modo versus com um pássaro adversário controlado pela rede neural.
+        self.brain, _meta = fai.load_brain()
+        self.versus = self.brain is not None
         self._reset()
 
     def _reset(self) -> None:
@@ -62,6 +55,11 @@ class FlappyScreen:
         self.score = 0
         self.state = "ready"            # ready -> playing -> over
         self._t = 0.0
+        # adversário IA (só ativo no modo versus)
+        self.ai_y = H / 2
+        self.ai_vel = 0.0
+        self.ai_alive = self.versus
+        self.ai_score = 0
         self._spawn_first_pipes()
 
     def _spawn_first_pipes(self) -> None:
@@ -71,9 +69,10 @@ class FlappyScreen:
             x += PIPE_SPACING
 
     def _make_pipe(self, x: float) -> dict:
-        gap_y = random.randint(CEIL_Y + GAP_MARGIN + PIPE_GAP // 2,
-                               GROUND_Y - GAP_MARGIN - PIPE_GAP // 2)
-        return {"x": float(x), "gap_y": gap_y, "scored": False}
+        gap = fai.gap_for(self.score)   # vão afunila conforme a pontuação cresce
+        gap_y = random.randint(CEIL_Y + GAP_MARGIN + gap // 2,
+                               GROUND_Y - GAP_MARGIN - gap // 2)
+        return {"x": float(x), "gap_y": gap_y, "gap": gap, "scored": False}
 
     def enter(self) -> None: ...
     def exit(self) -> None: ...
@@ -112,43 +111,69 @@ class FlappyScreen:
         if self.state != "playing":
             return
 
+        # --- jogador ---
         self.vel = min(MAX_FALL, self.vel + GRAVITY * dt)
         self.bird_y += self.vel * dt
-
-        # piso / teto
+        player_dead = False
         if self.bird_y >= GROUND_Y - BIRD_R:
             self.bird_y = GROUND_Y - BIRD_R
-            self._die()
-            return
-        if self.bird_y < CEIL_Y + BIRD_R:
+            player_dead = True
+        elif self.bird_y < CEIL_Y + BIRD_R:
             self.bird_y = CEIL_Y + BIRD_R
             self.vel = 0.0
 
-        # move canos, pontua e recicla
+        # move canos, pontua (jogador E adversário vivo) e recicla
+        speed = fai.speed_for(self.score)   # acelera conforme a pontuação cresce
         for p in self.pipes:
-            p["x"] -= PIPE_SPEED * dt
+            p["x"] -= speed * dt
             if not p["scored"] and p["x"] + PIPE_W < BIRD_X:
                 p["scored"] = True
                 self.score += 1
+                if self.ai_alive:
+                    self.ai_score += 1
                 audio.play("point")
-        # remove os que saíram e repõe à direita mantendo o espaçamento
         self.pipes = [p for p in self.pipes if p["x"] + PIPE_W > -4]
         while len(self.pipes) < 3:
             last_x = max((p["x"] for p in self.pipes), default=W)
             self.pipes.append(self._make_pipe(last_x + PIPE_SPACING))
 
-        # colisão com cano
-        if self._hits_pipe():
+        if not player_dead and self._hits_pipe(self.bird_y):
+            player_dead = True
+
+        # --- adversário IA (modo versus) ---
+        if self.versus and self.ai_alive:
+            self._step_ai(dt)
+
+        if player_dead:
             self._die()
 
-    def _hits_pipe(self) -> bool:
+    def _step_ai(self, dt: float) -> None:
+        p = self._next_pipe()
+        gap_y = p["gap_y"] if p else H / 2
+        pipe_x = p["x"] if p else float(W)
+        if self.brain.flaps(fai.sense(self.ai_y, pipe_x, gap_y)):
+            self.ai_vel = FLAP_V
+        self.ai_vel = min(MAX_FALL, self.ai_vel + GRAVITY * dt)
+        self.ai_y += self.ai_vel * dt
+        if (self.ai_y >= GROUND_Y - BIRD_R or self.ai_y < CEIL_Y + BIRD_R
+                or self._hits_pipe(self.ai_y)):
+            self.ai_alive = False
+
+    def _next_pipe(self) -> dict | None:
+        for p in self.pipes:
+            if p["x"] + PIPE_W >= BIRD_X:
+                return p
+        return self.pipes[0] if self.pipes else None
+
+    def _hits_pipe(self, y: float) -> bool:
         bx0, bx1 = BIRD_X - BIRD_R, BIRD_X + BIRD_R
-        by0, by1 = self.bird_y - BIRD_R, self.bird_y + BIRD_R
+        by0, by1 = y - BIRD_R, y + BIRD_R
         for p in self.pipes:
             if p["x"] > bx1 or p["x"] + PIPE_W < bx0:
                 continue
-            gap_top = p["gap_y"] - PIPE_GAP // 2
-            gap_bot = p["gap_y"] + PIPE_GAP // 2
+            half = p.get("gap", PIPE_GAP) // 2
+            gap_top = p["gap_y"] - half
+            gap_bot = p["gap_y"] + half
             if by0 < gap_top or by1 > gap_bot:
                 return True
         return False
@@ -168,8 +193,9 @@ class FlappyScreen:
         # canos
         for p in self.pipes:
             x = int(p["x"])
-            gap_top = p["gap_y"] - PIPE_GAP // 2
-            gap_bot = p["gap_y"] + PIPE_GAP // 2
+            half = p.get("gap", PIPE_GAP) // 2
+            gap_top = p["gap_y"] - half
+            gap_bot = p["gap_y"] + half
             pygame.draw.rect(surface, PIPE, (x, 0, PIPE_W, gap_top))
             pygame.draw.rect(surface, PIPE, (x, gap_bot, PIPE_W, GROUND_Y - gap_bot))
             # "boca" do cano (detalhe mais escuro)
@@ -177,22 +203,47 @@ class FlappyScreen:
             pygame.draw.rect(surface, PIPE_DARK, (x - 2, gap_bot, PIPE_W + 4, 6))
         # piso
         pygame.draw.rect(surface, GROUND, (0, GROUND_Y, W, H - GROUND_Y))
-        # passarinho (quadradinho com olhinho)
+        # adversário IA atrás, jogador na frente
+        if self.versus:
+            self._draw_ai_bird(surface)
         self._draw_bird(surface)
-        # score grande no topo
-        s = render_text(str(self.score), 18, WHITE)
-        surface.blit(s, s.get_rect(midtop=(W // 2, 6)))
+        # placar: versus mostra VOCE x BMO; solo mostra o número grande
+        if self.versus:
+            sc = render_text(f"VOCE {self.score}", 10, BIRD)
+            surface.blit(sc, sc.get_rect(midtop=(W // 2 - 46, 6)))
+            ai = render_text(f"BMO {self.ai_score}", 10, AI_BIRD)
+            surface.blit(ai, ai.get_rect(midtop=(W // 2 + 46, 6)))
+        else:
+            s = render_text(str(self.score), 18, WHITE)
+            surface.blit(s, s.get_rect(midtop=(W // 2, 6)))
         self._draw_back_btn(surface)
         if self.state == "ready":
-            self._center_text(surface, "TOQUE PRA VOAR", "")
+            hint = "voce x BMO" if self.versus else ""
+            self._center_text(surface, "TOQUE PRA VOAR", hint)
         elif self.state == "over":
-            self._center_text(surface, "FIM DE JOGO", "toque pra jogar de novo")
+            if self.versus:
+                self._center_text(surface, self._winner_text(), "toque pra jogar de novo")
+            else:
+                self._center_text(surface, "FIM DE JOGO", "toque pra jogar de novo")
+
+    def _winner_text(self) -> str:
+        if self.score == self.ai_score:
+            return "BMO VENCEU!" if self.ai_alive else "EMPATE"
+        return "VOCE VENCEU!" if self.score > self.ai_score else "BMO VENCEU!"
 
     def _draw_bird(self, surface) -> None:
         x, y = BIRD_X, int(self.bird_y)
         pygame.draw.rect(surface, BIRD, (x - BIRD_R, y - BIRD_R, BIRD_R * 2, BIRD_R * 2))
         pygame.draw.rect(surface, BIRD_EYE, (x + 1, y - 3, 2, 2))      # olho
         pygame.draw.rect(surface, (230, 120, 40), (x + BIRD_R, y, 3, 2))  # bico
+
+    def _draw_ai_bird(self, surface) -> None:
+        x, y = BIRD_X, int(self.ai_y)
+        if self.ai_alive:
+            pygame.draw.rect(surface, AI_BIRD, (x - BIRD_R, y - BIRD_R, BIRD_R * 2, BIRD_R * 2))
+            pygame.draw.rect(surface, BIRD_EYE, (x + 1, y - 3, 2, 2))
+        else:   # caiu: só o contorno apagado
+            pygame.draw.rect(surface, DIM, (x - BIRD_R, y - BIRD_R, BIRD_R * 2, BIRD_R * 2), 1)
 
     def _draw_back_btn(self, surface) -> None:
         rect = self._back_btn()

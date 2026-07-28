@@ -196,6 +196,14 @@ bmo_config.json
 bmo_pet.json
 bmo_memory.json
 
+# Melhor cérebro do treino de Flappy (neuroevolução) — modelo treinado local
+flappy_ai.json
+
+# Campeão do treino de Haxball (neuroevolução) — modelo treinado local
+haxball_ai.json
+# Imitador supervisionado do heurístico (semente do treino) — cache local recomputável
+haxball_imitator.json
+
 # Tokens OAuth do Google Calendar (refresh tokens) — NUNCA commitar
 gcal_tokens.json
 
@@ -218,3 +226,6 @@ knowledge/
 deploy.local.*
 *.local.sh
 hosts.local
+
+# cache local do builder de RAG (embeddings)
+scripts/.rag_cache.json

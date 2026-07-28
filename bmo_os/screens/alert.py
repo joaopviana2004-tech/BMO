@@ -1,12 +1,17 @@
-"""Tela de ALERTA — pop-up de evento próximo, empilhado sobre a tela atual.
+"""Tela de ALERTA — pop-up empilhado sobre a tela atual.
 
-É empurrada pelo frame_hook do App (main.py) quando o EventAlerter detecta
-um evento prestes a começar. Toca a voz do BMO, mostra "EM X MIN", título e
-horário. Some sozinha depois de AUTO_DISMISS_S ou no primeiro toque/botão.
+Dois modos:
+  - EVENTO próximo (`event=CalEvent`): empurrada pelo frame_hook quando o
+    EventAlerter detecta um evento prestes a começar. Mostra "EM X MIN", título
+    e horário.
+  - AVISO genérico (`notice={"title","body","label"}`): usado pelos avisos da
+    Plataforma Central que chegam em tempo real pelo ntfy (mesmos pushes do
+    celular). Mostra o título + corpo do aviso.
 
-Como entra via push, ao dispensar dá pop e volta exatamente pra tela de baixo
-(relógio, jogo, etc.). Empurrada sobre o SUSPENDED, o display religa sozinho
-(SuspendedScreen.exit liga o backlight).
+Toca a voz/alarme do BMO. Some sozinha depois de AUTO_DISMISS_S ou no primeiro
+toque/botão. Como entra via push, ao dispensar dá pop e volta exatamente pra
+tela de baixo (relógio, jogo, etc.). Empurrada sobre o SUSPENDED, o display
+religa sozinho (SuspendedScreen.exit liga o backlight).
 """
 from __future__ import annotations
 
@@ -32,8 +37,11 @@ def _local_now() -> dt.datetime:
 
 
 class AlertScreen:
-    def __init__(self, *, event: CalEvent, on_dismiss) -> None:
+    def __init__(self, *, on_dismiss, event: CalEvent | None = None,
+                 notice: dict | None = None) -> None:
+        # exatamente um dos dois: evento de agenda OU aviso genérico (ntfy)
         self.event = event
+        self.notice = notice
         self.on_dismiss = on_dismiss
         self._t = 0.0
         self._dismissed = False
@@ -72,6 +80,9 @@ class AlertScreen:
                          color=CRT_WHITE if blink else CRT_DIM)
 
         cx = LOGICAL_SIZE[0] // 2
+        if self.notice is not None:
+            self._draw_notice(surface, cx, blink)
+            return
         self._draw_bell(surface, cx, 46, blink)
 
         # quanto falta
@@ -100,6 +111,56 @@ class AlertScreen:
 
         hint = render_text("toque pra dispensar", 8, CRT_DIM, pixel=False)
         surface.blit(hint, hint.get_rect(midbottom=(cx, LOGICAL_SIZE[1] - SAFE_INSET - 4)))
+
+    def _draw_notice(self, surface, cx: int, blink: bool) -> None:
+        """Aviso genérico da Plataforma (ntfy) — sineta + título + corpo + selo."""
+        self._draw_bell(surface, cx, 44, blink)
+
+        title = self._fit((self.notice.get("title") or "Plataforma").strip(), 30)
+        timg = render_text(title, 14, CRT_WHITE)
+        surface.blit(timg, timg.get_rect(midtop=(cx, 70)))
+
+        body = (self.notice.get("body") or "").strip()
+        y = 98
+        for line in self._wrap(body, 36, 3):
+            limg = render_text(line, 11, CRT_WHITE, pixel=False)
+            surface.blit(limg, limg.get_rect(midtop=(cx, y)))
+            y += 16
+
+        label = (self.notice.get("label") or "PLATAFORMA").upper()
+        lbl = render_text(label, 9, CRT_DIM, pixel=False)
+        total_w = 8 + 4 + lbl.get_width()
+        lx = cx - total_w // 2
+        ly = 168
+        pygame.draw.rect(surface, CRT_WHITE, (lx, ly + 1, 6, 6))
+        surface.blit(lbl, (lx + 10, ly))
+
+        hint = render_text("toque pra dispensar", 8, CRT_DIM, pixel=False)
+        surface.blit(hint, hint.get_rect(midbottom=(cx, LOGICAL_SIZE[1] - SAFE_INSET - 4)))
+
+    @staticmethod
+    def _wrap(text: str, max_chars: int, max_lines: int) -> list[str]:
+        """Quebra o corpo do aviso em até max_lines de ~max_chars (por palavra)."""
+        words = text.split()
+        lines: list[str] = []
+        cur = ""
+        for w in words:
+            cand = (cur + " " + w).strip()
+            if len(cand) <= max_chars:
+                cur = cand
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+                if len(lines) >= max_lines:
+                    break
+        if cur and len(lines) < max_lines:
+            lines.append(cur)
+        if len(lines) == max_lines and (cur or words):
+            # sinaliza corte
+            last = lines[-1]
+            lines[-1] = (last[: max_chars - 1] + ".") if len(last) >= max_chars else last + " ."
+        return lines or [""]
 
     def _minutes_left(self) -> int:
         delta = (self.event.start - _local_now()).total_seconds()

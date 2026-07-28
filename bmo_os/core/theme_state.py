@@ -62,16 +62,36 @@ def apply_theme() -> None:
 
 # ---------- status bar ----------
 
-def draw_status_bar(surface: pygame.Surface, *, top_pad: int = 7, right_pad: int = 10) -> None:
-    """Top-right: sol/lua + sinal (mock) + bateria (mock 100%).
+# Getter opcional de conectividade (main registra lambda: network.online).
+# None = desconhecido -> mantém o sinal "cheio" (comportamento antigo, mock).
+_online_getter = None
 
-    top_pad/right_pad permitem afastar a barra dos brackets de canto (clock
-    pede mais, pra dar zona morta pro frame físico cobrir).
+
+def set_online_getter(fn) -> None:
+    """Liga a status bar ao NetworkService (mostra 'sem internet')."""
+    global _online_getter
+    _online_getter = fn
+
+
+def draw_status_bar(surface: pygame.Surface, *, top_pad: int = 7, right_pad: int = 10) -> None:
+    """Top-right: sol/lua + sinal (internet) + bateria (mock 100%).
+
+    O sinal reflete a conectividade real (via set_online_getter): cheio quando
+    online, barras vazias + barra cortada quando offline. top_pad/right_pad
+    afastam a barra dos brackets de canto (o clock pede mais).
     """
     fg = widgets.CRT_WHITE
     bg = widgets.CRT_BLACK
+    dim = widgets.CRT_DIM
     right = surface.get_width() - right_pad
     top = top_pad
+
+    online = None
+    if _online_getter is not None:
+        try:
+            online = bool(_online_getter())
+        except Exception:
+            online = None
 
     # ---- Bateria (18x9 corpo + 2px terminal) ----
     bat = pygame.Rect(right - 20, top, 18, 9)
@@ -80,7 +100,7 @@ def draw_status_bar(surface: pygame.Surface, *, top_pad: int = 7, right_pad: int
     # fill 100%
     pygame.draw.rect(surface, fg, (bat.left + 2, bat.top + 2, bat.width - 4, bat.height - 4))
 
-    # ---- Sinal (4 barras crescentes) ----
+    # ---- Sinal (4 barras crescentes; offline = vazias + corte) ----
     sig_right = bat.left - 4
     bar_w = 2
     bar_gap = 1
@@ -90,7 +110,13 @@ def draw_status_bar(surface: pygame.Surface, *, top_pad: int = 7, right_pad: int
         x = sig_left + i * (bar_w + bar_gap)
         h = 2 + i * 2   # 2,4,6,8
         y = top + 9 - h
-        pygame.draw.rect(surface, fg, (x, y, bar_w, h))
+        if online is False:
+            pygame.draw.rect(surface, dim, (x, y, bar_w, h), 1)   # só contorno
+        else:
+            pygame.draw.rect(surface, fg, (x, y, bar_w, h))
+    if online is False:
+        # barra diagonal cortando o sinal (= sem internet)
+        pygame.draw.line(surface, fg, (sig_left - 1, top + 9), (sig_right + 1, top), 1)
 
     # ---- Sol / Lua ----
     icon_right = sig_left - 4

@@ -37,6 +37,7 @@ class Task:
     id: str
     content: str
     section_key: str  # "to-do" | "doing" | "done"
+    due: str = ""     # data de vencimento "YYYY-MM-DD" ("" = sem prazo)
 
 
 @dataclass
@@ -165,10 +166,13 @@ class TodoistService:
                 key = next((k for k, v in sections.items() if v == section_id), None)
                 if key is None:
                     continue
+                due_raw = t.get("due") or {}
+                due = (due_raw.get("date") or "")[:10] if isinstance(due_raw, dict) else ""
                 tasks.append(Task(
                     id=str(t["id"]),
                     content=(t.get("content") or "").strip(),
                     section_key=key,
+                    due=due,
                 ))
 
             with self._lock:

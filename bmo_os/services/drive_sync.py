@@ -57,6 +57,7 @@ KNOWLEDGE_FOLDER_NAME = "Conhecimento"
 MEDIA_FOLDER_NAME = "Multimidia"
 AUDIO_FOLDER_NAME = "Audios"          # dentro de Multimidia/
 PREFS_FOLDER_NAME = "Preferencias"
+MODELS_FOLDER_NAME = "Modelos"        # cérebros treinados (Haxball/Flappy IA)
 FOLDER_MIME = "application/vnd.google-apps.folder"
 CONFIG_NAME = "bmo_config.json"
 
@@ -150,6 +151,80 @@ class DriveSync:
                     pass
         return ok
 
+    def delete_note(self, name: str) -> bool:
+        """Manda pra lixeira um .md de Bimo/Conhecimento pelo nome do arquivo.
+        Necessário ao excluir do painel: sem isso o PULL do _sync_knowledge
+        re-baixaria a nota e ela 'voltaria'. Best-effort (offline = no-op)."""
+        if not name:
+            return False
+        if not name.lower().endswith(".md"):
+            name += ".md"
+        folder = self._ensure_knowledge_folder()
+        if not folder:
+            return False
+        remote = self._list_remote_notes(folder)
+        if remote is None:
+            return False
+        ok = False
+        for f in remote:
+            if f.get("name") == name:
+                # DELETE manda pra lixeira; _request engole erro (volta None no 204)
+                self._request(f"{FILES_URL}/{f['id']}", method="DELETE")
+                ok = True
+        if ok:
+            self.knowledge_sync_at = time.time()
+            self.knowledge_status = f"nota {name[:-3]} removida do Drive"
+        return ok
+
+    def push_model(self, path: Path) -> bool:
+        """Sobe UM modelo (.json de cérebro treinado) pra Bimo/Modelos/ — backup
+        'bem seguro' do treino. Cria ou atualiza pelo nome. Síncrono (a tela de
+        treino chama num thread de fundo)."""
+        path = Path(path)
+        if not path.is_file():
+            return False
+        folder = self._folder(FOLDER_NAME, MODELS_FOLDER_NAME)
+        if not folder:
+            return False
+        try:
+            body = path.read_bytes()
+        except OSError:
+            return False
+        q = urllib.parse.quote(
+            f"name='{path.name}' and '{folder}' in parents and trashed=false")
+        found = self._request(f"{FILES_URL}?q={q}&fields=files(id)")
+        files = (found or {}).get("files", [])
+        file_id = files[0]["id"] if files else ""
+        if file_id:
+            res = self._request(
+                f"{UPLOAD_URL}/{file_id}?uploadType=media",
+                method="PATCH", data=body, content_type="application/json")
+        else:
+            boundary = "bimo-model-boundary"
+            meta = json.dumps({"name": path.name, "parents": [folder]})
+            payload = (
+                f"--{boundary}\r\n"
+                "Content-Type: application/json; charset=UTF-8\r\n\r\n"
+                f"{meta}\r\n"
+                f"--{boundary}\r\n"
+                "Content-Type: application/json\r\n\r\n"
+            ).encode() + body + f"\r\n--{boundary}--".encode()
+            res = self._request(
+                f"{UPLOAD_URL}?uploadType=multipart",
+                method="POST", data=payload,
+                content_type=f"multipart/related; boundary={boundary}")
+        if res is None:
+            self.status = "modelo: upload falhou (sem rede?)"
+            return False
+        self.last_sync = time.time()
+        self.status = f"modelo {path.stem} no Drive"
+        if self.on_event is not None:
+            try:
+                self.on_event(f"Modelo {path.stem} no Drive")
+            except Exception:
+                pass
+        return True
+
     def flush(self, timeout_s: float = 15.0) -> bool:
         """Sync final SÍNCRONO (logout/desligar): config + áudios pendentes.
 
@@ -174,6 +249,7 @@ class DriveSync:
         self._folder(FOLDER_NAME, KNOWLEDGE_FOLDER_NAME)
         self._folder(FOLDER_NAME, MEDIA_FOLDER_NAME, AUDIO_FOLDER_NAME)
         self._folder(FOLDER_NAME, PREFS_FOLDER_NAME)
+        self._folder(FOLDER_NAME, MODELS_FOLDER_NAME)
 
     def _loop(self) -> None:
         # estrutura primeiro, depois o pull das preferências

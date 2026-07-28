@@ -85,6 +85,18 @@ class PetMemory:
             if changed:
                 self._persist_unlocked()
 
+    def remove_fact(self, fact) -> None:
+        """Esquece um fato específico (comparação case-insensitive). Usado pelo
+        painel web pra o dono editar o que o BMO lembra. Silencioso se não achar."""
+        target = str(fact or "").strip().lower()
+        if not target:
+            return
+        with self._lock:
+            new = [f for f in self._facts if f.lower() != target]
+            if len(new) != len(self._facts):
+                self._facts = new
+                self._persist_unlocked()
+
     def clear(self) -> None:
         with self._lock:
             self._name = ""

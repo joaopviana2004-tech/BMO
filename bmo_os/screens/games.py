@@ -199,3 +199,14 @@ def draw_snake_icon(surface: pygame.Surface, rect: pygame.Rect) -> None:
     for i in range(2):                       # sobe (cabeça)
         pygame.draw.rect(surface, (180, 250, 180), (cx + 3, cy - 3 - i * 7, 6, 6))
     pygame.draw.rect(surface, (240, 110, 110), (cx - 14, cy - 12, 6, 6))  # comida
+
+
+def draw_haxball_icon(surface: pygame.Surface, rect: pygame.Rect) -> None:
+    """Mini campo top-down: bola no centro + discos vermelho/azul + linha do meio."""
+    cx, cy = rect.center
+    pygame.draw.rect(surface, (18, 62, 34), (cx - 20, cy - 13, 40, 26))
+    pygame.draw.rect(surface, (96, 156, 116), (cx - 20, cy - 13, 40, 26), 1)
+    pygame.draw.line(surface, (96, 156, 116), (cx, cy - 13), (cx, cy + 13), 1)
+    pygame.draw.circle(surface, (232, 84, 72), (cx - 12, cy), 4)     # disco vermelho
+    pygame.draw.circle(surface, (92, 152, 240), (cx + 12, cy), 4)    # disco azul
+    pygame.draw.circle(surface, (245, 245, 245), (cx, cy), 3)        # bola

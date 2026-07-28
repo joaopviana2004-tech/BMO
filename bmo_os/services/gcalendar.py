@@ -23,6 +23,7 @@ import json
 import os
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -142,9 +143,9 @@ def _oauth_creds() -> tuple[str, str]:
 
 
 def _resolve_oauth_accounts() -> list[dict]:
-    """Contas OAuth salvas em gcal_tokens.json (vazio se sem client/credenciais)."""
-    if not _oauth_creds()[0]:
-        return []
+    """Contas OAuth salvas em gcal_tokens.json. Cada conta pode trazer seu próprio
+    client_id/client_secret (multi-cliente: pessoal e empresa têm clientes
+    diferentes); cai pro GCAL_CLIENT_ID global do .env se a conta não tiver."""
     if not TOKENS_PATH.exists():
         return []
     try:
@@ -152,7 +153,8 @@ def _resolve_oauth_accounts() -> list[dict]:
     except Exception:
         return []
     accounts = data.get("accounts", []) if isinstance(data, dict) else []
-    return [a for a in accounts if a.get("refresh_token")]
+    return [a for a in accounts
+            if a.get("refresh_token") and (a.get("client_id") or _oauth_creds()[0])]
 
 
 def _parse_api_dt(node: dict):
@@ -319,13 +321,17 @@ class CalendarService:
 
     # ---------- OAuth ----------
 
-    def _access_token(self, refresh_token: str) -> str:
-        """Troca o refresh token por um access token (cacheado até expirar)."""
+    def _access_token(self, account: dict) -> str:
+        """Troca o refresh token por um access token (cacheado até expirar).
+        Usa o client_id/secret DA CONTA (cada conta pode ter o seu); cai pro
+        global do .env se a conta não trouxer."""
+        refresh_token = account["refresh_token"]
         now = time.time()
         cached = self._token_cache.get(refresh_token)
         if cached and cached[1] - 60 > now:
             return cached[0]
-        cid, csec = _oauth_creds()
+        cid = account.get("client_id") or _oauth_creds()[0]
+        csec = account.get("client_secret") or _oauth_creds()[1]
         body = urllib.parse.urlencode({
             "client_id": cid,
             "client_secret": csec,
@@ -341,7 +347,7 @@ class CalendarService:
         return access
 
     def _fetch_oauth(self, account: dict, label: str, color, start, end) -> list[CalEvent]:
-        token = self._access_token(account["refresh_token"])
+        token = self._access_token(account)
         cal_id = account.get("calendar_id") or "primary"
         params = urllib.parse.urlencode({
             "timeMin": start.isoformat(),
@@ -375,6 +381,71 @@ class CalendarService:
                 color=color,
             ))
         return out
+
+    # ---------- escrita (criar evento) ----------
+
+    def _writable_account(self) -> dict | None:
+        """Primeira conta OAuth autorizada com escopo de ESCRITA (gcal_auth
+        --write marca "write": true). None se nenhuma pode escrever."""
+        for a in _resolve_oauth_accounts():
+            if a.get("write"):
+                return a
+        return None
+
+    def can_write(self) -> bool:
+        return self._writable_account() is not None
+
+    def create_event(self, title: str, date: str, time: str = "",
+                     duration_min: int = 60) -> dict:
+        """Cria um evento na conta com permissão de escrita (a pessoal).
+        date = "YYYY-MM-DD"; time = "HH:MM" ("" = dia todo). Retorna
+        {ok, error?, title, date, time}. Dispara refresh do snapshot."""
+        acc = self._writable_account()
+        if acc is None:
+            return {"ok": False, "error": "nenhuma conta com permissao de escrita "
+                    "(rode: python scripts/gcal_auth.py --write)"}
+        title = (title or "").strip() or "(sem titulo)"
+        try:
+            d = dt.date.fromisoformat((date or "").strip()[:10])
+        except Exception:
+            return {"ok": False, "error": "data invalida (use YYYY-MM-DD)"}
+        body: dict = {"summary": title}
+        time = (time or "").strip()
+        if time:
+            try:
+                hh, mm = (int(x) for x in time.split(":")[:2])
+            except Exception:
+                hh, mm = 9, 0
+            start_dt = dt.datetime.combine(d, dt.time(hh, mm), tzinfo=_local_tz())
+            end_dt = start_dt + dt.timedelta(minutes=max(5, int(duration_min or 60)))
+            body["start"] = {"dateTime": start_dt.isoformat()}
+            body["end"] = {"dateTime": end_dt.isoformat()}
+        else:
+            body["start"] = {"date": d.isoformat()}
+            body["end"] = {"date": (d + dt.timedelta(days=1)).isoformat()}
+        try:
+            token = self._access_token(acc)
+        except Exception as e:
+            return {"ok": False, "error": "auth: " + str(e)[:70]}
+        cal_id = acc.get("calendar_id") or "primary"
+        url = f"{CAL_API}/{urllib.parse.quote(cal_id, safe='')}/events"
+        req = urllib.request.Request(
+            url, data=json.dumps(body).encode("utf-8"), method="POST",
+            headers={"Authorization": f"Bearer {token}",
+                     "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+                created = json.load(resp)
+        except urllib.error.HTTPError as e:
+            return {"ok": False, "error": f"HTTP {e.code} ao criar evento"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:80]}
+        try:
+            self.trigger_refresh()   # já criou; refresh é best-effort
+        except Exception:
+            pass
+        return {"ok": True, "id": created.get("id", ""), "title": title,
+                "date": d.isoformat(), "time": time}
 
     def _set(self, snap: CalendarSnapshot) -> None:
         with self._lock:
