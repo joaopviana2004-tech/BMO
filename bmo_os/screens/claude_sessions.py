@@ -28,12 +28,16 @@ from ..services.claude_sessions import ClaudeSession, ClaudeSessionsService
 # sessão e o resultado de cada ferramenta). Texto e moldura seguem CRT — é o
 # que impede a tela de virar um papagaio.
 LARANJA = pygame.Color(232, 150, 42)    # trabalhando
-VERMELHO = pygame.Color(226, 74, 62)    # precisa de você / falhou
+AZUL = pygame.Color(80, 162, 240)       # precisa de você (perguntou / pediu permissão)
+VERMELHO = pygame.Color(226, 74, 62)    # falhou
 VERDE = pygame.Color(64, 198, 148)      # concluída
 
+# Azul e vermelho contam coisas diferentes de propósito: azul é "ele está te
+# esperando" (nada quebrado, só depende de você) e vermelho é "quebrou". Antes
+# os dois eram vermelho e um erro parecia pergunta no canto do olho.
 COR_STATUS = {
     "working": LARANJA,
-    "waiting": VERMELHO,
+    "waiting": AZUL,
     "error": VERMELHO,
     "done": VERDE,
     "idle": CRT_DIM,
@@ -343,7 +347,7 @@ class ClaudeSessionsScreen:
         # a mesma que aparece na faixa lateral de cada linha.
         partes = [
             (str(snap.count("working")), " ativas", LARANJA),
-            (str(snap.count("waiting")), " esperando", VERMELHO),
+            (str(snap.count("waiting")), " esperando", AZUL),
             (str(snap.count("done")), " prontas", VERDE),
         ]
         n_erro = snap.count("error")
