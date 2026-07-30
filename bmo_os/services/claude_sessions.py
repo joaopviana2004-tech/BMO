@@ -212,6 +212,9 @@ class ClaudeSessionsService:
         self._lock = threading.Lock()
         # Acorda o loop na hora quando a tela pede refresh (botão SYNC).
         self._wake = threading.Event()
+        # Pedido de reset (botão RESET). A tela só levanta a bandeira; a thread
+        # é que fala com a rede — no frame não entra I/O.
+        self._reset_pedido = False
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
@@ -239,6 +242,9 @@ class ClaudeSessionsService:
             # monitor. Qualquer excecao vira estado de erro visivel e o ciclo
             # continua.
             try:
+                if self._reset_pedido:
+                    self._reset_pedido = False
+                    self._zerar_painel()
                 self._fetch()
             except Exception as exc:
                 self._fail(f"erro interno: {exc}"[:60])
@@ -247,6 +253,37 @@ class ClaudeSessionsService:
 
     def trigger_refresh(self) -> None:
         self._wake.set()
+
+    def pedir_reset(self) -> None:
+        """Botão RESET: manda o painel esquecer TODAS as sessões.
+
+        Só marca a bandeira e acorda a thread — quem faz a requisição é ela.
+        As sessões vivas voltam no próximo hook (segundos, se estiverem
+        trabalhando); as fantasmas não voltam, que é o motivo do botão existir.
+        """
+        self._reset_pedido = True
+        self._wake.set()
+
+    def _zerar_painel(self) -> None:
+        base = self._url_ok or self.candidatos()[0]
+        partes = urllib.parse.urlsplit(base)
+        ip = resolver_ip(partes.hostname or "", DNS_TIMEOUT_S)
+        if not ip:
+            return                       # sem painel não há o que zerar
+        porta = f":{partes.port}" if partes.port else ""
+        alvo = f"{partes.scheme}://{ip}{porta}/limpar?tudo=1"
+        try:
+            with urllib.request.urlopen(alvo, timeout=TIMEOUT_S):
+                pass
+        except Exception:
+            # Falhou? O _fetch logo abaixo mostra o estado real de qualquer
+            # jeito; engolir aqui é melhor que derrubar a thread de consulta.
+            pass
+        with self._lock:
+            # Limpa já, sem esperar o próximo fetch: o toque tem que responder
+            # na hora, senão o botão parece quebrado.
+            self.snapshot = ClaudeSnapshot(sessions=[], fetched_at=time.time(),
+                                           ok=self.snapshot.ok)
 
     def _fetch(self) -> None:
         # Tenta a que funcionou da última vez primeiro; só varre a lista quando
