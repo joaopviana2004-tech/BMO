@@ -1,0 +1,736 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tela CLAUDE do BMO</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+
+  <style>
+    :root {
+      --ground:      #f4f5f2;
+      --surface:     #ffffff;
+      --surface-alt: #eceee9;
+      --ink:         #14171a;
+      --ink-soft:    #4a5157;
+      --ink-faint:   #767d83;
+      --rule:        #d8dbd5;
+      --rule-strong: #b9bdb6;
+
+      /* as quatro cores de status são as do próprio aparelho, valores exatos
+         de screens/claude_sessions.py — aqui elas codificam estado, não enfeitam */
+      --st-working: #e8962a;
+      --st-waiting: #50a2f0;
+      --st-error:   #e24a3e;
+      --st-done:    #40c694;
+
+      --accent:     #b96a05;
+      --accent-bg:  #fbf0dd;
+
+      --crt-black:  #000000;
+      --crt-white:  #ebebeb;
+      --crt-dim:    #5f5f5f;
+
+      --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --sans: "IBM Plex Sans", ui-sans-serif, system-ui, "Segoe UI", sans-serif;
+
+      --measure: 68ch;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --ground:      #0c0e10;
+        --surface:     #14171a;
+        --surface-alt: #1b1f23;
+        --ink:         #e4e7e4;
+        --ink-soft:    #a8afb4;
+        --ink-faint:   #7b8388;
+        --rule:        #262b30;
+        --rule-strong: #394046;
+        --accent:      #f0a740;
+        --accent-bg:   #241a09;
+      }
+    }
+
+    :root[data-theme="dark"] {
+      --ground:      #0c0e10;
+      --surface:     #14171a;
+      --surface-alt: #1b1f23;
+      --ink:         #e4e7e4;
+      --ink-soft:    #a8afb4;
+      --ink-faint:   #7b8388;
+      --rule:        #262b30;
+      --rule-strong: #394046;
+      --accent:      #f0a740;
+      --accent-bg:   #241a09;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--ground);
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.62;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .wrap {
+      max-width: 60rem;
+      margin: 0 auto;
+      padding: 3.5rem 1.5rem 6rem;
+    }
+
+    /* ---------- cabeçalho ---------- */
+
+    header.top { margin-bottom: 2.5rem; }
+
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      font-weight: 500;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      margin: 0 0 0.75rem;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 5vw, 2.9rem);
+      line-height: 1.08;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      text-wrap: balance;
+      margin: 0 0 0.9rem;
+    }
+
+    .lede {
+      font-size: 1.08rem;
+      color: var(--ink-soft);
+      max-width: var(--measure);
+      margin: 0;
+    }
+
+    /* ---------- faixa de números ---------- */
+
+    .specs {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+      gap: 1px;
+      background: var(--rule);
+      border: 1px solid var(--rule);
+      border-radius: 3px;
+      overflow: hidden;
+      margin: 2.5rem 0 3.5rem;
+    }
+
+    .spec { background: var(--surface); padding: 0.95rem 1.1rem; }
+
+    .spec dt {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      margin: 0 0 0.3rem;
+    }
+
+    .spec dd {
+      margin: 0;
+      font-family: var(--mono);
+      font-size: 1.18rem;
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.01em;
+    }
+
+    .spec dd small {
+      display: block;
+      font-family: var(--sans);
+      font-size: 0.75rem;
+      font-weight: 400;
+      color: var(--ink-faint);
+      letter-spacing: 0;
+      margin-top: 0.15rem;
+    }
+
+    /* ---------- seções ---------- */
+
+    section { margin-bottom: 3.5rem; scroll-margin-top: 1rem; }
+
+    h2 {
+      font-size: 1.45rem;
+      font-weight: 600;
+      letter-spacing: -0.017em;
+      margin: 0 0 0.4rem;
+      padding-bottom: 0.55rem;
+      border-bottom: 2px solid var(--rule-strong);
+      text-wrap: balance;
+    }
+
+    h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: -0.005em;
+      margin: 2rem 0 0.6rem;
+    }
+
+    p, ul, ol { max-width: var(--measure); }
+    p { margin: 0 0 1rem; }
+    ul, ol { padding-left: 1.15rem; margin: 0 0 1rem; }
+    li { margin-bottom: 0.42rem; }
+    li::marker { color: var(--ink-faint); }
+
+    code {
+      font-family: var(--mono);
+      font-size: 0.855em;
+      background: var(--surface-alt);
+      padding: 0.1em 0.34em;
+      border-radius: 2px;
+      word-break: break-word;
+    }
+
+    a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+    a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+    strong { font-weight: 600; }
+
+    /* ---------- tabelas ---------- */
+
+    .tw { overflow-x: auto; margin: 1.2rem 0 1.6rem; }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      min-width: 30rem;
+      font-size: 0.875rem;
+    }
+
+    th {
+      text-align: left;
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+      padding: 0 0.9rem 0.5rem 0;
+      border-bottom: 1px solid var(--rule-strong);
+      white-space: nowrap;
+    }
+
+    td {
+      padding: 0.5rem 0.9rem 0.5rem 0;
+      border-bottom: 1px solid var(--rule);
+      vertical-align: top;
+    }
+
+    td:first-child, th:first-child { padding-left: 0.1rem; }
+
+    td.num, td.mono {
+      font-family: var(--mono);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    td.desc { color: var(--ink-soft); }
+
+    .sw {
+      display: inline-block;
+      width: 0.7rem;
+      height: 0.7rem;
+      border-radius: 2px;
+      margin-right: 0.45rem;
+      vertical-align: -0.06rem;
+      border: 1px solid rgb(128 128 128 / 0.35);
+    }
+
+    /* ---------- blocos de destaque ---------- */
+
+    .note {
+      background: var(--surface);
+      border: 1px solid var(--rule);
+      border-left: 3px solid var(--accent);
+      border-radius: 3px;
+      padding: 1rem 1.2rem;
+      margin: 1.4rem 0;
+      max-width: var(--measure);
+    }
+
+    .note p:last-child { margin-bottom: 0; }
+
+    .note .tag {
+      display: block;
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 0.35rem;
+    }
+
+    /* ---------- diagramas ---------- */
+
+    figure {
+      margin: 1.6rem 0 1.8rem;
+      background: var(--surface);
+      border: 1px solid var(--rule);
+      border-radius: 3px;
+      padding: 1.3rem;
+    }
+
+    figure svg { display: block; width: 100%; height: auto; }
+
+    figcaption {
+      font-size: 0.8rem;
+      color: var(--ink-faint);
+      margin-top: 0.9rem;
+      padding-top: 0.8rem;
+      border-top: 1px solid var(--rule);
+    }
+
+    /* atributo de apresentação tem a menor precedência, então isto vale mesmo
+       onde o SVG traz font-family inline — garante mono nos dois temas */
+    figure svg text { font-family: var(--mono); }
+
+    .dg-label { font-family: var(--mono); font-size: 6px; fill: var(--ink-faint); }
+    .dg-label-in { font-family: var(--mono); font-size: 7px; fill: var(--ink-soft); }
+    .dg-band { fill: var(--surface-alt); }
+    .dg-line { stroke: var(--rule-strong); stroke-width: 0.5; }
+    .dg-dash { stroke: var(--rule-strong); stroke-width: 0.5; stroke-dasharray: 2 2; fill: none; }
+
+    /* ---------- mapa de arquivos ---------- */
+
+    .files { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
+    .file { background: var(--surface); padding: 0.85rem 1.1rem; display: flex; flex-wrap: wrap; gap: 0.2rem 1rem; align-items: baseline; }
+    .file .path { font-family: var(--mono); font-size: 0.83rem; font-weight: 500; }
+    .file .lines { font-family: var(--mono); font-size: 0.72rem; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+    .file .what { flex-basis: 100%; font-size: 0.85rem; color: var(--ink-soft); }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; transition: none !important; }
+    }
+  </style>
+  <style>
+    /* reset minimo — a plataforma de artifacts injeta um equivalente */
+    html { -webkit-text-size-adjust: 100%; }
+    img, svg, video { max-width: 100%; height: auto; }
+    table { border-spacing: 0; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow">BMO OS · handoff técnico</p>
+  <h1>Tela CLAUDE do BMO</h1>
+  <p class="lede">Tudo que é preciso saber antes de mexer na tela que acompanha as sessões do Claude Code: alvo de render, geometria, paleta, tipografia, interação e de onde vêm os dados. Números conferidos no código, não de memória.</p>
+</header>
+
+<dl class="specs">
+  <div class="spec"><dt>Canvas lógico</dt><dd>400 × 240<small>tudo é desenhado aqui</small></dd></div>
+  <div class="spec"><dt>Saída física</dt><dd>800 × 480<small>escala 2×, vizinho mais próximo</small></dd></div>
+  <div class="spec"><dt>Quadros</dt><dd>30 fps<small>a tela não pede outro</small></dd></div>
+  <div class="spec"><dt>Linhas visíveis</dt><dd>4<small>de 42 px cada</small></dd></div>
+  <div class="spec"><dt>Poll dos dados</dt><dd>2 s<small>numa thread à parte</small></dd></div>
+</dl>
+
+<section>
+  <h2>O alvo de render</h2>
+
+  <p>O BMO roda num Raspberry Pi 4B com touchscreen de 5". Todo desenho vai para um <code>pygame.Surface</code> de <strong>400 × 240</strong> e só no fim do quadro é escalado para os 800 × 480 da janela:</p>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Etapa</th><th>Onde</th><th>Detalhe</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">set_mode</td><td class="mono">core/app.py</td><td class="desc"><code>SCALED | NOFRAME</code>, mais <code>FULLSCREEN</code> com <code>--fullscreen</code></td></tr>
+      <tr><td class="mono">canvas</td><td class="mono">core/app.py</td><td class="desc"><code>Surface((400,240)).convert()</code> — a tela recebe este surface no <code>draw</code></td></tr>
+      <tr><td class="mono">dimming</td><td class="mono">core/app.py</td><td class="desc">overlay preto com alpha por cima do canvas, vindo de <code>config["brightness"]</code></td></tr>
+      <tr><td class="mono">escala</td><td class="mono">core/app.py</td><td class="desc"><code>pygame.transform.scale</code> — 2× inteiro, sem suavizar</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>A escala é exatamente 2×, então <strong>1 px lógico = 2 px reais</strong>. Meio pixel não existe: qualquer detalhe fino precisa cair em coordenada inteira ou some no arredondamento.</p>
+
+  <p>O ritmo do quadro vem de <code>getattr(screen, "preferred_fps", FPS)</code>, com <code>FPS = 30</code>. A tela CLAUDE <strong>não define</strong> <code>preferred_fps</code>, então roda a 30. Ela tem quatro animações contínuas (pulso do alerta, pulso da ferramenta atual, barra indeterminada, inércia da rolagem) — subir o fps aqueceria o Pi sem ganho visível.</p>
+</section>
+
+<section>
+  <h2>Geometria</h2>
+
+  <p>Todas as constantes ficam no topo de <code>screens/claude_sessions.py</code> e derivam de <code>SAFE_INSET = 14</code> — a margem morta que a moldura física do aparelho cobre. Nada legível pode encostar fora dela.</p>
+
+  <figure>
+    <svg viewBox="0 0 400 240" role="img" aria-label="Mapa do canvas 400 por 240 com as faixas de cabeçalho, lista e rodapé">
+      <rect x="0" y="0" width="400" height="240" fill="var(--crt-black)"/>
+      <rect x="14" y="14" width="372" height="212" class="dg-dash"/>
+
+      <rect x="14" y="14" width="372" height="30" class="dg-band" opacity="0.25"/>
+      <text x="20" y="26" class="dg-label-in" fill="var(--crt-white)">cabeçalho — CLAUDE, contadores, HOME / RESET / SYNC</text>
+
+      <rect x="14" y="44" width="372" height="38" fill="none" stroke="var(--crt-dim)" stroke-width="1"/>
+      <rect x="14" y="44" width="3" height="38" fill="var(--st-working)"/>
+      <rect x="14" y="86" width="372" height="38" fill="none" stroke="var(--crt-dim)" stroke-width="1"/>
+      <rect x="14" y="86" width="3" height="38" fill="var(--st-waiting)"/>
+      <rect x="14" y="128" width="372" height="38" fill="none" stroke="var(--crt-dim)" stroke-width="1"/>
+      <rect x="14" y="128" width="3" height="38" fill="var(--st-done)"/>
+      <rect x="14" y="170" width="372" height="38" fill="none" stroke="var(--crt-dim)" stroke-width="1"/>
+      <rect x="14" y="170" width="3" height="38" fill="var(--crt-dim)"/>
+
+      <rect x="393" y="44" width="3" height="168" fill="var(--crt-dim)" opacity="0.5"/>
+
+      <line x1="14" y1="212" x2="386" y2="212" class="dg-line"/>
+      <text x="20" y="223" class="dg-label-in" fill="var(--crt-white)">rodapé — legenda dos pontinhos</text>
+
+      <g class="dg-label">
+        <text x="392" y="18" text-anchor="end" fill="var(--st-working)">y=14  SAFE_INSET / HEADER_Y</text>
+        <text x="392" y="42" text-anchor="end">y=44  ROWS_TOP / LIST_TOP</text>
+        <text x="392" y="210" text-anchor="end">y=212  LIST_BOTTOM</text>
+        <text x="392" y="236" text-anchor="end">y=226  FOOTER_Y</text>
+      </g>
+    </svg>
+    <figcaption>O canvas em escala real. A área rolável (44 → 212) comporta exatamente quatro linhas de 42 px; a quinta é cortada pelo <code>set_clip</code> durante o arrasto.</figcaption>
+  </figure>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Constante</th><th>Valor</th><th>De onde sai</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">SAFE_INSET</td><td class="num">14</td><td class="desc">de <code>core/widgets.py</code>, comum a todas as telas</td></tr>
+      <tr><td class="mono">HEADER_Y</td><td class="num">14</td><td class="desc">= SAFE_INSET</td></tr>
+      <tr><td class="mono">ROWS_TOP / LIST_TOP</td><td class="num">44</td><td class="desc">HEADER_Y + 30</td></tr>
+      <tr><td class="mono">ROW_H</td><td class="num">42</td><td class="desc">passo entre linhas</td></tr>
+      <tr><td class="mono">MAX_VISIBLE</td><td class="num">4</td><td class="desc">44 + 4×42 = 212</td></tr>
+      <tr><td class="mono">LIST_H</td><td class="num">168</td><td class="desc">MAX_VISIBLE × ROW_H</td></tr>
+      <tr><td class="mono">LIST_BOTTOM</td><td class="num">212</td><td class="desc">LIST_TOP + LIST_H</td></tr>
+      <tr><td class="mono">FOOTER_Y</td><td class="num">226</td><td class="desc">240 − SAFE_INSET</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Anatomia de uma linha</h3>
+
+  <p>O retângulo da linha é <code>Rect(14, y, 372, 38)</code> — largura total menos as duas margens, altura <code>ROW_H − 4</code> para deixar 4 px de respiro entre linhas.</p>
+
+  <figure>
+    <svg viewBox="0 0 372 38" role="img" aria-label="Anatomia de uma linha de sessão com as três faixas de conteúdo">
+      <rect x="0" y="0" width="372" height="38" fill="var(--crt-black)" stroke="var(--crt-dim)" stroke-width="1"/>
+      <rect x="0" y="0" width="3" height="38" fill="var(--st-working)"/>
+
+      <rect x="6" y="5" width="10" height="8" fill="var(--st-working)" opacity="0.85"/>
+      <text x="20" y="11" font-family="var(--mono)" font-size="8" fill="var(--crt-white)">Analisador de qualidade.</text>
+      <text x="367" y="12" text-anchor="end" font-family="var(--mono)" font-size="10" fill="var(--st-working)">00:20</text>
+
+      <text x="20" y="24" font-family="var(--mono)" font-size="7" fill="var(--crt-white)">&gt; Bash</text>
+
+      <rect x="20" y="30" width="3" height="4" fill="var(--st-working)"/>
+      <rect x="25" y="31" width="3" height="2" fill="var(--crt-dim)"/>
+      <rect x="30" y="29" width="3" height="6" fill="var(--st-error)"/>
+      <rect x="35" y="30" width="3" height="4" fill="var(--st-working)"/>
+      <rect x="40" y="29" width="3" height="6" fill="none" stroke="var(--crt-white)" stroke-width="0.6"/>
+      <text x="52" y="34" font-family="var(--mono)" font-size="6" fill="var(--crt-dim)">4</text>
+      <rect x="306" y="31" width="52" height="3" fill="var(--crt-dim)" opacity="0.3"/>
+      <rect x="320" y="32" width="14" height="1" fill="var(--st-working)"/>
+
+      <g class="dg-label" fill="var(--ink-faint)">
+        <text x="80" y="11">+3  título (11 px)</text>
+        <text x="80" y="24">+17  linha de estado (9 px)</text>
+        <text x="80" y="35">+30  pontinhos, passo de 5 px</text>
+      </g>
+    </svg>
+    <figcaption>Faixa lateral de 3 px, bichinho de 10 × 8, e três faixas de conteúdo a +3, +17 e +30 do topo da linha. A barra indeterminada ocupa os últimos 66 px.</figcaption>
+  </figure>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Elemento</th><th>Posição</th><th>Regra</th></tr></thead>
+    <tbody>
+      <tr><td>Faixa de status</td><td class="mono">left, top, 3 × 38</td><td class="desc">o sinal que se lê de longe sem ler texto</td></tr>
+      <tr><td>Bichinho</td><td class="mono">+6, +5</td><td class="desc">sprite 10 × 8, <code>ESCALA_BICHO = 1</code>, cacheado por (cor, escala)</td></tr>
+      <tr><td>Nome da sessão</td><td class="mono">+20, +3</td><td class="desc">corpo 11, <strong>cortado em 24 caracteres</strong></td></tr>
+      <tr><td>Cronômetro</td><td class="mono">right −5, +2</td><td class="desc">corpo 13, cor do status, <code>mm:ss</code> (vira <code>h:mm:ss</code> após 1 h)</td></tr>
+      <tr><td>Linha de estado</td><td class="mono">+20, +17</td><td class="desc">corpo 9, cortada em 55 caracteres</td></tr>
+      <tr><td>Pontinhos</td><td class="mono">+20, +30</td><td class="desc">passo de 5 px, no máximo 40 (mostra os <em>últimos</em>)</td></tr>
+      <tr><td>Barra indeterminada</td><td class="mono">right −66, +31</td><td class="desc">52 × 3, cursor de 14 px, só quando <code>working</code></td></tr>
+      <tr><td>Barra de rolagem</td><td class="mono">x=393, 3 px</td><td class="desc">só aparece com mais de 4 sessões; pegador mínimo de 14 px</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Botões do cabeçalho</h3>
+
+  <p>Existem só no modo menu — no modo descanso o cabeçalho fica limpo e um relógio ocupa o canto direito.</p>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Botão</th><th>Hitbox</th><th>Faz</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">HOME</td><td class="mono">(14, 14, 52, 16)</td><td class="desc">sai da tela</td></tr>
+      <tr><td class="mono">RESET</td><td class="mono">(70, 14, 48, 16)</td><td class="desc">manda o painel esquecer todas as sessões — ícone de lixeira, não de recarga</td></tr>
+      <tr><td class="mono">SYNC</td><td class="mono">(334, 14, 52, 16)</td><td class="desc">força um ciclo de leitura</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>16 px lógicos = 32 px reais de altura de alvo. Num 5" isso já está no limite do confortável; encolher mais torna o toque impreciso.</p>
+</section>
+
+<section>
+  <h2>Cores</h2>
+
+  <p>A base é a paleta CRT compartilhada (<code>core/widgets.py</code>), que <strong>muda sozinha conforme o tema</strong>: <code>theme_state.apply_theme()</code> roda todo quadro e altera esses <code>pygame.Color</code> <em>no lugar</em>. Por isso nunca se deve rebindar esses nomes — <code>CRT_BLACK = ...</code> quebra o tema só para aquele módulo.</p>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Nome</th><th>RGB</th><th>Papel</th></tr></thead>
+    <tbody>
+      <tr><td class="mono"><span class="sw" style="background:#000"></span>CRT_BLACK</td><td class="num">0, 0, 0</td><td class="desc">fundo (muda com o tema)</td></tr>
+      <tr><td class="mono"><span class="sw" style="background:#ebebeb"></span>CRT_WHITE</td><td class="num">235, 235, 235</td><td class="desc">texto principal</td></tr>
+      <tr><td class="mono"><span class="sw" style="background:#5f5f5f"></span>CRT_DIM</td><td class="num">95, 95, 95</td><td class="desc">moldura, rótulos, ferramenta de leitura</td></tr>
+      <tr><td class="mono"><span class="sw" style="background:#262626"></span>TRILHO</td><td class="num">38, 38, 38</td><td class="desc">fundo da barra de rolagem</td></tr>
+      <tr><td class="mono"><span class="sw" style="background:#a5a5a5"></span>PEGADOR</td><td class="num">165, 165, 165</td><td class="desc">cursor da barra de rolagem</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Por cima disso, quatro cores — e só quatro. Elas aparecem sempre nos mesmos três lugares (faixa lateral, cronômetro, contador do cabeçalho), o que transforma a cor em vocabulário em vez de enfeite.</p>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Status</th><th>Cor</th><th>Hex</th><th>Significa</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">working</td><td class="mono"><span class="sw" style="background:#e8962a"></span>LARANJA</td><td class="num">#E8962A</td><td class="desc">trabalhando</td></tr>
+      <tr><td class="mono">waiting</td><td class="mono"><span class="sw" style="background:#50a2f0"></span>AZUL</td><td class="num">#50A2F0</td><td class="desc">está te esperando — nada quebrado</td></tr>
+      <tr><td class="mono">error</td><td class="mono"><span class="sw" style="background:#e24a3e"></span>VERMELHO</td><td class="num">#E24A3E</td><td class="desc">quebrou</td></tr>
+      <tr><td class="mono">done</td><td class="mono"><span class="sw" style="background:#40c694"></span>VERDE</td><td class="num">#40C694</td><td class="desc">turno concluído</td></tr>
+      <tr><td class="mono">idle / ended</td><td class="mono"><span class="sw" style="background:#5f5f5f"></span>CRT_DIM</td><td class="num">#5F5F5F</td><td class="desc">sem cor própria de propósito</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note">
+    <span class="tag">decisão anterior, vale preservar</span>
+    <p>Azul e vermelho contam coisas diferentes de propósito. Antes os dois eram vermelho e um erro parecia pergunta no canto do olho. <strong>“Precisa de você” é o único estado que cobra ação</strong> — por isso a linha ganha borda de 2 px pulsando a 1,6 Hz, enquanto todas as outras têm borda de 1 px estática.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Tipografia</h2>
+
+  <p>Todo texto passa por <code>render_text(texto, corpo, cor, pixel=…)</code>, que é <code>get_font(...).render(texto, False, cor)</code> — <strong>antialias desligado</strong>, coerente com a escala de vizinho mais próximo.</p>
+
+  <div class="note">
+    <span class="tag">achado — mexe no que dá pra assumir</span>
+    <p>O diretório <code>bmo_os/assets/fonts/</code> <strong>não existe</strong>, nem no PC nem na Raspberry. O ramo pixel de <code>get_font</code> procura <code>PressStart2P.ttf</code>, <code>pixel.ttf</code> e <code>DepartureMono.ttf</code>, não acha nenhum, e cai em <code>SysFont("consolas,courier,monospace", corpo, bold=True)</code>.</p>
+    <p>Na Raspberry isso resolve para <strong>DejaVu Sans Mono Bold</strong>. Ou seja: <code>pixel=True</code> e <code>pixel=False</code> hoje rendem a <em>mesma</em> fonte, e o único lugar da tela que pede <code>pixel=True</code> é o título “CLAUDE”. Instalar um <code>.ttf</code> ali muda a cara de todas as telas do aparelho de uma vez — é uma alavanca grande, e um risco grande.</p>
+  </div>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Constante</th><th>Corpo</th><th>Onde</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">FONT_CLOCK</td><td class="num">13</td><td class="desc">cronômetro do turno</td></tr>
+      <tr><td class="mono">FONT_TITLE</td><td class="num">11</td><td class="desc">“CLAUDE” no topo (único <code>pixel=True</code>)</td></tr>
+      <tr><td class="mono">FONT_FOLDER</td><td class="num">11</td><td class="desc">nome da sessão</td></tr>
+      <tr><td class="mono">FONT_LINE</td><td class="num">9</td><td class="desc">linha de estado e contadores</td></tr>
+      <tr><td class="mono">FONT_HINT</td><td class="num">8</td><td class="desc">rodapé, rótulos dos botões, resumo dos pontinhos</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Os cortes de texto são fixos em número de caracteres, via <code>_fit(texto, n)</code>, que troca o excedente por um ponto final: nome <strong>24</strong>, linha de estado <strong>55</strong>, dica do estado vazio <strong>46</strong>. Como a fonte é monoespaçada, isso funciona — mas amarra o layout à fonte atual. Trocar a fonte exige refazer esses números.</p>
+</section>
+
+<section>
+  <h2>Interação</h2>
+
+  <p>A tela tem dois modos, escolhidos no construtor por <code>ambient=True|False</code>.</p>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th></th><th>Modo menu</th><th>Modo descanso (ambient)</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">cabeçalho</td><td class="desc">HOME · RESET · SYNC</td><td class="desc">limpo, com relógio à direita</td></tr>
+      <tr><td class="mono">toque</td><td class="desc">aciona os botões</td><td class="desc">toque limpo volta ao menu</td></tr>
+      <tr><td class="mono">rolagem</td><td class="desc">arrasto, cima/baixo</td><td class="desc">arrasto</td></tr>
+      <tr><td class="mono">saída</td><td class="desc">B / MENU / HOME</td><td class="desc">A / MENU, ou toque</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Por que existem dois caminhos de evento</h3>
+
+  <p>O BMO normaliza toda entrada num único <code>ACTION_EVENT</code> com um <code>Action</code> (UP, DOWN, A, B, MENU, TAP…). Só que <strong>o ACTION_EVENT não carrega movimento do dedo</strong> — o TAP nasce no apertar e nada mais. Para arrastar, a tela escuta os eventos crus do pygame (<code>MOUSEBUTTONDOWN</code>, <code>MOUSEMOTION</code>, <code>MOUSEBUTTONUP</code>) e converte a posição com um <code>_to_logical</code> próprio, porque os eventos crus não passam pelo conversor do <code>App</code>.</p>
+
+  <p>Daí a sutileza do modo descanso: sair no TAP mataria toda rolagem antes do primeiro pixel. Quem decide a saída é o <em>soltar</em>, que já sabe se o dedo andou.</p>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Constante</th><th>Valor</th><th>Papel</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">DRAG_LIMIAR_PX</td><td class="num">4</td><td class="desc">separa “toquei” de “arrastei”; sem isso o tremor do dedo vira rolagem</td></tr>
+      <tr><td class="mono">ATRITO</td><td class="num">0.88</td><td class="desc">por 1/60 s — desacelera o embalo</td></tr>
+      <tr><td class="mono">VEL_MINIMA</td><td class="num">8 px/s</td><td class="desc">abaixo disso a inércia para, evitando tremeliques</td></tr>
+      <tr><td class="mono">VEL_MAXIMA</td><td class="num">1200 px/s</td><td class="desc">teto contra divisão por ~0 em dois eventos no mesmo ms</td></tr>
+      <tr><td class="mono">BLINK_HZ</td><td class="num">1.6</td><td class="desc">pulso da linha em “precisa de você”</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>A rolagem é medida em <strong>pixels</strong>, não em linhas — por isso a lista para no meio de uma linha e o <code>set_clip</code> é obrigatório para não invadir cabeçalho e rodapé.</p>
+</section>
+
+<section>
+  <h2>De onde vêm os dados</h2>
+
+  <p>A tela não fala com a rede. Ela lê um snapshot de <code>ClaudeSessionsService</code>, que roda numa thread própria e faz o trabalho todo fora do quadro.</p>
+
+  <figure>
+    <svg viewBox="0 0 400 74" role="img" aria-label="Fluxo dos dados: VS Code para o painel do PC, painel para a Raspberry, serviço para a tela">
+      <g font-family="var(--mono)" font-size="7">
+        <rect x="2" y="16" width="86" height="26" rx="2" fill="var(--surface-alt)" stroke="var(--rule-strong)" stroke-width="0.6"/>
+        <text x="45" y="27" text-anchor="middle" fill="var(--ink)">janelas do</text>
+        <text x="45" y="36" text-anchor="middle" fill="var(--ink)">VS Code</text>
+
+        <rect x="118" y="16" width="86" height="26" rx="2" fill="var(--surface-alt)" stroke="var(--rule-strong)" stroke-width="0.6"/>
+        <text x="161" y="27" text-anchor="middle" fill="var(--ink)">server.mjs</text>
+        <text x="161" y="36" text-anchor="middle" fill="var(--ink-faint)">PC-JP:4747</text>
+
+        <rect x="234" y="16" width="76" height="26" rx="2" fill="var(--surface-alt)" stroke="var(--rule-strong)" stroke-width="0.6"/>
+        <text x="272" y="27" text-anchor="middle" fill="var(--ink)">Service</text>
+        <text x="272" y="36" text-anchor="middle" fill="var(--ink-faint)">thread</text>
+
+        <rect x="340" y="16" width="58" height="26" rx="2" fill="var(--accent-bg)" stroke="var(--accent)" stroke-width="0.8"/>
+        <text x="369" y="32" text-anchor="middle" fill="var(--accent)">draw()</text>
+
+        <g stroke="var(--rule-strong)" stroke-width="0.7" fill="none">
+          <path d="M88 29 L116 29"/><path d="M112 26 L118 29 L112 32" fill="var(--rule-strong)"/>
+          <path d="M204 29 L232 29"/><path d="M228 26 L234 29 L228 32" fill="var(--rule-strong)"/>
+          <path d="M310 29 L338 29"/><path d="M334 26 L340 29 L334 32" fill="var(--rule-strong)"/>
+        </g>
+
+        <g font-size="5.5" fill="var(--ink-faint)" text-anchor="middle">
+          <text x="102" y="13">hooks</text>
+          <text x="218" y="13">GET /estado</text>
+          <text x="218" y="52">a cada 2 s</text>
+          <text x="324" y="13">snapshot</text>
+          <text x="324" y="52">sem I/O</text>
+        </g>
+      </g>
+    </svg>
+    <figcaption>Os hooks do Claude Code alimentam um painel HTTP no PC; a Raspberry puxa dele. A thread guarda um snapshot sob lock e o <code>draw</code> só lê — o quadro nunca bloqueia em rede.</figcaption>
+  </figure>
+
+  <h3>Campos de cada sessão</h3>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Campo</th><th>Tipo</th><th>Observação</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">folder</td><td class="mono">str</td><td class="desc">o nome exibido: título da aba do VS Code, ou a pasta como reserva</td></tr>
+      <tr><td class="mono">status</td><td class="mono">str</td><td class="desc">idle · working · waiting · done · error · ended</td></tr>
+      <tr><td class="mono">current_tool</td><td class="mono">str</td><td class="desc">ferramenta rodando agora, ou vazio</td></tr>
+      <tr><td class="mono">tool_count</td><td class="mono">int</td><td class="desc">total real; pode ser maior que <code>len(ticks)</code></td></tr>
+      <tr><td class="mono">ticks</td><td class="mono">list</td><td class="desc"><code>ToolTick(name, kind, failed)</code>, <code>kind</code> ∈ acao · leitura</td></tr>
+      <tr><td class="mono">elapsed_s</td><td class="mono">float</td><td class="desc"><strong>calculado no PC</strong> — ver aviso abaixo</td></tr>
+      <tr><td class="mono">notice</td><td class="mono">str</td><td class="desc">o que o Claude está pedindo (permissão, resposta)</td></tr>
+      <tr><td class="mono">last_message</td><td class="mono">str</td><td class="desc">última fala, usada em done e ended</td></tr>
+      <tr><td class="mono">prompt</td><td class="mono">str</td><td class="desc">último prompt enviado</td></tr>
+      <tr><td class="mono">updated_at</td><td class="mono">float</td><td class="desc">relógio do PAINEL, em ms</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note">
+    <span class="tag">armadilha de relógio</span>
+    <p>Os relógios do PC e da Raspberry não estão sincronizados. Por isso <code>elapsed_s</code> chega pronto do PC e <code>updated_at</code> só serve para <strong>comparar sessões entre si</strong> — nunca contra <code>time.time()</code> da Raspberry. O <code>draw</code> completa o cronômetro somando <code>time.time() − fetched_at</code>, que é uma medida local de ponta a ponta e não mistura os dois relógios.</p>
+  </div>
+
+  <h3>A lista já chega ordenada</h3>
+
+  <p><code>organizar()</code> roda no serviço, antes da tela. Ela remove id repetido, descarta sessão morta com mais de 10 min, colapsa mortas cujo nome já tem sessão viva, e ordena por urgência: <strong>waiting → error → working → done → idle → ended</strong>, e dentro de cada faixa pela mais recente.</p>
+
+  <p>Isso garante que “precisa de você” nunca nasça fora da área visível. <strong>Qualquer reordenação nova na tela precisa preservar essa garantia.</strong></p>
+</section>
+
+<section>
+  <h2>Como se chega na tela</h2>
+
+  <p>Ela <strong>não está no menu principal</strong> — foi tirada de lá de propósito (“é um monitor pra ficar olhando, não um app pra abrir e fechar”). Restam três caminhos:</p>
+
+  <ul>
+    <li><strong>Modo descanso</strong> — SLEEP → CLAUDE. É como está configurada hoje (<code>ambient_mode: "claude"</code>), e é o uso principal.</li>
+    <li><strong>Voz</strong> — “claude”, “claudes”, “sessão”, “sessões”.</li>
+    <li><strong>Roteador de telas do LLM</strong> — chave <code>"claude"</code> em <code>screen_actions</code>.</li>
+  </ul>
+
+  <p>O <code>sleep.py</code> ainda desenha uma miniatura de prévia da tela no seletor de modos (<code>_draw_claude_preview</code>) — se a cara da tela mudar, essa prévia precisa acompanhar.</p>
+</section>
+
+<section>
+  <h2>Onde mexer</h2>
+
+  <div class="files">
+    <div class="file">
+      <span class="path">bmo_os/screens/claude_sessions.py</span><span class="lines">603 linhas</span>
+      <span class="what">A tela. Constantes, sprite do bichinho, arrasto, e todo o desenho.</span>
+    </div>
+    <div class="file">
+      <span class="path">bmo_os/services/claude_sessions.py</span><span class="lines">412 linhas</span>
+      <span class="what">Thread de consulta, dataclasses, <code>organizar()</code>, resolução de nome com prazo.</span>
+    </div>
+    <div class="file">
+      <span class="path">bmo_os/screens/sleep.py</span><span class="lines">—</span>
+      <span class="what">Registro do modo ambient e a miniatura de prévia.</span>
+    </div>
+    <div class="file">
+      <span class="path">bmo_os/core/widgets.py</span><span class="lines">—</span>
+      <span class="what"><code>SAFE_INSET</code> e a paleta CRT mutável. Compartilhado com todas as telas.</span>
+    </div>
+    <div class="file">
+      <span class="path">bmo_os/core/theme.py</span><span class="lines">—</span>
+      <span class="what"><code>LOGICAL_SIZE</code>, <code>FPS</code>, <code>get_font</code>, <code>render_text</code>.</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Pontos de atenção</h2>
+
+  <p>Coisas que já custaram caro e não são óbvias lendo o arquivo:</p>
+
+  <ol>
+    <li><strong>Não rebindar as cores CRT.</strong> <code>CRT_BLACK</code> e companhia são <code>pygame.Color</code> mutados no lugar todo quadro pelo tema. Reatribuir o nome quebra o tema só naquele módulo.</li>
+    <li><strong>Esta tela não desenha scanlines</strong>, ao contrário de quase todas as outras (agenda, brain, alert…). Foi escolha, não esquecimento: linhas de varredura por cima de pontinhos de 2–3 px comeriam o sinal. Vale reavaliar, mas com essa perda em mente.</li>
+    <li><strong>Cortes fixos em caracteres.</strong> Os limites de 24 / 55 / 46 só funcionam porque a fonte é monoespaçada. Fonte proporcional exige medir em pixels.</li>
+    <li><strong>Quatro linhas é o teto real.</strong> Com uma 5ª visível, cada linha cairia para ~33 px e as três faixas de conteúdo não cabem mais.</li>
+    <li><strong>A barra é indeterminada de propósito.</strong> Não existe percentual real de conclusão de um turno — só a contagem de tool calls. Inventar uma porcentagem seria mentir.</li>
+    <li><strong>O sprite do bichinho é cacheado por (cor, escala).</strong> São ~60 quadradinhos por bicho e até 5 bichos por quadro; redesenhar 30×/s no Pi 4 não vale.</li>
+    <li><strong>Estado vazio tem três textos diferentes</strong> — acabou de zerar, nenhuma sessão, painel offline. Cada um responde uma pergunta distinta do usuário.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>Como testar</h2>
+
+  <p>Não precisa da Raspberry para iterar no visual.</p>
+
+  <ul>
+    <li><strong>No Windows, em janela:</strong> <code>python -m bmo_os.main</code> a partir da raiz do repo. Sai com F4. Renderiza igual — mesmo canvas, mesma escala.</li>
+    <li><strong>Com dados de verdade:</strong> aponte <code>CLAUDE_PAINEL_URL</code> para o painel do PC (<code>http://127.0.0.1:4747</code>) e as suas sessões abertas aparecem.</li>
+    <li><strong>Com dados sintéticos:</strong> <code>node testar.mjs</code> na pasta <code>claude-painel</code> injeta sessões em cada status, inclusive falhas — é assim que se testa “precisa de você” e “erro” sem esperar acontecer.</li>
+    <li><strong>Print da tela real:</strong> por SSH na Raspberry, com <code>XDG_RUNTIME_DIR=/run/user/1000</code> e <code>WAYLAND_DISPLAY=wayland-0</code>, rode <code>grim /tmp/tela.png</code>. Sai um PNG de 800 × 480 sem interromper o BMO.</li>
+  </ul>
+
+  <p>O repo <strong>não tem suíte de testes, linter nem build</strong> — a verificação é rodar o app. E o deploy na Raspberry é por <code>origin/main</code>: o botão ATUALIZAR faz <code>git reset --hard</code>, então editar arquivo direto no aparelho é perdido no próximo update.</p>
+</section>
+
+</div>
+</body>
+</html>
