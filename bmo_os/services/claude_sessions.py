@@ -11,6 +11,10 @@ ou `bmo_config.json["claude_painel_url"]`. Precedência: env > config > default.
 
 O servidor precisa estar escutando na rede, não só em loopback:
     HOST=0.0.0.0 node server.mjs
+
+Cada sessão vem com `title` (o nome da aba do VS Code) além de `cwd`. É o
+`title` que vira o nome na tela; a pasta do `cwd` só entra quando ele falta.
+Painel velho, que não manda o campo, continua funcionando pela pasta.
 """
 from __future__ import annotations
 
@@ -75,6 +79,8 @@ class ToolTick:
 @dataclass
 class ClaudeSession:
     id: str
+    # como a sessão se chama na tela: o título da aba do VS Code quando existe,
+    # senão a pasta. Ver _rotulo().
     folder: str = "?"
     status: str = "idle"
     prompt: str = ""
@@ -145,6 +151,25 @@ def _folder_of(cwd: str) -> str:
     return parts[-1] if parts else "?"
 
 
+def _rotulo(item: dict) -> str:
+    """Como a sessão se chama na tela.
+
+    Preferimos `title` — o nome que o Claude Code dá à conversa, o mesmo que
+    aparece na aba do VS Code. Ele diz o que a sessão ESTÁ FAZENDO ("Analisador
+    de qualidade de golpes"), enquanto a pasta só diz onde ela mora; com duas
+    janelas abertas no mesmo repo, a pasta não distingue uma da outra.
+
+    O painel relê esse título de minuto em minuto, então renomear a conversa no
+    VS Code muda o nome aqui sozinho.
+
+    A pasta continua como reserva, e é ela que aparece em dois casos reais:
+    sessão recém-aberta, que ainda não ganhou título, e painel antigo, que não
+    manda o campo.
+    """
+    return (str(item.get("title", "")).strip()
+            or _folder_of(str(item.get("cwd", ""))))
+
+
 # O painel guarda TODA sessão que já passou por ele e nunca descarta as
 # encerradas — abrir três vezes o mesmo repo deixa três linhas iguais na tela.
 # Isto aqui é um monitor do AGORA, não um histórico: sessão morta velha sai.
@@ -165,9 +190,14 @@ def organizar(sessions: list[ClaudeSession]) -> list[ClaudeSession]:
 
     Três regras, nesta ordem:
       1. id repetido some (defesa — o painel não deveria repetir, mas repete);
-      2. sessão morta (idle/ended) some se estiver velha, se a pasta já tem
-         sessão viva, ou se é a mais antiga entre as mortas daquela pasta;
+      2. sessão morta (idle/ended) some se estiver velha, se aquele nome já tem
+         sessão viva, ou se é a mais antiga entre as mortas do mesmo nome;
       3. o que sobra é ordenado por urgência e, dentro dela, pela mais recente.
+
+    A regra 2 agrupa por NOME, que hoje é o título da conversa e não mais a
+    pasta: duas janelas no mesmo repo têm títulos diferentes e agora aparecem
+    como duas linhas — que é o certo, são duas conversas. Só volta a colapsar
+    por pasta quando o painel não manda título (ver _rotulo).
 
     A idade é medida contra o relógio do PRÓPRIO painel (o updatedAt mais novo
     do lote), nunca contra o da Raspberry — os dois relógios divergem e usar o
@@ -184,7 +214,7 @@ def organizar(sessions: list[ClaudeSession]) -> list[ClaudeSession]:
         return []
 
     agora = max((s.updated_at for s in itens), default=0.0)
-    pastas_vivas = {s.folder for s in itens if s.status in VIVOS}
+    nomes_vivos = {s.folder for s in itens if s.status in VIVOS}
 
     mantidas: list[ClaudeSession] = []
     melhor_morta: dict[str, ClaudeSession] = {}
@@ -194,11 +224,11 @@ def organizar(sessions: list[ClaudeSession]) -> list[ClaudeSession]:
             continue
         if agora and s.updated_at and (agora - s.updated_at) > ENDED_TTL_MS:
             continue                      # encerrada e velha: é histórico
-        if s.folder in pastas_vivas:
-            continue                      # a pasta já tem sessão de verdade
+        if s.folder in nomes_vivos:
+            continue                      # esse nome já tem sessão de verdade
         atual = melhor_morta.get(s.folder)
         if atual is None or s.updated_at > atual.updated_at:
-            melhor_morta[s.folder] = s    # uma linha por pasta, a mais nova
+            melhor_morta[s.folder] = s    # uma linha por nome, a mais nova
 
     mantidas.extend(melhor_morta.values())
     mantidas.sort(key=lambda s: (ORDEM_STATUS.get(s.status, 9), -s.updated_at))
@@ -341,7 +371,7 @@ class ClaudeSessionsService:
             sessions.append(ClaudeSession(
                 ticks=ticks,
                 id=str(item.get("id", "")),
-                folder=_folder_of(str(item.get("cwd", ""))),
+                folder=_rotulo(item),
                 status=str(item.get("status", "idle")),
                 prompt=str(item.get("prompt", "")).strip(),
                 notice=str(item.get("notice", "")).strip(),
