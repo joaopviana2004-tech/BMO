@@ -1,0 +1,51 @@
+{
+  "items": [
+    {
+      "id": "r1",
+      "text": "Tarefa para hoje: Carencia em Contratos",
+      "area": "",
+      "kind": "task",
+      "when": "2026-07-20",
+      "created": "2026-07-20T19:09:29",
+      "read": false,
+      "spoke": false
+    },
+    {
+      "id": "r2",
+      "text": "Tarefa para hoje: Contrato PJ sem CNPJ e Automação HS-> Drive",
+      "area": "",
+      "kind": "task",
+      "when": "2026-07-20",
+      "created": "2026-07-20T19:09:29",
+      "read": false,
+      "spoke": false
+    },
+    {
+      "id": "r3",
+      "text": "Tarefa para hoje: Preparar Apresentação PDI",
+      "area": "",
+      "kind": "task",
+      "when": "2026-07-20",
+      "created": "2026-07-20T19:09:29",
+      "read": false,
+      "spoke": false
+    },
+    {
+      "id": "r4",
+      "text": "Resumo de hoje (20/07):\n- tarefa hoje: Carencia em Contratos\n- tarefa hoje: Contrato PJ sem CNPJ e Automação HS-> Drive\n- tarefa hoje: Preparar Apresentação PDI",
+      "area": "",
+      "kind": "briefing",
+      "when": "",
+      "created": "2026-07-20T19:09:29",
+      "read": false,
+      "spoke": false
+    }
+  ],
+  "fired": {
+    "due:e58e64a8-b7f8-4848-b561-976dd6aa8a9a:2026-07-20": "2026-07-20",
+    "due:e909d000-4fee-45af-b0c2-61542c10e85e:2026-07-20": "2026-07-20",
+    "due:0697f01c-bb7d-4a18-a2a2-8249d7323e15:2026-07-20": "2026-07-20",
+    "briefing:2026-07-20": "2026-07-20"
+  },
+  "seq": 4
+}
