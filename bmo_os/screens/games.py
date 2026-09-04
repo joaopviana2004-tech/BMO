@@ -210,3 +210,22 @@ def draw_haxball_icon(surface: pygame.Surface, rect: pygame.Rect) -> None:
     pygame.draw.circle(surface, (232, 84, 72), (cx - 12, cy), 4)     # disco vermelho
     pygame.draw.circle(surface, (92, 152, 240), (cx + 12, cy), 4)    # disco azul
     pygame.draw.circle(surface, (245, 245, 245), (cx, cy), 3)        # bola
+
+
+def draw_padel_icon(surface: pygame.Surface, rect: pygame.Rect) -> None:
+    """Quadra de padel vista de cima: piso azul, vidros claros, rede e a bola.
+
+    Mesmas cores do jogo (assets/arenas/partida_azul) pra o ícone e a tela
+    contarem a mesma história — quem vê o ícone reconhece a quadra ao entrar.
+    """
+    cx, cy = rect.center
+    pygame.draw.rect(surface, (38, 92, 176), (cx - 20, cy - 12, 40, 24))     # piso
+    pygame.draw.rect(surface, (150, 200, 235), (cx - 20, cy - 12, 40, 24), 1)  # vidros
+    pygame.draw.line(surface, (235, 235, 235), (cx - 20, cy), (cx + 20, cy), 1)  # linha central
+    pygame.draw.line(surface, (245, 245, 245), (cx, cy - 12), (cx, cy + 12), 1)  # rede
+    for lado in (-1, 1):                      # linhas de saque
+        pygame.draw.line(surface, (235, 235, 235),
+                         (cx + 13 * lado, cy - 12), (cx + 13 * lado, cy + 12), 1)
+    pygame.draw.rect(surface, (208, 60, 52), (cx - 10, cy - 7, 4, 5))       # você
+    pygame.draw.rect(surface, (232, 196, 72), (cx + 7, cy + 3, 4, 5))       # rival
+    pygame.draw.circle(surface, (226, 240, 92), (cx + 3, cy - 4), 2)        # bola

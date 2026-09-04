@@ -1,0 +1,246 @@
+{
+ "rects": {
+  "swoosh_0": [
+   0,
+   0,
+   28,
+   28
+  ],
+  "swoosh_1": [
+   29,
+   0,
+   28,
+   28
+  ],
+  "swoosh_2": [
+   58,
+   0,
+   28,
+   28
+  ],
+  "swoosh_3": [
+   87,
+   0,
+   28,
+   28
+  ],
+  "impacto_0": [
+   116,
+   0,
+   16,
+   16
+  ],
+  "impacto_1": [
+   133,
+   0,
+   16,
+   16
+  ],
+  "impacto_2": [
+   150,
+   0,
+   16,
+   16
+  ],
+  "vento_0": [
+   167,
+   0,
+   24,
+   12
+  ],
+  "vento_1": [
+   192,
+   0,
+   24,
+   12
+  ],
+  "vento_2": [
+   217,
+   0,
+   24,
+   12
+  ],
+  "bola_fogo_0": [
+   0,
+   29,
+   26,
+   14
+  ],
+  "bola_fogo_1": [
+   27,
+   29,
+   26,
+   14
+  ],
+  "bola_fogo_2": [
+   54,
+   29,
+   26,
+   14
+  ],
+  "bola_fogo_3": [
+   81,
+   29,
+   26,
+   14
+  ],
+  "poeira_0": [
+   108,
+   29,
+   24,
+   16
+  ],
+  "poeira_1": [
+   133,
+   29,
+   24,
+   16
+  ],
+  "poeira_2": [
+   158,
+   29,
+   24,
+   16
+  ],
+  "poeira_3": [
+   183,
+   29,
+   24,
+   16
+  ],
+  "marcador_0": [
+   208,
+   29,
+   12,
+   14
+  ],
+  "marcador_1": [
+   221,
+   29,
+   12,
+   14
+  ],
+  "marcador_verde_0": [
+   234,
+   29,
+   12,
+   14
+  ],
+  "marcador_verde_1": [
+   0,
+   46,
+   12,
+   14
+  ],
+  "marcador_vermelho_0": [
+   13,
+   46,
+   12,
+   14
+  ],
+  "marcador_vermelho_1": [
+   26,
+   46,
+   12,
+   14
+  ],
+  "bola_rastro": [
+   39,
+   46,
+   24,
+   6
+  ],
+  "bola_rapida": [
+   64,
+   46,
+   16,
+   6
+  ],
+  "sombra_bola": [
+   81,
+   46,
+   8,
+   4
+  ],
+  "sombra_jogador": [
+   90,
+   46,
+   16,
+   5
+  ],
+  "tag_voce": [
+   107,
+   46,
+   30,
+   14
+  ],
+  "tag_parceiro": [
+   138,
+   46,
+   54,
+   14
+  ],
+  "tag_rival": [
+   193,
+   46,
+   36,
+   14
+  ]
+ },
+ "anims": {
+  "swoosh": {
+   "frames": 4,
+   "fps": 16
+  },
+  "impacto": {
+   "frames": 3,
+   "fps": 14
+  },
+  "vento": {
+   "frames": 3,
+   "fps": 12
+  },
+  "bola_fogo": {
+   "frames": 4,
+   "fps": 12
+  },
+  "poeira": {
+   "frames": 4,
+   "fps": 10
+  },
+  "marcador": {
+   "frames": 2,
+   "fps": 3
+  },
+  "marcador_verde": {
+   "frames": 2,
+   "fps": 3
+  },
+  "marcador_vermelho": {
+   "frames": 2,
+   "fps": 3
+  },
+  "bola_rastro": {
+   "frames": 1
+  },
+  "bola_rapida": {
+   "frames": 1
+  },
+  "sombra_bola": {
+   "frames": 1
+  },
+  "sombra_jogador": {
+   "frames": 1
+  },
+  "tag_voce": {
+   "frames": 1
+  },
+  "tag_parceiro": {
+   "frames": 1
+  },
+  "tag_rival": {
+   "frames": 1
+  }
+ },
+ "nota": "bola_fogo/bola_rapida/rastro/vento apontam p/ direita; girar/espelhar conforme direcao da bola"
+}

@@ -229,3 +229,6 @@ hosts.local
 
 # cache local do builder de RAG (embeddings)
 scripts/.rag_cache.json
+
+# O Padel grava as preferencias dele (volume, mira) ao lado do proprio codigo.
+bmo_os/games/padel/config.json

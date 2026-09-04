@@ -33,12 +33,13 @@ from bmo_os.screens.brain import BrainScreen
 from bmo_os.screens.confirm import ConfirmScreen
 from bmo_os.screens.claude_sessions import ClaudeSessionsScreen
 from bmo_os.screens.devhub import DevHubScreen
+from bmo_os.screens.padel import PadelScreen
 from bmo_os.screens.clock import ClockScreen
 from bmo_os.screens.flappy import FlappyScreen
 from bmo_os.screens.flappy_train import FlappyTrainScreen
 from bmo_os.screens.games import (
-    GamesScreen, draw_flappy_icon, draw_haxball_icon, draw_pong_icon,
-    draw_snake_icon, draw_space_invaders_icon,
+    GamesScreen, draw_flappy_icon, draw_haxball_icon, draw_padel_icon,
+    draw_pong_icon, draw_snake_icon, draw_space_invaders_icon,
 )
 from bmo_os.screens.haxball import HaxballScreen
 from bmo_os.screens.haxball_train import HaxballTrainScreen
@@ -410,8 +411,18 @@ def build_initial(app: App):
                         HaxballScreen(on_back=app.manager.pop)
                     ),
                 },
+                {
+                    "label": "Padel",
+                    "draw_icon": draw_padel_icon,
+                    "launch": lambda: app.manager.push(make_padel_screen()),
+                },
             ],
         )
+
+    def make_padel_screen() -> PadelScreen:
+        # O jogo tem menu proprio (clube, partida rapida, opcoes) e a saida dele
+        # e o SAIR de la — por isso nao ha botao de voltar por cima da tela.
+        return PadelScreen(on_back=app.manager.pop)
 
     def open_suspend() -> None:
         # Suspende: display off + FPS baixo. Wake → vai direto pro ambient.
@@ -601,6 +612,8 @@ def build_initial(app: App):
                            _cmd(lambda: app.manager.push(make_devhub_screen())))
     voice.register_command(["claude", "claudes", "sessao", "sessoes"],
                            _cmd(lambda: app.manager.push(make_claude_screen())))
+    voice.register_command(["padel", "padle", "quadra", "raquete"],
+                           _cmd(lambda: app.manager.push(make_padel_screen())))
     voice.register_command(["configura", "ajuste", "settings"], _cmd(lambda: app.manager.push(make_settings())))
     voice.register_command(["menu", "inicio", "casa", "home"], _cmd(open_home))
     voice.register_command(["relogio", "horas", "tela inicial", "descanso"], _cmd(go_ambient))
@@ -659,6 +672,7 @@ def build_initial(app: App):
         "devhub": lambda: app.manager.push(make_devhub_screen()),
         "casa": lambda: app.manager.push(make_smarthome_screen()),
         "claude": lambda: app.manager.push(make_claude_screen()),
+        "padel": lambda: app.manager.push(make_padel_screen()),
         "configuracoes": lambda: app.manager.push(make_settings()),
         # relógio explícito (NÃO o ambient configurado, que pode ser face/pong)
         "relogio": lambda: app.manager.replace(_instantiate_ambient("clock")),

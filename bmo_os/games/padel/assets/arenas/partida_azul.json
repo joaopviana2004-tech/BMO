@@ -1,0 +1,38 @@
+{
+ "screen": [
+  640,
+  360
+ ],
+ "scale_px_per_m": 20,
+ "court": [
+  120,
+  92,
+  400,
+  200
+ ],
+ "net_x": 320,
+ "service_x": [
+  181,
+  459
+ ],
+ "center_y": 192,
+ "team_left_side": [
+  120,
+  92,
+  200,
+  200
+ ],
+ "team_right_side": [
+  320,
+  92,
+  200,
+  200
+ ],
+ "scoreboard": [
+  220,
+  6,
+  200,
+  40
+ ],
+ "note": "jogadores: 'side' virados p/ a rede (esq. espelhado); 'front'/'back' ao andar vertical"
+}
