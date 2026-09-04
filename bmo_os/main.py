@@ -59,6 +59,7 @@ from bmo_os.screens.shuffler import ShufflingAmbientScreen
 from bmo_os.screens.sleep import SleepScreen
 from bmo_os.screens.space_invaders import SpaceInvadersAmbientScreen, SpaceInvadersScreen
 from bmo_os.screens.suspended import SuspendedScreen
+from bmo_os.screens.painel import PainelScreen
 from bmo_os.screens.tasks import TasksScreen
 from bmo_os.services import audio
 from bmo_os.services import google_auth
@@ -469,6 +470,7 @@ def build_initial(app: App):
                     SleepScreen(on_back=pop, on_select_mode=select_ambient)),
                 on_suspend=open_suspend,
                 on_tasks=lambda: push(TasksScreen(on_back=pop, todoist=todoist)),
+                on_painel=lambda: push(PainelScreen(on_back=pop)),
                 on_agenda=lambda: push(AgendaScreen(on_back=pop, calendar=calendar)),
                 on_pomodoro=lambda: push(pomodoro),
                 on_recorder=lambda: push(make_recorder_screen()),

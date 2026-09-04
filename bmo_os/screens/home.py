@@ -91,6 +91,21 @@ def _icon_photo(surf: pygame.Surface, cx: int, cy: int) -> None:
     pygame.draw.rect(surf, CRT_WHITE, (body.right - 6, body.top + 3, 3, 3))
 
 
+def _icon_painel(surf: pygame.Surface, cx: int, cy: int) -> None:
+    """Um monitor: e o painel web da Plataforma numa tela, nao mais uma lista."""
+    w, h = 34, 24
+    x, y = cx - w // 2, cy - h // 2 - 3
+    pygame.draw.rect(surf, CRT_WHITE, (x, y, w, h), 1)
+    # tres coluninhas la dentro, ecoando o kanban que ele abre
+    for i in range(3):
+        cw = 8
+        pygame.draw.rect(surf, CRT_DIM if i == 2 else CRT_WHITE,
+                         (x + 3 + i * (cw + 2), y + 4, cw, h - 8))
+    # pe do monitor
+    pygame.draw.rect(surf, CRT_WHITE, (cx - 6, y + h, 12, 2))
+    pygame.draw.rect(surf, CRT_WHITE, (cx - 10, y + h + 2, 20, 2))
+
+
 def _icon_tasks(surf: pygame.Surface, cx: int, cy: int) -> None:
     col_w, col_h, gap = 12, 30, 3
     total_w = 3 * col_w + 2 * gap
@@ -301,6 +316,7 @@ def build_categories(
     on_suspend: Callable[[], None],
     on_tasks: Callable[[], None],
     on_agenda: Callable[[], None],
+    on_painel: Callable[[], None],
     on_pomodoro: Callable[[], None],
     on_recorder: Callable[[], None],
     on_games: Callable[[], None],
@@ -327,6 +343,7 @@ def build_categories(
         HubCategory("ESTUDOS", _icon_cat_study, [
             HubItem("TASKS", _icon_tasks, on_tasks),
             HubItem("AGENDA", _icon_agenda, on_agenda),
+            HubItem("PAINEL", _icon_painel, on_painel),
             HubItem("FOCO", _icon_pomodoro, on_pomodoro),
             HubItem("GRAVAR", _icon_recorder, on_recorder),
             HubItem("JOGOS", _icon_games, on_games),
