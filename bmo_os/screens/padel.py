@@ -26,6 +26,7 @@ import pygame
 
 from ..core.theme import LOGICAL_SIZE, render_text
 from ..core.widgets import CRT_BLACK, CRT_DIM, CRT_WHITE, SAFE_INSET
+from ..services import audio
 
 # Resolução nativa do jogo. Não é ajustável: o layout dele é desenhado nela.
 JOGO_W, JOGO_H = 640, 360
@@ -45,6 +46,33 @@ def _encaixe() -> tuple[int, int, int, int]:
 
 DEST_X, DEST_Y, DEST_W, DEST_H = _encaixe()
 
+# ---------------------------------------------------------------- saída por toque
+#
+# O jogo é de teclado e gamepad — não tem toque. O BMO, na Raspberry, só tem o
+# touchscreen: sem um controle espetado na USB, quem abre o jogo NÃO CONSEGUE
+# chegar no SAIR dele e fica preso, e a única saída vira derrubar o processo por
+# SSH. Por isso o adaptador oferece uma saída própria, que não existe no jogo:
+# segurar o dedo na tela por um tempo.
+#
+# Segurar, e não tocar: o toque simples é repassado ao jogo (os menus dele
+# respondem ao mouse) e roubar isso quebraria a navegação. O anel que cresce sob
+# o dedo é o que torna a saída descobrível — sem ele seria um segredo.
+SAIR_SEGURAR_S = 1.2
+SAIR_TOLERANCIA_PX = 12      # acima disso é arrasto, não "segurar"
+DICA_S = 4.0                 # quanto tempo o aviso de "segure para sair" fica
+
+
+def _para_logico(pos: tuple[int, int]) -> tuple[int, int]:
+    """Pixel da janela -> canvas 400x240.
+
+    Os eventos crus de mouse chegam à tela SEM passar pelo conversor do App —
+    só o ACTION_EVENT vem convertido. Mesmo helper de screens/claude_sessions.
+    """
+    w, h = pygame.display.get_window_size()
+    if w <= 0 or h <= 0:
+        return pos
+    return (pos[0] * LOGICAL_SIZE[0] // w, pos[1] * LOGICAL_SIZE[1] // h)
+
 
 class PadelScreen:
     voice_announce = "O jogo de padel."
@@ -60,6 +88,10 @@ class PadelScreen:
         self._eventos: list = []     # o que chegou desde o último passo
         self._erro = ""
         self._carregando = True      # mostra um aviso antes de travar carregando
+        self._t = 0.0
+        self._toque_em: tuple[int, int] | None = None   # onde o dedo encostou
+        self._toque_desde = 0.0
+        self._saindo = False         # já pedimos a saída; não pedir duas vezes
 
     # ---------- ciclo de vida ----------
 
@@ -69,6 +101,9 @@ class PadelScreen:
         # o BMO ficaria congelado sem explicar por quê. O carregamento acontece
         # no primeiro update, depois que "CARREGANDO" já apareceu na tela.
         self._carregando = True
+        self._t = 0.0
+        self._toque_em = None
+        self._saindo = False
 
     def exit(self) -> None:
         if self._app is not None:
@@ -138,6 +173,19 @@ class PadelScreen:
     # ---------- entrada ----------
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        # O "segurar para sair" é medido aqui e repassado ao jogo do mesmo jeito:
+        # ele não consome o toque, só observa.
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            self._toque_em = _para_logico(event.pos)
+            self._toque_desde = self._t
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self._toque_em = None
+        elif event.type == pygame.MOUSEMOTION and self._toque_em is not None:
+            x, y = _para_logico(event.pos)
+            if abs(x - self._toque_em[0]) > SAIR_TOLERANCIA_PX \
+                    or abs(y - self._toque_em[1]) > SAIR_TOLERANCIA_PX:
+                self._toque_em = None      # virou arrasto: não é pedido de saída
+
         # Só empilha; quem entrega ao jogo é o update, que é onde o quadro dele
         # acontece. Assim a ordem evento->update->draw fica igual à do laço
         # original e nada é processado duas vezes.
@@ -154,7 +202,25 @@ class PadelScreen:
 
     # ---------- quadro ----------
 
+    def _progresso_saida(self) -> float:
+        """0..1 de quanto falta do 'segurar para sair'."""
+        if self._toque_em is None:
+            return 0.0
+        return min(1.0, (self._t - self._toque_desde) / SAIR_SEGURAR_S)
+
     def update(self, dt: float) -> None:
+        self._t += dt
+
+        # Segurou o suficiente: sai. Vale mesmo com o jogo ainda carregando ou
+        # quebrado — é justamente aí que ficar preso seria pior.
+        if not self._saindo and self._progresso_saida() >= 1.0:
+            self._saindo = True
+            self._toque_em = None
+            audio.play("back")
+            if self.on_back is not None:
+                self.on_back()
+            return
+
         if self._app is None:
             if not self._carregando:
                 return                      # já falhou; não tenta de novo todo quadro
@@ -222,6 +288,32 @@ class PadelScreen:
         # linhas inteiras e a fonte 5x7 do placar vira sujeira ilegível.
         surface.blit(pygame.transform.smoothscale(self._quadro, (DEST_W, DEST_H)),
                      (DEST_X, DEST_Y))
+        self._desenhar_saida(surface)
+
+    def _desenhar_saida(self, surface: pygame.Surface) -> None:
+        """O anel que cresce sob o dedo, e a dica dos primeiros segundos."""
+        progresso = self._progresso_saida()
+        if progresso > 0.0:
+            x, y = self._toque_em
+            raio = 9
+            pygame.draw.circle(surface, CRT_BLACK, (x, y), raio + 2)
+            pygame.draw.circle(surface, CRT_DIM, (x, y), raio, 1)
+            if progresso > 0.02:
+                import math
+                pygame.draw.arc(surface, CRT_WHITE,
+                                pygame.Rect(x - raio, y - raio, raio * 2, raio * 2),
+                                math.pi / 2, math.pi / 2 + progresso * math.tau, 2)
+            return
+
+        # A dica só nos primeiros segundos: depois vira poluição em cima do jogo.
+        if self._t < DICA_S:
+            img = render_text("segure a tela para sair", 8, CRT_WHITE, pixel=False)
+            r = img.get_rect(midbottom=(LOGICAL_SIZE[0] // 2,
+                                        LOGICAL_SIZE[1] - SAFE_INSET + 2))
+            fundo = r.inflate(8, 4)
+            pygame.draw.rect(surface, CRT_BLACK, fundo)
+            pygame.draw.rect(surface, CRT_DIM, fundo, 1)
+            surface.blit(img, r)
 
     def _aviso(self, surface: pygame.Surface, titulo: str, detalhe: str) -> None:
         cx = LOGICAL_SIZE[0] // 2
