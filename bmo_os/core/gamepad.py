@@ -111,7 +111,11 @@ class Gamepad:
         try:
             if sdl_controller is not None and sdl_controller.is_controller(indice):
                 c = sdl_controller.Controller(indice)
-                iid = c.get_instance_id()
+                # `Controller` NAO tem get_instance_id() — quem tem e o Joystick
+                # por tras dele. Chamar no Controller levanta AttributeError, que
+                # o except abaixo engolia: o aparelho caia calado no fallback e
+                # so o log ("joystick" onde devia dizer "controle") denunciava.
+                iid = c.as_joystick().get_instance_id()
                 if iid in self._controllers:
                     return
                 # PROMOVE se ja tinha entrado como joystick cru. O SDL dispara
