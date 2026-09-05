@@ -96,20 +96,38 @@ class Gamepad:
     def conectado(self) -> bool:
         return bool(self._controllers or self._joysticks)
 
+    def _ja_aberto(self, iid: int) -> bool:
+        return iid in self._controllers or iid in self._joysticks
+
     def _abrir(self, indice: int) -> None:
+        """Abre o dispositivo do índice, se ainda não estiver aberto.
+
+        A checagem por instance_id não é zelo à toa: no arranque o mesmo
+        controle chega por dois caminhos — a varredura do __init__ e os eventos
+        DEVICEADDED que o SDL dispara logo em seguida — e sem ela o mesmo
+        aparelho era aberto três vezes, poluindo o log e mentindo sobre quantos
+        controles existem.
+        """
         try:
             if sdl_controller is not None and sdl_controller.is_controller(indice):
                 c = sdl_controller.Controller(indice)
-                self._controllers[c.get_instance_id()] = c
+                iid = c.get_instance_id()
+                if self._ja_aberto(iid):
+                    return
+                self._controllers[iid] = c
                 print(f"[gamepad] controle: {c.name}")
                 return
         except Exception:
             pass
         try:
             j = pygame.joystick.Joystick(indice)
+            iid = j.get_instance_id()
+            if self._ja_aberto(iid):
+                return
             j.init()
-            self._joysticks[j.get_instance_id()] = j
-            print(f"[gamepad] joystick: {j.get_name()}")
+            self._joysticks[iid] = j
+            print(f"[gamepad] joystick: {j.get_name()} "
+                  f"({j.get_numaxes()} eixos, {j.get_numbuttons()} botoes)")
         except Exception:
             pass
 
