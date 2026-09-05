@@ -162,7 +162,6 @@ class ClaudeSessionsScreen:
         self.scroll = 0.0        # deslocamento em PIXELS (não em linhas)
         self._t = 0.0
         self._sync_flash_until = 0.0
-        self._reset_flash_until = 0.0
         # arrasto
         self._arrastando = False
         self._ultimo_y = 0
@@ -239,10 +238,6 @@ class ClaudeSessionsScreen:
             if self._back_btn().collidepoint(pos):
                 audio.play("back")
                 self.on_back()
-            elif self._reset_btn().collidepoint(pos):
-                audio.play("select")
-                self.claude.pedir_reset()
-                self._reset_flash_until = self._t + 0.6
             elif self._sync_btn().collidepoint(pos):
                 audio.play("tick")
                 self.claude.trigger_refresh()
@@ -269,7 +264,6 @@ class ClaudeSessionsScreen:
 
     def _iniciar_arrasto(self, pos) -> None:
         if not self.ambient and (self._back_btn().collidepoint(pos)
-                                 or self._reset_btn().collidepoint(pos)
                                  or self._sync_btn().collidepoint(pos)):
             return                      # botão do cabeçalho não rola a lista
         self._arrastando = True
@@ -310,11 +304,6 @@ class ClaudeSessionsScreen:
     def _back_btn(self) -> pygame.Rect:
         return pygame.Rect(SAFE_INSET, HEADER_Y, 52, 16)
 
-    def _reset_btn(self) -> pygame.Rect:
-        # Colado no HOME, mesmo canto superior esquerdo. Não substitui o HOME:
-        # tirar a saída da tela pra pôr um botão destrutivo seria uma cilada.
-        return pygame.Rect(SAFE_INSET + 56, HEADER_Y, 48, 16)
-
     def _sync_btn(self) -> pygame.Rect:
         return pygame.Rect(LOGICAL_SIZE[0] - SAFE_INSET - 52, HEADER_Y, 52, 16)
 
@@ -349,7 +338,6 @@ class ClaudeSessionsScreen:
     def _draw_header(self, surface, snap) -> None:
         if not self.ambient:
             self._draw_back_btn(surface)
-            self._draw_reset_btn(surface)
             self._draw_sync_btn(surface)
 
         title = render_text("CLAUDE", FONT_TITLE, CRT_WHITE)
@@ -393,23 +381,6 @@ class ClaudeSessionsScreen:
         ])
         img = render_text("HOME", 8, CRT_WHITE, pixel=False)
         surface.blit(img, img.get_rect(midleft=(rect.left + 12, rect.centery)))
-
-    def _draw_reset_btn(self, surface) -> None:
-        rect = self._reset_btn()
-        piscando = self._t < self._reset_flash_until
-        bg = CRT_WHITE if piscando else CRT_BLACK
-        fg = CRT_BLACK if piscando else CRT_WHITE
-        pygame.draw.rect(surface, bg, rect)
-        pygame.draw.rect(surface, CRT_WHITE, rect, 1)
-        # ícone: lixeira (tampa + corpo + dois riscos) — diz "apaga", não "recarrega"
-        ix, iy = rect.left + 8, rect.centery
-        pygame.draw.line(surface, fg, (ix - 4, iy - 4), (ix + 4, iy - 4), 1)
-        pygame.draw.line(surface, fg, (ix - 1, iy - 6), (ix + 1, iy - 6), 1)
-        pygame.draw.rect(surface, fg, (ix - 3, iy - 3, 7, 8), 1)
-        pygame.draw.line(surface, fg, (ix - 1, iy - 1), (ix - 1, iy + 3), 1)
-        pygame.draw.line(surface, fg, (ix + 2, iy - 1), (ix + 2, iy + 3), 1)
-        img = render_text("RESET", 8, fg, pixel=False)
-        surface.blit(img, img.get_rect(midleft=(rect.left + 15, rect.centery)))
 
     def _draw_sync_btn(self, surface) -> None:
         rect = self._sync_btn()
@@ -559,12 +530,7 @@ class ClaudeSessionsScreen:
     def _draw_empty(self, surface, snap) -> None:
         cx = LOGICAL_SIZE[0] // 2
         cy = LOGICAL_SIZE[1] // 2
-        if snap.ok and self._t < self._reset_flash_until + 4.0:
-            # acabou de zerar: dizer "vazio" aqui pareceria que nada existe,
-            # quando na verdade estamos esperando os hooks reportarem de novo
-            msg = "Zerado"
-            hint = "esperando as sessoes reportarem"
-        elif snap.ok:
+        if snap.ok:
             msg = "Nenhuma sessao aberta"
             hint = "mande um prompt no VS Code"
         else:
