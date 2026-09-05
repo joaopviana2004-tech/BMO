@@ -11,10 +11,11 @@ O que NÃO herdamos do `App.__init__` original, e por quê:
     mixer.pre_init()             o mixer já foi aberto pelo services/audio
     apply_fullscreen()           tela cheia quem decide é o BMO (--fullscreen)
 
-O jogo desenha em 640x360. Aqui ele é reduzido para caber na ÁREA SEGURA
-(372x212), não nos 400x240 inteiros: a moldura física cobre `SAFE_INSET` de
-cada lado, e é justamente ali que ficam o placar (topo) e a barra de dicas
-(rodapé). Escalar para a tela cheia deixaria os dois debaixo do plástico.
+O jogo desenha em 640x360 e aqui COBRE os 400x240 inteiros, sem tarja preta.
+Como as proporções não batem (16:9 contra 5:3), ~13 px de cada lado saem da
+tela — decoração da arena, nunca a quadra. O preço de ocupar tudo: as pontas do
+placar e a barra de dicas do jogo caem debaixo da moldura física, que cobre
+`SAFE_INSET` de cada lado. Esticar em vez de cortar deixaria a bola ovalada.
 
 Controle: o `Input` do próprio jogo cuida do gamepad (API de controller do SDL2
 com queda para joystick genérico). O BMO não liga o subsistema de joystick, ele
@@ -31,16 +32,20 @@ from ..services import audio
 # Resolução nativa do jogo. Não é ajustável: o layout dele é desenhado nela.
 JOGO_W, JOGO_H = 640, 360
 
-# Caixa em que o jogo cabe sem nada debaixo da moldura.
-CAIXA_W = LOGICAL_SIZE[0] - SAFE_INSET * 2      # 372
-CAIXA_H = LOGICAL_SIZE[1] - SAFE_INSET * 2      # 212
-
-
 def _encaixe() -> tuple[int, int, int, int]:
-    """Onde e de que tamanho o quadro do jogo entra no canvas do BMO."""
-    escala = min(CAIXA_W / JOGO_W, CAIXA_H / JOGO_H)
-    w = int(JOGO_W * escala)
-    h = int(JOGO_H * escala)
+    """Onde e de que tamanho o quadro do jogo entra no canvas do BMO.
+
+    O jogo COBRE a tela inteira: escala pelo maior lado e deixa sobrar pelo
+    outro, que sai fora da borda. Como 640x360 é 16:9 e o BMO é 5:3, o que sobra
+    são ~13 px de cada lado — decoração da arena, nunca a quadra, que fica em
+    x 120..520 dos 640 e sobra folgada.
+
+    A alternativa seria esticar até 400x240, e aí a bola vira ovo: a quadra ficaria
+    5% mais alta do que larga em relação ao desenho original.
+    """
+    escala = max(LOGICAL_SIZE[0] / JOGO_W, LOGICAL_SIZE[1] / JOGO_H)
+    w = round(JOGO_W * escala)
+    h = round(JOGO_H * escala)
     return (LOGICAL_SIZE[0] - w) // 2, (LOGICAL_SIZE[1] - h) // 2, w, h
 
 
