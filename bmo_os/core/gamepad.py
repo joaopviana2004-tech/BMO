@@ -112,8 +112,14 @@ class Gamepad:
             if sdl_controller is not None and sdl_controller.is_controller(indice):
                 c = sdl_controller.Controller(indice)
                 iid = c.get_instance_id()
-                if self._ja_aberto(iid):
+                if iid in self._controllers:
                     return
+                # PROMOVE se ja tinha entrado como joystick cru. O SDL dispara
+                # JOYDEVICEADDED antes de CONTROLLERDEVICEADDED, entao o mesmo
+                # aparelho chega primeiro sem perfil; sem esta troca o fallback
+                # virava o padrao e o mapeamento passava a depender do layout
+                # ser igual ao do Xbox no Linux — que e sorte, nao contrato.
+                self._joysticks.pop(iid, None)
                 self._controllers[iid] = c
                 print(f"[gamepad] controle: {c.name}")
                 return
