@@ -11,6 +11,7 @@ import sys
 import pygame
 
 from . import config
+from . import gamepad as bmo_gamepad
 from . import input as bmo_input
 from . import theme_state
 from .screen_manager import ScreenManager
@@ -31,6 +32,9 @@ class App:
         self._dim_overlay = pygame.Surface(LOGICAL_SIZE)
         self._dim_overlay.fill((0, 0, 0))
         self.clock = pygame.time.Clock()
+        # Controle: so traduz pros mesmos Actions do teclado/toque, entao vale
+        # em toda tela sem que nenhuma precise saber que ele existe.
+        self.gamepad = bmo_gamepad.Gamepad()
         self.manager = ScreenManager()
         self.running = True
         # Hook opcional chamado todo frame (depois do update, antes do draw).
@@ -93,8 +97,14 @@ class App:
                         self.mic_button.release()
                 elif event.type == pygame.KEYDOWN:
                     bmo_input.dispatch_keyboard(event)
+                elif event.type in bmo_gamepad.EVENTOS:
+                    # Vira Action pro BMO — e o evento CRU segue para a tela do
+                    # topo mesmo assim: o Padel le o controle direto, com o
+                    # mapa de golpes dele, que o Action nao saberia expressar.
+                    self.gamepad.handle_event(event)
                 self.manager.handle_event(event)
 
+            self.gamepad.update(dt)      # repeticao de quem segura o analogico
             self.manager.update(dt)
             if self.frame_hook is not None:
                 self.frame_hook(dt)
