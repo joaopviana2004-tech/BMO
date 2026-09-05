@@ -21,6 +21,10 @@ from ..core.widgets import (
     LOGICAL_SIZE,
 )
 from ..services import audio
+from .games import (
+    draw_flappy_icon, draw_haxball_icon, draw_padel_icon, draw_pong_icon,
+    draw_snake_icon, draw_space_invaders_icon,
+)
 
 
 @dataclass
@@ -306,6 +310,36 @@ def _icon_cat_home(surf: pygame.Surface, cx: int, cy: int) -> None:
     pygame.draw.rect(surf, CRT_DIM, (cx - 4, cy + 5, 8, 11))
 
 
+def _icon_claude(surf: pygame.Surface, cx: int, cy: int) -> None:
+    """O mesmo bichinho que a tela CLAUDE desenha em cada sessao — um sprite so
+    para as duas, entao o icone e a tela nunca divergem."""
+    from .claude_sessions import desenhar_bicho_claude
+    escala = 3
+    desenhar_bicho_claude(surf, cx - 5 * escala, cy - 4 * escala, CRT_WHITE, escala)
+
+
+def _icon_cat_games(surf: pygame.Surface, cx: int, cy: int) -> None:
+    # controle: corpo, d-pad e dois botoes — o simbolo mais direto de "jogo"
+    corpo = pygame.Rect(0, 0, 36, 22)
+    corpo.center = (cx, cy + 2)
+    pygame.draw.rect(surf, CRT_WHITE, corpo, 2, border_radius=7)
+    pygame.draw.line(surf, CRT_WHITE, (cx - 13, cy + 2), (cx - 5, cy + 2), 2)
+    pygame.draw.line(surf, CRT_WHITE, (cx - 9, cy - 2), (cx - 9, cy + 6), 2)
+    pygame.draw.circle(surf, CRT_DIM, (cx + 7, cy + 5), 3)
+    pygame.draw.circle(surf, CRT_DIM, (cx + 13, cy - 1), 3)
+
+
+def _de_grade(desenhar_rect):
+    """Reaproveita um icone da tela GAMES (que recebe rect) aqui (que recebe cx,cy).
+
+    Um icone so por jogo: a grade e o hub mostram exatamente a mesma arte, e
+    mexer num lugar acerta os dois.
+    """
+    def desenhar(surf: pygame.Surface, cx: int, cy: int) -> None:
+        desenhar_rect(surf, pygame.Rect(cx - 22, cy - 15, 44, 30))
+    return desenhar
+
+
 def build_categories(
     *,
     on_brain: Callable[[], None],
@@ -319,7 +353,13 @@ def build_categories(
     on_painel: Callable[[], None],
     on_pomodoro: Callable[[], None],
     on_recorder: Callable[[], None],
-    on_games: Callable[[], None],
+    on_padel: Callable[[], None],
+    on_pong: Callable[[], None],
+    on_flappy: Callable[[], None],
+    on_snake: Callable[[], None],
+    on_invaders: Callable[[], None],
+    on_haxball: Callable[[], None],
+    on_claude: Callable[[], None],
     on_photo: Callable[[], None],
     on_dev: Callable[[], None],
     on_smarthome: Callable[[], None],
@@ -328,17 +368,32 @@ def build_categories(
     on_shutdown: Callable[[], None],
     on_update: Callable[[], None],
 ) -> list[HubCategory]:
-    """Monta as 4 categorias do hub a partir dos callbacks do main."""
+    """Monta as categorias do hub a partir dos callbacks do main.
+
+    A divisao e por O QUE A COISA E, nao por como ela foi feita:
+
+      JOGOS    tudo que se joga, inclusive os treinados por rede neural. Eles
+               sao IA por dentro, mas o que voce faz com eles e jogar — e era
+               isso que deixava jogo espalhado entre duas categorias.
+      IA       as ferramentas de IA de verdade: memoria, teste de modelo e o
+               monitor das sessoes do Claude (que so existia no SLEEP e na voz).
+      ESTUDOS  trabalho: tarefas, agenda, foco, captura e o dev hub.
+    """
     return [
-        HubCategory("IA", _icon_cat_ia, [
-            HubItem("CEREBRO", _icon_brain, on_brain),
-            HubItem("TESTE IA", _icon_aitest, on_aitest),
+        HubCategory("JOGOS", _icon_cat_games, [
+            HubItem("PADEL", _de_grade(draw_padel_icon), on_padel),
+            HubItem("PONG", _de_grade(draw_pong_icon), on_pong),
+            HubItem("FLAPPY", _de_grade(draw_flappy_icon), on_flappy),
+            HubItem("SNAKE", _de_grade(draw_snake_icon), on_snake),
+            HubItem("INVADERS", _de_grade(draw_space_invaders_icon), on_invaders),
+            HubItem("HAXBALL", _de_grade(draw_haxball_icon), on_haxball),
             HubItem("FLAPPY IA", _icon_flappy_ai, on_flappy_ai),
             HubItem("HAXBALL IA", _icon_haxball_ai, on_haxball_ai),
         ]),
-        HubCategory("REPOUSO", _icon_cat_rest, [
-            HubItem("SLEEP", _icon_sleep, on_sleep),
-            HubItem("SUSPEND", _icon_suspend, on_suspend),
+        HubCategory("IA", _icon_cat_ia, [
+            HubItem("CEREBRO", _icon_brain, on_brain),
+            HubItem("TESTE IA", _icon_aitest, on_aitest),
+            HubItem("CLAUDE", _icon_claude, on_claude),
         ]),
         HubCategory("ESTUDOS", _icon_cat_study, [
             HubItem("TASKS", _icon_tasks, on_tasks),
@@ -346,9 +401,12 @@ def build_categories(
             HubItem("PAINEL", _icon_painel, on_painel),
             HubItem("FOCO", _icon_pomodoro, on_pomodoro),
             HubItem("GRAVAR", _icon_recorder, on_recorder),
-            HubItem("JOGOS", _icon_games, on_games),
             HubItem("FOTO", _icon_photo, on_photo),
             HubItem("DEV", _icon_devhub, on_dev),
+        ]),
+        HubCategory("REPOUSO", _icon_cat_rest, [
+            HubItem("SLEEP", _icon_sleep, on_sleep),
+            HubItem("SUSPEND", _icon_suspend, on_suspend),
         ]),
         HubCategory("CASA", _icon_cat_home, [
             HubItem("TOMADAS", _icon_smarthome, on_smarthome),

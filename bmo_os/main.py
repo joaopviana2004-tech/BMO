@@ -485,7 +485,16 @@ def build_initial(app: App):
                 on_agenda=lambda: push(AgendaScreen(on_back=pop, calendar=calendar)),
                 on_pomodoro=lambda: push(pomodoro),
                 on_recorder=lambda: push(make_recorder_screen()),
-                on_games=lambda: push(make_games_screen()),
+                # Os jogos entram direto no hub, um item cada: a grade GAMES
+                # virava um passo a mais so pra chegar no mesmo lugar. Ela
+                # continua existindo pro roteador de telas da IA/voz.
+                on_padel=lambda: push(make_padel_screen()),
+                on_pong=lambda: push(PongScreen(on_back=pop)),
+                on_flappy=lambda: push(FlappyScreen(on_back=pop)),
+                on_snake=lambda: push(SnakeScreen(on_back=pop)),
+                on_invaders=lambda: push(SpaceInvadersScreen(on_back=pop)),
+                on_haxball=lambda: push(HaxballScreen(on_back=pop)),
+                on_claude=lambda: push(make_claude_screen()),
                 on_photo=lambda: push(PhotoScreen(
                     on_back=pop, camera=camera,
                     on_open_gallery=lambda: push(
