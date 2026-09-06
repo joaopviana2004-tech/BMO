@@ -1,0 +1,107 @@
+{
+ "frame": [
+  32,
+  32
+ ],
+ "rows": {
+  "front_idle": {
+   "row": 0,
+   "frames": 2
+  },
+  "front_run": {
+   "row": 1,
+   "frames": 4
+  },
+  "front_forehand": {
+   "row": 2,
+   "frames": 4
+  },
+  "front_backhand": {
+   "row": 3,
+   "frames": 4
+  },
+  "front_smash": {
+   "row": 4,
+   "frames": 4
+  },
+  "front_serve": {
+   "row": 5,
+   "frames": 4
+  },
+  "front_walk": {
+   "row": 6,
+   "frames": 4
+  },
+  "back_idle": {
+   "row": 7,
+   "frames": 2
+  },
+  "back_run": {
+   "row": 8,
+   "frames": 4
+  },
+  "back_forehand": {
+   "row": 9,
+   "frames": 4
+  },
+  "back_backhand": {
+   "row": 10,
+   "frames": 4
+  },
+  "back_smash": {
+   "row": 11,
+   "frames": 4
+  },
+  "back_serve": {
+   "row": 12,
+   "frames": 4
+  },
+  "back_walk": {
+   "row": 13,
+   "frames": 4
+  },
+  "side_idle": {
+   "row": 14,
+   "frames": 2
+  },
+  "side_run": {
+   "row": 15,
+   "frames": 4
+  },
+  "side_forehand": {
+   "row": 16,
+   "frames": 4
+  },
+  "side_backhand": {
+   "row": 17,
+   "frames": 4
+  },
+  "side_smash": {
+   "row": 18,
+   "frames": 4
+  },
+  "side_serve": {
+   "row": 19,
+   "frames": 4
+  },
+  "side_walk": {
+   "row": 20,
+   "frames": 4
+  }
+ },
+ "fps": {
+  "idle": 2,
+  "run": 8,
+  "forehand": 12,
+  "backhand": 12,
+  "smash": 12,
+  "serve": 8,
+  "walk": 6
+ },
+ "note": "front = olhando p/ baixo; back = de costas; side = virado p/ direita (espelhar horizontalmente p/ esquerda). Rede fica a esquerda/direita na quadra 16:9.",
+ "columns": 4,
+ "sheet": [
+  128,
+  672
+ ]
+}

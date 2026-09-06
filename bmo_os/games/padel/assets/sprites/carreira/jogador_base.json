@@ -1,0 +1,240 @@
+{
+ "frame": [
+  32,
+  32
+ ],
+ "sheet": [
+  128,
+  672
+ ],
+ "layout": "igual a jogador_*.png (21 linhas x 4 colunas)",
+ "ordem": [
+  "fixo|corpo",
+  "pele",
+  "camisa",
+  "camisa2",
+  "short",
+  "tenis",
+  "sola",
+  "cabelo",
+  "bone_aba",
+  "extra",
+  "raquete",
+  "cordas"
+ ],
+ "tint": {
+  "pele": "pele",
+  "camisa": "camisa",
+  "camisa2": "secundaria",
+  "short": "short",
+  "fixo": "branco",
+  "raquete": "armacao",
+  "cabelo_curto": "cabelo",
+  "cabelo_cacheado": "cabelo",
+  "cabelo_longo": "cabelo",
+  "bone_aba": "camisa",
+  "cabelo_bone": "cabelo",
+  "cabelo_trancas": "cabelo",
+  "cabelo_moicano": "cabelo",
+  "cabelo_coque": "cabelo",
+  "extra_barba": "cabelo",
+  "extra_oculos": "branco",
+  "extra_faixa": "short",
+  "corpo": "branco",
+  "tenis": "tenis",
+  "sola": "sola",
+  "raquete_redonda": "armacao",
+  "cordas_redonda": "cordas",
+  "raquete_lagrima": "armacao",
+  "cordas_lagrima": "cordas",
+  "raquete_diamante": "armacao",
+  "cordas_diamante": "cordas",
+  "camisa_regata": "camisa",
+  "camisa_regata2": "secundaria",
+  "camisa_longa": "camisa",
+  "camisa_longa2": "secundaria",
+  "camisa_polo2": "secundaria",
+  "camisa_listras": "secundaria",
+  "bermuda": "short",
+  "saia": "short",
+  "calca": "short",
+  "legging": "short",
+  "short_listra": "secundaria",
+  "calca_listra": "secundaria",
+  "tenis_alto": "tenis",
+  "extra_viseira": "acessorio",
+  "extra_munhequeira": "acessorio",
+  "extra_oculos_esp": "acessorio",
+  "extra_bandana": "acessorio"
+ },
+ "cabelos": [
+  "curto",
+  "cacheado",
+  "longo",
+  "bone",
+  "trancas",
+  "moicano",
+  "coque"
+ ],
+ "extras": [
+  "barba",
+  "oculos",
+  "faixa"
+ ],
+ "cores": {
+  "pele": {
+   "claro": "f3cfa8",
+   "medio": "d9a06b",
+   "moreno": "9c6238",
+   "escuro": "5a3720"
+  },
+  "cabelo": {
+   "castanho": "3b2314",
+   "preto": "262626",
+   "loiro": "e8c24a",
+   "ruivo": "b8431e",
+   "grisalho": "b9b9b9",
+   "marrom": "7a4a1f"
+  },
+  "camisa": {
+   "vermelho": "e0392f",
+   "amarelo": "f2c94c",
+   "azul": "2f7fe0",
+   "verde": "3fbf6b",
+   "roxo": "8e4bd6",
+   "laranja": "ff8c1a",
+   "branco": "e9e9e9",
+   "preto": "262626"
+  },
+  "raquete": {
+   "vermelha": "d9382c",
+   "azul": "2f7fe0",
+   "verde": "3fbf6b",
+   "amarela": "f2c94c",
+   "roxa": "8e4bd6",
+   "branca": "e9e9e9"
+  },
+  "short": {
+   "vermelho": "e0392f",
+   "amarelo": "f2c94c",
+   "azul": "2f7fe0",
+   "verde": "3fbf6b",
+   "roxo": "8e4bd6",
+   "laranja": "ff8c1a",
+   "branco": "e9e9e9",
+   "preto": "262626"
+  },
+  "tenis": {
+   "vermelho": "e0392f",
+   "amarelo": "f2c94c",
+   "azul": "2f7fe0",
+   "verde": "3fbf6b",
+   "roxo": "8e4bd6",
+   "laranja": "ff8c1a",
+   "branco": "e9e9e9",
+   "preto": "262626"
+  }
+ },
+ "kit_basico_v1": [
+  "fixo (tenis e raquete redonda embutidos)",
+  "pele",
+  "camisa",
+  "camisa2",
+  "short",
+  "cabelo_<estilo>",
+  "bone_aba (bone)",
+  "extra_<extra>",
+  "raquete (tint armacao; furos 168 = sombra)"
+ ],
+ "kit_basico_v2": [
+  "corpo (pagina loja)",
+  "pele",
+  "camisa",
+  "camisa2",
+  "short",
+  "tenis (loja)",
+  "sola (loja)",
+  "cabelo_<estilo>",
+  "bone_aba (bone)",
+  "extra_<extra>",
+  "raquete_redonda (loja)",
+  "cordas_redonda (loja)"
+ ],
+ "contrato": "v1 = cliente atual, atlas principal, sem loja. v2 = economia: trocar fixo por corpo e desenhar tenis+sola e raquete+cordas da pagina loja.",
+ "loja": {
+  "camisa": {
+   "curta": [
+    "camisa",
+    "camisa2"
+   ],
+   "regata": [
+    "camisa_regata",
+    "camisa_regata2"
+   ],
+   "longa": [
+    "camisa_longa",
+    "camisa_longa2"
+   ],
+   "polo": [
+    "camisa",
+    "camisa2",
+    "camisa_polo2"
+   ],
+   "listrada": [
+    "camisa",
+    "camisa2",
+    "camisa_listras"
+   ]
+  },
+  "short": {
+   "short": [
+    "short"
+   ],
+   "bermuda": [
+    "bermuda"
+   ],
+   "saia": [
+    "saia"
+   ],
+   "calca": [
+    "calca"
+   ],
+   "legging": [
+    "legging"
+   ],
+   "short_listrado": [
+    "short",
+    "short_listra"
+   ],
+   "calca_listrada": [
+    "calca",
+    "calca_listra"
+   ]
+  },
+  "tenis": {
+   "baixo": [
+    "tenis",
+    "sola"
+   ],
+   "alto": [
+    "tenis_alto",
+    "sola"
+   ]
+  },
+  "raquete": {
+   "redonda": [
+    "raquete_redonda",
+    "cordas_redonda"
+   ],
+   "lagrima": [
+    "raquete_lagrima",
+    "cordas_lagrima"
+   ],
+   "diamante": [
+    "raquete_diamante",
+    "cordas_diamante"
+   ]
+  }
+ },
+ "nota": "branco (255) = cor base, cinza 199 = sombra (x0.78), 209 = sombra da pele; tint multiplica. 'secundaria' = cor do short no kit basico (gola, punho, barra, listra da meia); item da loja define a sua. 'armacao' e 'cordas' vem da tabela da raquete. v1 (fixo, raquete) continua valido no atlas principal; v2 (corpo, tenis, sola, raquete_<forma>, cordas_<forma>) na pagina loja."
+}

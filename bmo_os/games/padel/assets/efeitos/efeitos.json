@@ -144,45 +144,81 @@
    12,
    14
   ],
-  "bola_rastro": [
+  "alcance_0": [
    39,
+   46,
+   28,
+   12
+  ],
+  "alcance_1": [
+   68,
+   46,
+   28,
+   12
+  ],
+  "alcance_2": [
+   97,
+   46,
+   28,
+   12
+  ],
+  "alvo_bola_0": [
+   126,
+   46,
+   14,
+   14
+  ],
+  "alvo_bola_1": [
+   141,
+   46,
+   14,
+   14
+  ],
+  "bola_rastro": [
+   156,
    46,
    24,
    6
   ],
   "bola_rapida": [
-   64,
+   181,
    46,
    16,
    6
   ],
   "sombra_bola": [
-   81,
+   198,
    46,
    8,
    4
   ],
   "sombra_jogador": [
-   90,
+   207,
    46,
    16,
    5
   ],
   "tag_voce": [
-   107,
+   224,
    46,
    30,
    14
   ],
   "tag_parceiro": [
-   138,
-   46,
+   0,
+   61,
    54,
    14
   ],
   "tag_rival": [
-   193,
-   46,
+   55,
+   61,
+   36,
+   14
+  ],
+  "tag_amigo": [
+   92,
+   61,
    36,
    14
   ]
@@ -220,6 +256,14 @@
    "frames": 2,
    "fps": 3
   },
+  "alcance": {
+   "frames": 3,
+   "fps": 8
+  },
+  "alvo_bola": {
+   "frames": 2,
+   "fps": 4
+  },
   "bola_rastro": {
    "frames": 1
   },
@@ -239,6 +283,9 @@
    "frames": 1
   },
   "tag_rival": {
+   "frames": 1
+  },
+  "tag_amigo": {
    "frames": 1
   }
  },

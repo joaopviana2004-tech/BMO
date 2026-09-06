@@ -80,13 +80,13 @@ class TitleScene:
             return
         cx = S.SCREEN_W // 2
         bob = int(math.sin(self.t * 2.0) * 3)
-        f.draw(surf, "THE PADEL GAME", cx, 56 + bob, YELLOW, 4, "midtop", outline=BLACK, shadow=(0, 0, 0))
+        f.draw(surf, "PIXEL CLUB", cx, 56 + bob, YELLOW, 4, "midtop", outline=BLACK, shadow=(0, 0, 0))
         # bola quicando ao lado do titulo
         bx = cx + 190
         by = 96 - int(abs(math.sin(self.t * 3.2)) * 22)
         a.fx.draw(surf, "sombra_bola", bx, 98, "center")
         surf.blit(a.ball, (bx - 3, by - 3))
-        f.draw(surf, "PIXEL ART  -  REGRAS DO PADEL  -  1X1 OU 2X2 COM BOTS", cx, 108, GREY, 1, "midtop")
+        f.draw(surf, "PADEL  -  REGRAS OFICIAIS  -  1X1 OU 2X2 COM BOTS", cx, 108, GREY, 1, "midtop")
         self.list.draw(surf)
         if self.app.overlay is None:
             draw_hints(a, surf, [("↑ ↓", "ESCOLHER"), ("← →", "MUDAR"), ("E", "OK"), ("F11", "TELA CHEIA")])
@@ -97,7 +97,7 @@ class App:
     def __init__(self):
         pygame.mixer.pre_init(22050, -16, 2, 512, allowedchanges=0)
         pygame.init()
-        pygame.display.set_caption("The Padel Game")
+        pygame.display.set_caption("Pixel Club")
         self.config = config.load()
         self.screen = pygame.display.set_mode((S.SCREEN_W, S.SCREEN_H), pygame.SCALED | pygame.RESIZABLE)
         self.clock = pygame.time.Clock()

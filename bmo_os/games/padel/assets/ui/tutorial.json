@@ -1,0 +1,218 @@
+{
+ "rects": {
+  "diag_mover": [
+   0,
+   0,
+   64,
+   28
+  ],
+  "diag_normal": [
+   65,
+   0,
+   64,
+   28
+  ],
+  "diag_forte": [
+   130,
+   0,
+   64,
+   28
+  ],
+  "diag_lob": [
+   195,
+   0,
+   64,
+   28
+  ],
+  "diag_curta": [
+   0,
+   29,
+   64,
+   28
+  ],
+  "diag_smash": [
+   65,
+   29,
+   64,
+   28
+  ],
+  "diag_voleio": [
+   130,
+   29,
+   64,
+   28
+  ],
+  "diag_paredes": [
+   195,
+   29,
+   64,
+   28
+  ],
+  "diag_velocidade": [
+   0,
+   58,
+   64,
+   28
+  ],
+  "diag_saque": [
+   65,
+   58,
+   64,
+   28
+  ],
+  "diag_pronto": [
+   130,
+   58,
+   64,
+   28
+  ],
+  "pip_feito": [
+   195,
+   58,
+   6,
+   6
+  ],
+  "pip_atual": [
+   202,
+   58,
+   6,
+   6
+  ],
+  "pip_falta": [
+   209,
+   58,
+   6,
+   6
+  ]
+ },
+ "passos": [
+  {
+   "chave": "mover",
+   "titulo": "MOVER E CORRER",
+   "linhas": [
+    "ANDE ATÉ O MARCADOR. CORRER: 1,5X MAIS RÁPIDO,",
+    "MAS O GOLPE PERDE MIRA POR 0,35 S DEPOIS DE PARAR."
+   ],
+   "diagrama": "diag_mover",
+   "meta": "MARCADORES 0/2",
+   "acao": "CORRER"
+  },
+  {
+   "chave": "normal",
+   "titulo": "GOLPE E MIRA",
+   "linhas": [
+    "SEGURE UMA DIREÇÃO ANTES DE BATER: A SETA É O ALVO.",
+    "GOLPE NORMAL CAI A 6,8 M E SOBE O MEDIDOR EM +0,1."
+   ],
+   "diagrama": "diag_normal",
+   "meta": "GOLPES DENTRO 0/3",
+   "acao": "GOLPE"
+  },
+  {
+   "chave": "forte",
+   "titulo": "GOLPE FORTE",
+   "linhas": [
+    "ARCO BAIXO E FUNDO (8,2 M), 15% MAIS RÁPIDA,",
+    "+0,15 NO MEDIDOR E TREME A TELA.",
+    "MAIS ARRISCADO: SAI FÁCIL PELA GRADE."
+   ],
+   "diagrama": "diag_forte",
+   "meta": "FORTES DENTRO 0/3",
+   "acao": "FORTE"
+  },
+  {
+   "chave": "lob",
+   "titulo": "LOB",
+   "linhas": [
+    "ARCO ALTO POR CIMA DO RIVAL NA REDE, CAI A 8,6 M.",
+    "SÓ +0,05 NO MEDIDOR. CUIDADO: BOLA ALTA",
+    "VIRA SMASH DO RIVAL."
+   ],
+   "diagrama": "diag_lob",
+   "meta": "LOBS QUE PASSARAM 0/2",
+   "acao": "LOB"
+  },
+  {
+   "chave": "curta",
+   "titulo": "DEIXADINHA",
+   "linhas": [
+    "CAI LOGO DEPOIS DA REDE (2,2 M).",
+    "USE QUANDO O RIVAL ESTÁ NO FUNDO.",
+    "BATA LEVE: SÓ +0,05 NO MEDIDOR."
+   ],
+   "diagrama": "diag_curta",
+   "meta": "DEIXADINHAS 0/2",
+   "acao": "CURTA"
+  },
+  {
+   "chave": "smash",
+   "titulo": "SMASH",
+   "linhas": [
+    "BOLA ACIMA DE 1,45 M + GOLPE FORTE VIRA SMASH.",
+    "+0,3 NO MEDIDOR E TREMOR FORTE.",
+    "CASTIGUE OS LOBS DO RIVAL."
+   ],
+   "diagrama": "diag_smash",
+   "meta": "SMASHES 0/2",
+   "acao": "FORTE"
+  },
+  {
+   "chave": "voleio",
+   "titulo": "VOLEIO",
+   "linhas": [
+    "PERTO DA REDE, BATA ANTES DO QUIQUE: VIRA VOLEIO,",
+    "RASO E RÁPIDO. VALE COM GOLPE NORMAL OU FORTE."
+   ],
+   "diagrama": "diag_voleio",
+   "meta": "VOLEIOS 0/2",
+   "acao": "GOLPE"
+  },
+  {
+   "chave": "paredes",
+   "titulo": "PAREDES DE VIDRO",
+   "linhas": [
+    "A BOLA QUICA NO VIDRO E VOLTA: ESPERE ELA",
+    "EM VEZ DE CORRER ATRÁS.",
+    "NA GRADE ELA PERDE 40% DA VELOCIDADE."
+   ],
+   "diagrama": "diag_paredes",
+   "meta": "DEVOLVIDAS DO VIDRO 0/2",
+   "acao": "GOLPE"
+  },
+  {
+   "chave": "velocidade",
+   "titulo": "VELOCIDADE E FOGO",
+   "linhas": [
+    "CADA GOLPE ACELERA A BOLA (ATÉ 2,4X).",
+    "NO NÍVEL 6 ELA PEGA FOGO: EM CHAMAS!",
+    "QUEM ERRA COM A BOLA RÁPIDA PERDE O PONTO."
+   ],
+   "diagrama": "diag_velocidade",
+   "meta": "NÍVEL 6 EM UM RALLY 0/1",
+   "acao": "FORTE"
+  },
+  {
+   "chave": "saque",
+   "titulo": "SAQUE",
+   "linhas": [
+    "POR BAIXO, NA DIAGONAL, DEPOIS DO QUIQUE.",
+    "DUAS TENTATIVAS: ERROU AS DUAS, PONTO DO RIVAL."
+   ],
+   "diagrama": "diag_saque",
+   "meta": "SAQUES DENTRO 0/2",
+   "acao": "SACAR"
+  },
+  {
+   "chave": "pronto",
+   "titulo": "MUITO BEM!",
+   "linhas": [
+    "VOCÊ CONHECE TODOS OS GOLPES. AGORA É JOGAR:",
+    "O CLUBE TEM 4 QUADRAS E OS BOTS SOBEM DE NÍVEL."
+   ],
+   "diagrama": "diag_pronto",
+   "meta": "",
+   "acao": "OK"
+  }
+ ],
+ "nota": "cartao 420x62 no topo (painel 9-slice); ver ARTE.md secao 7 e arte/2026-09-05-tutorial"
+}

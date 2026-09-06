@@ -1,0 +1,17 @@
+{
+ "rects": {
+  "pt_vazio": [
+   0,
+   0,
+   40,
+   40
+  ],
+  "pt_vazio_s": [
+   41,
+   0,
+   20,
+   20
+  ]
+ },
+ "nota": "retrato vazio das vagas do lobby. Icones (ui:icone_rede_0..3, rede_x, compartilhar, coroa, humano, bot), fx:tag_amigo e toque:botao_ping / ping_<rede|fundo|minha|sua> estao nas sheets de ui/efeitos/toque. Ver arte/2026-09-05-multiplayer."
+}

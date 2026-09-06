@@ -1,0 +1,150 @@
+{
+ "rects": {
+  "zona_fundo": [
+   0,
+   0,
+   44,
+   40
+  ],
+  "zona_marca": [
+   45,
+   0,
+   20,
+   18
+  ],
+  "zona_auto_on": [
+   66,
+   0,
+   44,
+   12
+  ],
+  "zona_auto_off": [
+   111,
+   0,
+   44,
+   12
+  ],
+  "zona_mini_fundo": [
+   156,
+   0,
+   24,
+   20
+  ],
+  "zona_mini_marca": [
+   181,
+   0,
+   10,
+   8
+  ],
+  "zona_mini_ponto": [
+   192,
+   0,
+   4,
+   4
+  ],
+  "zona_sel_0": [
+   197,
+   0,
+   44,
+   54
+  ],
+  "zona_mini_0": [
+   242,
+   0,
+   24,
+   20
+  ],
+  "zona_sel_1": [
+   267,
+   0,
+   44,
+   54
+  ],
+  "zona_mini_1": [
+   0,
+   55,
+   24,
+   20
+  ],
+  "zona_sel_2": [
+   25,
+   55,
+   44,
+   54
+  ],
+  "zona_mini_2": [
+   70,
+   55,
+   24,
+   20
+  ],
+  "zona_sel_3": [
+   95,
+   55,
+   44,
+   54
+  ],
+  "zona_mini_3": [
+   140,
+   55,
+   24,
+   20
+  ],
+  "zona_sel_4": [
+   165,
+   55,
+   44,
+   54
+  ],
+  "zona_mini_4": [
+   210,
+   55,
+   24,
+   20
+  ]
+ },
+ "quadrantes": {
+  "1": [
+   22,
+   1
+  ],
+  "2": [
+   22,
+   20
+  ],
+  "3": [
+   1,
+   1
+  ],
+  "4": [
+   1,
+   20
+  ]
+ },
+ "quadrantes_mini": {
+  "1": [
+   13,
+   1
+  ],
+  "2": [
+   13,
+   11
+  ],
+  "3": [
+   1,
+   1
+  ],
+  "4": [
+   1,
+   11
+  ]
+ },
+ "zonas": [
+  "AUTO",
+  "REDE CIMA",
+  "REDE BAIXO",
+  "FUNDO CIMA",
+  "FUNDO BAIXO"
+ ],
+ "nota": "zona_fundo/zona_mini_fundo sao cinza: tint = cor da quadra (turf), alfa 0.6/0.7; marca no quadrante; AUTO = ponto no centro. Ver arte/2026-09-05-equipe."
+}

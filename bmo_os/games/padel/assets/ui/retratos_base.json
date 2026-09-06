@@ -1,0 +1,83 @@
+{
+ "rects": {
+  "bone_aba": [
+   0,
+   0,
+   20,
+   20
+  ],
+  "cabelo_cacheado": [
+   21,
+   0,
+   20,
+   20
+  ],
+  "cabelo_coque": [
+   42,
+   0,
+   20,
+   20
+  ],
+  "cabelo_curto": [
+   63,
+   0,
+   20,
+   20
+  ],
+  "cabelo_longo": [
+   84,
+   0,
+   20,
+   20
+  ],
+  "cabelo_moicano": [
+   105,
+   0,
+   20,
+   20
+  ],
+  "cabelo_trancas": [
+   126,
+   0,
+   20,
+   20
+  ],
+  "camisa": [
+   147,
+   0,
+   20,
+   20
+  ],
+  "extra_barba": [
+   168,
+   0,
+   20,
+   20
+  ],
+  "extra_faixa": [
+   189,
+   0,
+   20,
+   20
+  ],
+  "extra_oculos": [
+   210,
+   0,
+   20,
+   20
+  ],
+  "fixo": [
+   231,
+   0,
+   20,
+   20
+  ],
+  "pele": [
+   252,
+   0,
+   20,
+   20
+  ]
+ },
+ "nota": "camadas 20x20 do retrato do jogador criado; mesma ordem e tint de sprites/carreira/jogador_base.json; moldura vermelha (time A) esta em fixo"
+}

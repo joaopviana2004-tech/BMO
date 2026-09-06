@@ -1,0 +1,1126 @@
+{
+ "rects": {
+  "raq_classica": [
+   0,
+   0,
+   16,
+   16
+  ],
+  "raq_madeira": [
+   17,
+   0,
+   16,
+   16
+  ],
+  "raq_neon": [
+   34,
+   0,
+   16,
+   16
+  ],
+  "raq_lamina": [
+   51,
+   0,
+   16,
+   16
+  ],
+  "raq_martelo": [
+   68,
+   0,
+   16,
+   16
+  ],
+  "raq_cirurgica": [
+   85,
+   0,
+   16,
+   16
+  ],
+  "raq_tita": [
+   102,
+   0,
+   16,
+   16
+  ],
+  "raq_equilibrio": [
+   119,
+   0,
+   16,
+   16
+  ],
+  "raq_foguete": [
+   136,
+   0,
+   16,
+   16
+  ],
+  "raq_laser": [
+   153,
+   0,
+   16,
+   16
+  ],
+  "raq_caveira": [
+   170,
+   0,
+   16,
+   16
+  ],
+  "raq_meteoro": [
+   187,
+   0,
+   16,
+   16
+  ],
+  "raq_olho_de_aguia": [
+   204,
+   0,
+   16,
+   16
+  ],
+  "cam_clube": [
+   221,
+   0,
+   16,
+   16
+  ],
+  "cam_regata": [
+   238,
+   0,
+   16,
+   16
+  ],
+  "cam_manga_longa": [
+   255,
+   0,
+   16,
+   16
+  ],
+  "cam_polo": [
+   272,
+   0,
+   16,
+   16
+  ],
+  "cam_listrada": [
+   289,
+   0,
+   16,
+   16
+  ],
+  "cam_numerada": [
+   0,
+   17,
+   16,
+   16
+  ],
+  "cam_respiravel": [
+   17,
+   17,
+   16,
+   16
+  ],
+  "cam_retro": [
+   34,
+   17,
+   16,
+   16
+  ],
+  "cam_campeao": [
+   51,
+   17,
+   16,
+   16
+  ],
+  "cam_segunda_pele": [
+   68,
+   17,
+   16,
+   16
+  ],
+  "cam_armadura_leve": [
+   85,
+   17,
+   16,
+   16
+  ],
+  "sho_short": [
+   102,
+   17,
+   16,
+   16
+  ],
+  "sho_bermuda": [
+   119,
+   17,
+   16,
+   16
+  ],
+  "sho_saia": [
+   136,
+   17,
+   16,
+   16
+  ],
+  "sho_short_listrado": [
+   153,
+   17,
+   16,
+   16
+  ],
+  "sho_calca_treino": [
+   170,
+   17,
+   16,
+   16
+  ],
+  "sho_short_corrida": [
+   187,
+   17,
+   16,
+   16
+  ],
+  "sho_legging": [
+   204,
+   17,
+   16,
+   16
+  ],
+  "sho_calca_campeao": [
+   221,
+   17,
+   16,
+   16
+  ],
+  "sho_short_jato": [
+   238,
+   17,
+   16,
+   16
+  ],
+  "sho_pernas_raio": [
+   255,
+   17,
+   16,
+   16
+  ],
+  "ten_basico": [
+   272,
+   17,
+   16,
+   16
+  ],
+  "ten_colorido": [
+   289,
+   17,
+   16,
+   16
+  ],
+  "ten_cano_alto": [
+   0,
+   34,
+   16,
+   16
+  ],
+  "ten_grip": [
+   17,
+   34,
+   16,
+   16
+  ],
+  "ten_elastico": [
+   34,
+   34,
+   16,
+   16
+  ],
+  "ten_pantera": [
+   51,
+   34,
+   16,
+   16
+  ],
+  "ten_velocista": [
+   68,
+   34,
+   16,
+   16
+  ],
+  "ten_bota_foguete": [
+   85,
+   34,
+   16,
+   16
+  ],
+  "ten_sete_leguas": [
+   102,
+   34,
+   16,
+   16
+  ],
+  "ace_bone": [
+   119,
+   34,
+   16,
+   16
+  ],
+  "ace_faixa": [
+   136,
+   34,
+   16,
+   16
+  ],
+  "ace_oculos_escuros": [
+   153,
+   34,
+   16,
+   16
+  ],
+  "ace_viseira": [
+   170,
+   34,
+   16,
+   16
+  ],
+  "ace_munhequeira": [
+   187,
+   34,
+   16,
+   16
+  ],
+  "ace_oculos_esportivo": [
+   204,
+   34,
+   16,
+   16
+  ],
+  "ace_bandana": [
+   221,
+   34,
+   16,
+   16
+  ],
+  "moeda": [
+   238,
+   34,
+   12,
+   12
+  ],
+  "check": [
+   251,
+   34,
+   12,
+   12
+  ],
+  "usando": [
+   264,
+   34,
+   24,
+   8
+  ],
+  "cadeado_real": [
+   289,
+   34,
+   12,
+   12
+  ],
+  "real": [
+   302,
+   34,
+   12,
+   12
+  ],
+  "passe_xp": [
+   0,
+   51,
+   16,
+   16
+  ],
+  "saco_p": [
+   17,
+   51,
+   16,
+   16
+  ],
+  "saco_m": [
+   34,
+   51,
+   16,
+   16
+  ],
+  "saco_g": [
+   51,
+   51,
+   16,
+   16
+  ],
+  "pacote_campeao": [
+   68,
+   51,
+   16,
+   16
+  ],
+  "elixir": [
+   85,
+   51,
+   16,
+   16
+  ]
+ },
+ "raridade_cor": {
+  "COMUM": "9a9a9a",
+  "PRO": "2f7fe0",
+  "ELITE": "8e4bd6",
+  "LENDÁRIO": "f2c94c",
+  "ESPECIAL": "e0392f"
+ },
+ "cores": {
+  "vermelho": "e0392f",
+  "amarelo": "f2c94c",
+  "azul": "2f7fe0",
+  "verde": "3fbf6b",
+  "roxo": "8e4bd6",
+  "laranja": "ff8c1a",
+  "branco": "e9e9e9",
+  "preto": "262626"
+ },
+ "itens": {
+  "raq_classica": {
+   "nome": "CLÁSSICA",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "forma": "redonda",
+    "arm": "2b2b33",
+    "cordas": "9a9a9a"
+   },
+   "variantes": null
+  },
+  "raq_madeira": {
+   "nome": "MADEIRA",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "forma": "redonda",
+    "arm": "7a4a1f",
+    "cordas": "e8d8b0",
+    "decal": "veios"
+   },
+   "variantes": null
+  },
+  "raq_neon": {
+   "nome": "NEON",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "forma": "redonda",
+    "arm": "262626",
+    "cordas": "c8f542"
+   },
+   "variantes": null
+  },
+  "raq_lamina": {
+   "nome": "LÂMINA",
+   "raridade": "PRO",
+   "bonus": "+1 PRECISÃO",
+   "visual": {
+    "forma": "lagrima",
+    "arm": "2f7fe0",
+    "cordas": "f6f6f6",
+    "decal": "listra"
+   },
+   "variantes": null
+  },
+  "raq_martelo": {
+   "nome": "MARTELO",
+   "raridade": "PRO",
+   "bonus": "+1 FORÇA",
+   "visual": {
+    "forma": "diamante",
+    "arm": "e0392f",
+    "cordas": "262626",
+    "decal": "borda"
+   },
+   "variantes": null
+  },
+  "raq_cirurgica": {
+   "nome": "CIRÚRGICA",
+   "raridade": "ELITE",
+   "bonus": "+2 PRECISÃO",
+   "visual": {
+    "forma": "lagrima",
+    "arm": "f6f6f6",
+    "cordas": "8ec9f0",
+    "decal": "mira"
+   },
+   "variantes": null
+  },
+  "raq_tita": {
+   "nome": "TITÃ",
+   "raridade": "ELITE",
+   "bonus": "+2 FORÇA",
+   "visual": {
+    "forma": "diamante",
+    "arm": "9aa3ad",
+    "cordas": "ffd23f",
+    "decal": "metal"
+   },
+   "variantes": null
+  },
+  "raq_equilibrio": {
+   "nome": "EQUILÍBRIO",
+   "raridade": "ELITE",
+   "bonus": "+1 FORÇA +1 PRECISÃO",
+   "visual": {
+    "forma": "redonda",
+    "arm": "8e4bd6",
+    "cordas": "f2c94c"
+   },
+   "variantes": null
+  },
+  "raq_foguete": {
+   "nome": "FOGUETE",
+   "raridade": "LENDÁRIO",
+   "bonus": "+5 FORÇA",
+   "visual": {
+    "forma": "diamante",
+    "arm": "e0392f",
+    "cordas": "ff8c1a",
+    "decal": "chama"
+   },
+   "variantes": null
+  },
+  "raq_laser": {
+   "nome": "LASER",
+   "raridade": "LENDÁRIO",
+   "bonus": "+5 PRECISÃO",
+   "visual": {
+    "forma": "lagrima",
+    "arm": "262626",
+    "cordas": "8ec9f0",
+    "decal": "filete"
+   },
+   "variantes": null
+  },
+  "raq_caveira": {
+   "nome": "CAVEIRA",
+   "raridade": "LENDÁRIO",
+   "bonus": "+3 FORÇA +2 PRECISÃO",
+   "visual": {
+    "forma": "diamante",
+    "arm": "262626",
+    "cordas": "f6f6f6",
+    "decal": "caveira"
+   },
+   "variantes": null
+  },
+  "raq_meteoro": {
+   "nome": "METEORO",
+   "raridade": "ESPECIAL",
+   "bonus": "+10 FORÇA",
+   "visual": {
+    "forma": "diamante",
+    "arm": "5a3720",
+    "cordas": "ff8c1a",
+    "decal": "rachaduras"
+   },
+   "variantes": null
+  },
+  "raq_olho_de_aguia": {
+   "nome": "OLHO DE ÁGUIA",
+   "raridade": "ESPECIAL",
+   "bonus": "+6 PRECISÃO +4 FORÇA",
+   "visual": {
+    "forma": "lagrima",
+    "arm": "f2c94c",
+    "cordas": "f6f6f6",
+    "decal": "olho"
+   },
+   "variantes": null
+  },
+  "cam_clube": {
+   "nome": "CAMISA DO CLUBE",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "sleeve": "curta",
+    "cor": "cinza",
+    "cor2": "f6f6f6"
+   },
+   "variantes": [
+    "vermelho",
+    "amarelo",
+    "azul",
+    "verde",
+    "roxo",
+    "laranja",
+    "branco",
+    "preto"
+   ]
+  },
+  "cam_regata": {
+   "nome": "REGATA",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "sleeve": "regata",
+    "cor": "cinza",
+    "cor2": "f6f6f6"
+   },
+   "variantes": [
+    "vermelho",
+    "amarelo",
+    "azul",
+    "verde",
+    "roxo",
+    "laranja",
+    "branco",
+    "preto"
+   ]
+  },
+  "cam_manga_longa": {
+   "nome": "MANGA LONGA",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "sleeve": "longa",
+    "cor": "cinza",
+    "cor2": "f6f6f6"
+   },
+   "variantes": [
+    "vermelho",
+    "azul",
+    "verde",
+    "preto"
+   ]
+  },
+  "cam_polo": {
+   "nome": "POLO",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "sleeve": "polo",
+    "cor": "cinza",
+    "cor2": "f6f6f6"
+   },
+   "variantes": [
+    "vermelho",
+    "azul",
+    "verde",
+    "preto"
+   ]
+  },
+  "cam_listrada": {
+   "nome": "LISTRADA",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "sleeve": "curta",
+    "listras": true,
+    "cor": "cinza",
+    "cor2": "f6f6f6"
+   },
+   "variantes": [
+    "vermelho",
+    "azul",
+    "verde",
+    "preto"
+   ]
+  },
+  "cam_numerada": {
+   "nome": "NUMERADA",
+   "raridade": "PRO",
+   "bonus": "+1 FÔLEGO",
+   "visual": {
+    "sleeve": "curta",
+    "cor": "f6f6f6",
+    "cor2": "262626",
+    "decal": "numero"
+   },
+   "variantes": null
+  },
+  "cam_respiravel": {
+   "nome": "RESPIRÁVEL",
+   "raridade": "PRO",
+   "bonus": "+1 FÔLEGO",
+   "visual": {
+    "sleeve": "curta",
+    "cor": "9aa3ad",
+    "cor2": "2f7fe0",
+    "decal": "mesh"
+   },
+   "variantes": null
+  },
+  "cam_retro": {
+   "nome": "RETRÔ",
+   "raridade": "ELITE",
+   "bonus": "+2 FÔLEGO",
+   "visual": {
+    "sleeve": "curta",
+    "cor": "8c1f18",
+    "cor2": "e8d8b0",
+    "decal": "v",
+    "gola": "262626"
+   },
+   "variantes": null
+  },
+  "cam_campeao": {
+   "nome": "CAMISA DO CAMPEÃO",
+   "raridade": "ELITE",
+   "bonus": "+2 FÔLEGO",
+   "visual": {
+    "sleeve": "curta",
+    "cor": "262626",
+    "cor2": "f2c94c",
+    "decal": "campeao"
+   },
+   "variantes": null
+  },
+  "cam_segunda_pele": {
+   "nome": "SEGUNDA PELE",
+   "raridade": "LENDÁRIO",
+   "bonus": "+5 FÔLEGO",
+   "visual": {
+    "sleeve": "longa",
+    "cor": "262626",
+    "cor2": "8ec9f0",
+    "decal": "linhas"
+   },
+   "variantes": null
+  },
+  "cam_armadura_leve": {
+   "nome": "ARMADURA LEVE",
+   "raridade": "ESPECIAL",
+   "bonus": "+10 FÔLEGO",
+   "visual": {
+    "sleeve": "curta",
+    "cor": "c0c8d0",
+    "cor2": "ffd23f",
+    "decal": "raio"
+   },
+   "variantes": null
+  },
+  "sho_short": {
+   "nome": "SHORT",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "bottom": "short",
+    "cor": "cinza",
+    "cor2": "f6f6f6"
+   },
+   "variantes": [
+    "vermelho",
+    "amarelo",
+    "azul",
+    "verde",
+    "roxo",
+    "laranja",
+    "branco",
+    "preto"
+   ]
+  },
+  "sho_bermuda": {
+   "nome": "BERMUDA",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "bottom": "bermuda",
+    "cor": "cinza",
+    "cor2": "f6f6f6"
+   },
+   "variantes": [
+    "vermelho",
+    "azul",
+    "verde",
+    "preto"
+   ]
+  },
+  "sho_saia": {
+   "nome": "SAIA",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "bottom": "saia",
+    "cor": "cinza",
+    "cor2": "f6f6f6"
+   },
+   "variantes": [
+    "vermelho",
+    "azul",
+    "verde",
+    "preto"
+   ]
+  },
+  "sho_short_listrado": {
+   "nome": "SHORT LISTRADO",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "bottom": "short",
+    "listra": true,
+    "cor": "cinza",
+    "cor2": "f6f6f6"
+   },
+   "variantes": [
+    "vermelho",
+    "azul",
+    "verde",
+    "preto"
+   ]
+  },
+  "sho_calca_treino": {
+   "nome": "CALÇA DE TREINO",
+   "raridade": "PRO",
+   "bonus": "+1 VELOCIDADE",
+   "visual": {
+    "bottom": "calca",
+    "listra": true,
+    "cor": "262626",
+    "cor2": "f6f6f6"
+   },
+   "variantes": null
+  },
+  "sho_short_corrida": {
+   "nome": "SHORT DE CORRIDA",
+   "raridade": "PRO",
+   "bonus": "+1 VELOCIDADE",
+   "visual": {
+    "bottom": "short",
+    "cor": "2f7fe0",
+    "cor2": "f6f6f6",
+    "decal": "fenda"
+   },
+   "variantes": null
+  },
+  "sho_legging": {
+   "nome": "LEGGING",
+   "raridade": "ELITE",
+   "bonus": "+2 VELOCIDADE",
+   "visual": {
+    "bottom": "legging",
+    "cor": "262626",
+    "cor2": "8e4bd6"
+   },
+   "variantes": null
+  },
+  "sho_calca_campeao": {
+   "nome": "CALÇA DO CAMPEÃO",
+   "raridade": "ELITE",
+   "bonus": "+2 VELOCIDADE",
+   "visual": {
+    "bottom": "calca",
+    "listra": true,
+    "cor": "262626",
+    "cor2": "f2c94c"
+   },
+   "variantes": null
+  },
+  "sho_short_jato": {
+   "nome": "SHORT A JATO",
+   "raridade": "LENDÁRIO",
+   "bonus": "+5 VELOCIDADE",
+   "visual": {
+    "bottom": "short",
+    "cor": "e0392f",
+    "cor2": "ff8c1a",
+    "decal": "chama"
+   },
+   "variantes": null
+  },
+  "sho_pernas_raio": {
+   "nome": "PERNAS DE RAIO",
+   "raridade": "ESPECIAL",
+   "bonus": "+10 VELOCIDADE",
+   "visual": {
+    "bottom": "calca",
+    "cor": "ffd23f",
+    "cor2": "262626",
+    "decal": "raio"
+   },
+   "variantes": null
+  },
+  "ten_basico": {
+   "nome": "TÊNIS BÁSICO",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "shoe": "baixo",
+    "cor": "f0f0f0",
+    "sola": "2b2b2b"
+   },
+   "variantes": null
+  },
+  "ten_colorido": {
+   "nome": "COLORIDO",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "shoe": "baixo",
+    "cor": "cinza",
+    "sola": "f6f6f6"
+   },
+   "variantes": [
+    "vermelho",
+    "amarelo",
+    "azul",
+    "verde",
+    "roxo",
+    "laranja",
+    "branco",
+    "preto"
+   ]
+  },
+  "ten_cano_alto": {
+   "nome": "CANO ALTO",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "shoe": "alto",
+    "cor": "cinza",
+    "sola": "f6f6f6"
+   },
+   "variantes": [
+    "vermelho",
+    "azul",
+    "verde",
+    "preto"
+   ]
+  },
+  "ten_grip": {
+   "nome": "GRIP",
+   "raridade": "PRO",
+   "bonus": "+1 ALCANCE",
+   "visual": {
+    "shoe": "baixo",
+    "cor": "f0f0f0",
+    "sola": "ff8c1a"
+   },
+   "variantes": null
+  },
+  "ten_elastico": {
+   "nome": "ELÁSTICO",
+   "raridade": "PRO",
+   "bonus": "+1 ALCANCE",
+   "visual": {
+    "shoe": "baixo",
+    "cor": "c8f542",
+    "sola": "f6f6f6"
+   },
+   "variantes": null
+  },
+  "ten_pantera": {
+   "nome": "PANTERA",
+   "raridade": "ELITE",
+   "bonus": "+2 ALCANCE",
+   "visual": {
+    "shoe": "baixo",
+    "cor": "262626",
+    "sola": "2b2b2b",
+    "decal": "risco"
+   },
+   "variantes": null
+  },
+  "ten_velocista": {
+   "nome": "VELOCISTA",
+   "raridade": "ELITE",
+   "bonus": "+1 ALCANCE +1 VELOCIDADE",
+   "visual": {
+    "shoe": "baixo",
+    "cor": "ffd23f",
+    "sola": "e0392f"
+   },
+   "variantes": null
+  },
+  "ten_bota_foguete": {
+   "nome": "BOTA DE FOGUETE",
+   "raridade": "LENDÁRIO",
+   "bonus": "+3 ALCANCE +2 VELOCIDADE",
+   "visual": {
+    "shoe": "alto",
+    "cor": "c0c8d0",
+    "sola": "2b2b2b",
+    "decal": "chama_azul"
+   },
+   "variantes": null
+  },
+  "ten_sete_leguas": {
+   "nome": "SETE LÉGUAS",
+   "raridade": "ESPECIAL",
+   "bonus": "+6 ALCANCE +4 VELOCIDADE",
+   "visual": {
+    "shoe": "alto",
+    "cor": "f2c94c",
+    "sola": "a8861e",
+    "decal": "brilho"
+   },
+   "variantes": null
+  },
+  "ace_bone": {
+   "nome": "BONÉ",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "tipo": "bone",
+    "cor": "2456c9",
+    "cor2": "1d2a5a"
+   },
+   "variantes": null
+  },
+  "ace_faixa": {
+   "nome": "FAIXA",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "tipo": "faixa",
+    "cor": "e0392f",
+    "cor2": "f6f6f6"
+   },
+   "variantes": null
+  },
+  "ace_oculos_escuros": {
+   "nome": "ÓCULOS ESCUROS",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "tipo": "oculos",
+    "cor": "262626",
+    "cor2": "9a9a9a"
+   },
+   "variantes": null
+  },
+  "ace_viseira": {
+   "nome": "VISEIRA",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "tipo": "viseira",
+    "cor": "cinza",
+    "cor2": "f6f6f6"
+   },
+   "variantes": [
+    "vermelho",
+    "azul",
+    "verde",
+    "preto"
+   ]
+  },
+  "ace_munhequeira": {
+   "nome": "MUNHEQUEIRA",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "tipo": "munhequeira",
+    "cor": "cinza",
+    "cor2": "f6f6f6"
+   },
+   "variantes": [
+    "vermelho",
+    "azul",
+    "verde",
+    "preto"
+   ]
+  },
+  "ace_oculos_esportivo": {
+   "nome": "ÓCULOS ESPORTIVO",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "tipo": "oculos_esp",
+    "cor": "cinza",
+    "cor2": "8ec9f0"
+   },
+   "variantes": [
+    "vermelho",
+    "azul",
+    "verde",
+    "preto"
+   ]
+  },
+  "ace_bandana": {
+   "nome": "BANDANA",
+   "raridade": "COMUM",
+   "bonus": "",
+   "visual": {
+    "tipo": "bandana",
+    "cor": "cinza",
+    "cor2": "f6f6f6"
+   },
+   "variantes": [
+    "vermelho",
+    "azul",
+    "verde",
+    "preto"
+   ]
+  }
+ },
+ "especiais": [
+  {
+   "id": "raq_meteoro",
+   "nome": "METEORO",
+   "preco_real": "9,90",
+   "preco_moedas": "80.000"
+  },
+  {
+   "id": "raq_olho_de_aguia",
+   "nome": "OLHO DE ÁGUIA",
+   "preco_real": "9,90",
+   "preco_moedas": "80.000"
+  },
+  {
+   "id": "cam_armadura_leve",
+   "nome": "ARMADURA LEVE",
+   "preco_real": "7,90",
+   "preco_moedas": "80.000"
+  },
+  {
+   "id": "sho_pernas_raio",
+   "nome": "PERNAS DE RAIO",
+   "preco_real": "7,90",
+   "preco_moedas": "80.000"
+  },
+  {
+   "id": "ten_sete_leguas",
+   "nome": "SETE LÉGUAS",
+   "preco_real": "7,90",
+   "preco_moedas": "80.000"
+  },
+  {
+   "id": "elixir",
+   "nome": "ELIXIR DO CLUBE",
+   "preco_real": "2,90",
+   "preco_moedas": "15.000"
+  },
+  {
+   "id": "passe_xp",
+   "nome": "PASSE DE XP",
+   "preco_real": "4,90",
+   "preco_moedas": "20.000"
+  },
+  {
+   "id": "saco_p",
+   "nome": "SACO P",
+   "preco_real": "1,90",
+   "preco_moedas": ""
+  },
+  {
+   "id": "saco_m",
+   "nome": "SACO M",
+   "preco_real": "4,90",
+   "preco_moedas": ""
+  },
+  {
+   "id": "saco_g",
+   "nome": "SACO G",
+   "preco_real": "9,90",
+   "preco_moedas": ""
+  },
+  {
+   "id": "pacote_campeao",
+   "nome": "PACOTE CAMPEÃO",
+   "preco_real": "14,90",
+   "preco_moedas": ""
+  }
+ ],
+ "nota": "icones 16x16 com contorno; COMUM com variantes e cinza (tint = cor da variante). Ver arte/2026-09-05-economia."
+}

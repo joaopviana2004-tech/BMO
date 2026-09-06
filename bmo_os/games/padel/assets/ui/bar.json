@@ -1,0 +1,256 @@
+{
+ "rects": {
+  "cafezinho_cheio": [
+   0,
+   0,
+   12,
+   16
+  ],
+  "cafezinho_vazio": [
+   13,
+   0,
+   12,
+   16
+  ],
+  "ativo_cafezinho": [
+   26,
+   0,
+   12,
+   12
+  ],
+  "agua_de_coco_cheio": [
+   39,
+   0,
+   12,
+   16
+  ],
+  "agua_de_coco_vazio": [
+   52,
+   0,
+   12,
+   16
+  ],
+  "ativo_agua_de_coco": [
+   65,
+   0,
+   12,
+   12
+  ],
+  "acai_cheio": [
+   78,
+   0,
+   12,
+   16
+  ],
+  "acai_vazio": [
+   91,
+   0,
+   12,
+   16
+  ],
+  "ativo_acai": [
+   104,
+   0,
+   12,
+   12
+  ],
+  "mate_cheio": [
+   117,
+   0,
+   12,
+   16
+  ],
+  "mate_vazio": [
+   130,
+   0,
+   12,
+   16
+  ],
+  "ativo_mate": [
+   143,
+   0,
+   12,
+   12
+  ],
+  "laranja_cheio": [
+   156,
+   0,
+   12,
+   16
+  ],
+  "laranja_vazio": [
+   169,
+   0,
+   12,
+   16
+  ],
+  "ativo_laranja": [
+   182,
+   0,
+   12,
+   12
+  ],
+  "guarana_cheio": [
+   195,
+   0,
+   12,
+   16
+  ],
+  "guarana_vazio": [
+   208,
+   0,
+   12,
+   16
+  ],
+  "ativo_guarana": [
+   221,
+   0,
+   12,
+   12
+  ],
+  "energetico_cheio": [
+   234,
+   0,
+   12,
+   16
+  ],
+  "energetico_vazio": [
+   247,
+   0,
+   12,
+   16
+  ],
+  "ativo_energetico": [
+   260,
+   0,
+   12,
+   12
+  ],
+  "garrafao_cheio": [
+   273,
+   0,
+   12,
+   16
+  ],
+  "garrafao_vazio": [
+   286,
+   0,
+   12,
+   16
+  ],
+  "ativo_garrafao": [
+   299,
+   0,
+   12,
+   12
+  ],
+  "elixir_cheio": [
+   312,
+   0,
+   12,
+   16
+  ],
+  "elixir_vazio": [
+   325,
+   0,
+   12,
+   16
+  ],
+  "ativo_elixir": [
+   338,
+   0,
+   12,
+   12
+  ],
+  "balcao": [
+   0,
+   17,
+   400,
+   40
+  ]
+ },
+ "drinks": [
+  {
+   "id": "cafezinho",
+   "nome": "CAFEZINHO",
+   "sobe": "+2 VELOCIDADE",
+   "desce": "-1 PRECISÃO",
+   "dura": 1,
+   "preco_q1": "60",
+   "fala": "'ESSE AQUI ACORDA ATÉ DEFUNTO'"
+  },
+  {
+   "id": "agua_de_coco",
+   "nome": "ÁGUA DE COCO",
+   "sobe": "+2 FÔLEGO",
+   "desce": "-1 FORÇA",
+   "dura": 1,
+   "preco_q1": "60",
+   "fala": "'GELADINHA, DIRETO DO COQUEIRO'"
+  },
+  {
+   "id": "acai",
+   "nome": "AÇAÍ",
+   "sobe": "+2 FORÇA",
+   "desce": "-1 VELOCIDADE",
+   "dura": 1,
+   "preco_q1": "60",
+   "fala": "'PESA NO ESTÔMAGO, MAS RENDE'"
+  },
+  {
+   "id": "mate",
+   "nome": "MATE GELADO",
+   "sobe": "+2 PRECISÃO",
+   "desce": "-1 FÔLEGO",
+   "dura": 1,
+   "preco_q1": "60",
+   "fala": "'CALMA E MIRA FINA'"
+  },
+  {
+   "id": "laranja",
+   "nome": "SUCO DE LARANJA",
+   "sobe": "+2 ALCANCE",
+   "desce": "-1 FORÇA",
+   "dura": 1,
+   "preco_q1": "60",
+   "fala": "'ESPREMIDO NA HORA'"
+  },
+  {
+   "id": "guarana",
+   "nome": "GUARANÁ",
+   "sobe": "+1 VELOCIDADE +1 FORÇA",
+   "desce": "-1 PRECISÃO -1 FÔLEGO",
+   "dura": 2,
+   "preco_q1": "150",
+   "fala": "'TUDO OU NADA'"
+  },
+  {
+   "id": "energetico",
+   "nome": "ENERGÉTICO TURBO",
+   "sobe": "+3 VELOCIDADE +1 FORÇA",
+   "desce": "-2 PRECISÃO",
+   "dura": 2,
+   "preco_q1": "200",
+   "fala": "'NÃO ME RESPONSABILIZO'"
+  },
+  {
+   "id": "garrafao",
+   "nome": "GARRAFÃO DO MARCOS",
+   "sobe": "+3 NO ESCOLHIDO",
+   "desce": "-2 NO OPOSTO",
+   "dura": 4,
+   "preco_q1": "400",
+   "fala": "'RECEITA DA FAMÍLIA, NÃO PERGUNTA'"
+  },
+  {
+   "id": "elixir",
+   "nome": "ELIXIR DO CLUBE",
+   "sobe": "+2 EM TUDO",
+   "desce": "",
+   "dura": 4,
+   "preco_q1": "15.000",
+   "fala": "'ISSO AQUI EU NÃO VENDO PRA QUALQUER UM'"
+  }
+ ],
+ "nota": "12x16 cheio/vazio, ativo 12x12; particula da corrida = rect 2x2 na cor principal. Ver arte/2026-09-05-economia."
+}

@@ -1,0 +1,258 @@
+{
+ "rects": {
+  "maquina_idle": [
+   0,
+   0,
+   24,
+   24
+  ],
+  "maquina_carregar_0": [
+   25,
+   0,
+   24,
+   24
+  ],
+  "maquina_carregar_1": [
+   50,
+   0,
+   24,
+   24
+  ],
+  "maquina_disparo_0": [
+   75,
+   0,
+   24,
+   24
+  ],
+  "maquina_disparo_1": [
+   100,
+   0,
+   24,
+   24
+  ],
+  "alvo_borda_0": [
+   125,
+   0,
+   40,
+   40
+  ],
+  "alvo_borda_1": [
+   166,
+   0,
+   40,
+   40
+  ],
+  "alvo_miolo": [
+   207,
+   0,
+   36,
+   36
+  ],
+  "alvo_hit_0": [
+   244,
+   0,
+   40,
+   40
+  ],
+  "alvo_hit_1": [
+   0,
+   41,
+   40,
+   40
+  ],
+  "alvo_hit_2": [
+   41,
+   41,
+   40,
+   40
+  ],
+  "zona_maquina": [
+   82,
+   41,
+   60,
+   60
+  ],
+  "hud": [
+   0,
+   102,
+   240,
+   30
+  ],
+  "seg_on": [
+   241,
+   102,
+   4,
+   6
+  ],
+  "seg_off": [
+   246,
+   102,
+   4,
+   6
+  ],
+  "drill_alvos": [
+   251,
+   102,
+   12,
+   12
+  ],
+  "drill_smash": [
+   264,
+   102,
+   12,
+   12
+  ],
+  "drill_paredes": [
+   277,
+   102,
+   12,
+   12
+  ],
+  "drill_combo": [
+   290,
+   102,
+   12,
+   12
+  ],
+  "medalha_bronze": [
+   303,
+   102,
+   12,
+   12
+  ],
+  "medalha_prata": [
+   0,
+   133,
+   12,
+   12
+  ],
+  "medalha_ouro": [
+   13,
+   133,
+   12,
+   12
+  ],
+  "medalha_vazia": [
+   26,
+   133,
+   12,
+   12
+  ]
+ },
+ "anims": {
+  "maquina_idle": {
+   "frames": 1
+  },
+  "maquina_carregar": {
+   "frames": 2,
+   "fps": 8
+  },
+  "maquina_disparo": {
+   "frames": 2,
+   "fps": 8
+  },
+  "alvo_borda": {
+   "frames": 2,
+   "fps": 4
+  },
+  "alvo_hit": {
+   "frames": 3,
+   "fps": 12
+  }
+ },
+ "hud": {
+  "size": [
+   240,
+   30
+  ],
+  "pos": [
+   200,
+   4
+  ],
+  "icone": [
+   5,
+   9
+  ],
+  "bolas_texto": [
+   22,
+   4
+  ],
+  "barra": [
+   22,
+   17,
+   4,
+   30
+  ],
+  "pontos": [
+   150,
+   4
+  ],
+  "combo": [
+   150,
+   16
+  ]
+ },
+ "drills": [
+  {
+   "id": "alvos",
+   "nome": "ALVOS",
+   "libera": "INÍCIO",
+   "descricao": [
+    "DEVOLVA NOS 3 ALVOS",
+    "ALVO CURTO VALE 2"
+   ],
+   "medalhas": [
+    15,
+    25,
+    35
+   ],
+   "mult_xp": 1.0
+  },
+  {
+   "id": "smash",
+   "nome": "SMASH",
+   "libera": "QUADRA 1",
+   "descricao": [
+    "LOBS ALTOS: SMASH NO LADO DELA",
+    "DENTRO DE UM ALVO VALE 3"
+   ],
+   "medalhas": [
+    20,
+    35,
+    50
+   ],
+   "mult_xp": 1.5
+  },
+  {
+   "id": "paredes",
+   "nome": "PAREDES",
+   "libera": "QUADRA 2",
+   "descricao": [
+    "BOLAS FUNDAS: BATA APÓS O VIDRO",
+    "DENTRO DE UM ALVO VALE 3"
+   ],
+   "medalhas": [
+    20,
+    35,
+    50
+   ],
+   "mult_xp": 2.0
+  },
+  {
+   "id": "combo",
+   "nome": "COMBO",
+   "libera": "QUADRA 3",
+   "descricao": [
+    "SIGA A SEQUÊNCIA ANUNCIADA",
+    "ACERTOS SEGUIDOS: ATÉ X3"
+   ],
+   "medalhas": [
+    30,
+    60,
+    100
+   ],
+   "mult_xp": 2.5
+  }
+ ],
+ "nota": "maquina virada para a direita (rede); espelhar. alvo = alvo_miolo tingido (verde ativo, amarelo da vez, cinza inativo) + alvo_borda. Ver arte/2026-09-05-treino."
+}
